@@ -122,6 +122,12 @@ describe("toSanitizedMarkdownHtml", () => {
       expect(cell?.textContent).toBe("一二");
     });
 
+    it("renders an attribute-free line break between Markdown blocks", () => {
+      const html = toSanitizedMarkdownHtml("before\n\n<br>\n\nafter");
+
+      expect(html).toBe("<p>before</p>\n<br>\n<p>after</p>\n");
+    });
+
     it.each([
       '<br onclick="alert(1)">',
       '<br onmouseover="alert(1)" />',
