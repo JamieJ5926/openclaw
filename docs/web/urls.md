@@ -440,7 +440,8 @@ no route-specific URL parameters.
 | Logs                | `/logs`                                        | -                         | -                                                                                 |
 | Skill Workshop      | `/skills/workshop`                             | -                         | -                                                                                 |
 | Skills              | `/skills`                                      | -                         | -                                                                                 |
-| Plugins             | `/settings/plugins`                            | -                         | `/settings/plugins/discover`                                                      |
+| Plugins             | `/plugins`                                     | -                         | -                                                                                 |
+| Plugin settings     | `/settings/plugins`                            | -                         | `/settings/plugins/<pluginId>`                                                    |
 | Automations         | `/automations`                                 | `/cron`                   | `?job=<jobId>`, `?job=<jobId>&run=<runId>`                                        |
 | Tasks               | `/tasks`                                       | -                         | -                                                                                 |
 | Devices             | `/settings/devices`                            | `/nodes`                  | Shared settings parameters below                                                  |
