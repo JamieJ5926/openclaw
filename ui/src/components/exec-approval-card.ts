@@ -223,12 +223,12 @@ export function compactApprovalCommand(command: string): string {
   return singleLine.length > 64 ? `${truncateUtf16Safe(singleLine, 61)}…` : singleLine;
 }
 
-function approvalDecisionLabel(decision: ExecApprovalDecision, approval: ExecApprovalRequest) {
+function approvalDecisionLabel(decision: ExecApprovalDecision, kind: ExecApprovalRequest["kind"]) {
   return t(
     decision === "allow-once"
       ? "execApproval.allowOnce"
       : decision === "allow-always"
-        ? approval.kind === "exec" || approval.request.sessionKey
+        ? kind === "exec"
           ? "execApproval.alwaysAllowHere"
           : "execApproval.alwaysAllow"
         : "execApproval.deny",
@@ -315,7 +315,7 @@ export function renderSidebarApprovalRow(props: SidebarApprovalRowProps) {
         aria-label=${t("approvalPage.actionsLabel")}
       >
         ${resolveApprovalDecisions(approval).map((decision) => {
-          const label = approvalDecisionLabel(decision, approval);
+          const label = approvalDecisionLabel(decision, approval.kind);
           return html`<button
             type="button"
             class="btn btn--xs ${
@@ -441,7 +441,7 @@ export function renderExecApprovalCard(props: ExecApprovalCardProps) {
     }
     <div class="exec-approval-actions">
       ${decisions.map((decision) => {
-        const label = approvalDecisionLabel(decision, props.approval);
+        const label = approvalDecisionLabel(decision, props.approval.kind);
         return html`<button
           class=${decisionClass(decision)}
           type="button"
