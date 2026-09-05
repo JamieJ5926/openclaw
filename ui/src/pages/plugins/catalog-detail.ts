@@ -3,6 +3,7 @@ import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { renderHubTabs } from "../../components/hub-tabs.ts";
 import { icons } from "../../components/icons.ts";
 import { toSanitizedMarkdownHtml } from "../../components/markdown.ts";
+import { renderReasonedDisabledControl } from "../../components/reasoned-disabled-control.ts";
 import { renderSettingsLoadingSkeleton, renderSettingsPage } from "../../components/settings-ui.ts";
 import { t } from "../../i18n/index.ts";
 import { formatUiExternalText } from "../../lib/format-error.ts";
@@ -29,6 +30,9 @@ export type PluginCatalogDetailProps = {
   onBack: () => void;
   onRetry: () => void;
   onTabChange: (tab: PluginCatalogDetailTab) => void;
+  canInstall: boolean;
+  installBlockedReason: string | null;
+  onInstall: () => void;
 };
 
 function githubRepositoryUrl(repo: string | undefined): string | null {
@@ -241,6 +245,26 @@ function renderDetail(result: PluginDiscoveryDetailResult, props: PluginCatalogD
             : nothing
         }
         <div class="plugin-catalog-detail__actions">
+          ${
+            plugin.local.action === "install"
+              ? renderReasonedDisabledControl(
+                  props.installBlockedReason,
+                  html`<button
+                    type="button"
+                    class="btn primary oc-action oc-action-primary"
+                    ?disabled=${!props.installBlockedReason && !props.canInstall}
+                    aria-disabled=${!props.canInstall ? "true" : nothing}
+                    @click=${() => {
+                      if (props.canInstall) {
+                        props.onInstall();
+                      }
+                    }}
+                  >
+                    ${t("pluginsPage.install")}
+                  </button>`,
+                )
+              : nothing
+          }
           ${
             packageUrl
               ? html`<a href=${packageUrl} target="_blank" rel="noopener noreferrer">

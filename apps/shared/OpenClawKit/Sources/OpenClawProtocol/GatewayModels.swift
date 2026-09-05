@@ -22224,6 +22224,7 @@ public struct PluginDiscoveryLocalFacts: Codable, Sendable {
     public let enabled: Bool
     public let state: AnyCodable
     public let pluginid: String?
+    public let install: PluginCatalogInstallAction?
     public let action: AnyCodable
 
     public init(
@@ -22232,6 +22233,7 @@ public struct PluginDiscoveryLocalFacts: Codable, Sendable {
         enabled: Bool,
         state: AnyCodable,
         pluginid: String? = nil,
+        install: PluginCatalogInstallAction? = nil,
         action: AnyCodable)
     {
         self.present = present
@@ -22239,6 +22241,7 @@ public struct PluginDiscoveryLocalFacts: Codable, Sendable {
         self.enabled = enabled
         self.state = state
         self.pluginid = pluginid
+        self.install = install
         self.action = action
     }
 
@@ -22248,6 +22251,7 @@ public struct PluginDiscoveryLocalFacts: Codable, Sendable {
         case enabled
         case state
         case pluginid = "pluginId"
+        case install
         case action
     }
 }
