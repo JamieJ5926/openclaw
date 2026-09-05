@@ -32,6 +32,7 @@ import { OpenClawLightDomElement } from "../../lit/openclaw-element.ts";
 import { SubscriptionsController } from "../../lit/subscriptions-controller.ts";
 import "../../styles/plugins.css";
 import type { PluginCatalogDetailTab } from "./catalog-detail.ts";
+import { CatalogIconController } from "./catalog-icon-controller.ts";
 import { InstallWizardController } from "./install-wizard-controller.ts";
 import type { PluginInstallWizardState } from "./install-wizard-model.ts";
 import { PluginDiscoveryController } from "./plugin-discovery-controller.ts";
@@ -47,7 +48,7 @@ import type { PluginSettingsTab } from "./settings-view.ts";
 
 type PluginsPageSurface = "discovery" | "settings";
 
-export class PluginsPage extends OpenClawLightDomElement {
+class PluginsPage extends OpenClawLightDomElement {
   @consume({ context: applicationContext, subscribe: true })
   private context!: ApplicationContext;
 
@@ -68,6 +69,7 @@ export class PluginsPage extends OpenClawLightDomElement {
     error: string | null;
   } | null = null;
   @state() private iconUrls: Record<string, string> = {};
+  @state() private catalogIconUrls: Record<string, string> = {};
   @state() private pageNotice: PluginRowMessage | null = null;
   @state() private catalogDetail: {
     id: string;
@@ -96,6 +98,21 @@ export class PluginsPage extends OpenClawLightDomElement {
       this.iconUrls = urls;
     },
   });
+  private readonly catalogIcons = new CatalogIconController({
+    getFetchContext: () => ({
+      resourceBasePath: this.context.resourceBasePath,
+      gatewayUrl: this.context.gateway.connection.gatewayUrl,
+      auth: {
+        hello: this.context.gateway.snapshot.hello,
+        settings: { token: this.context.gateway.connection.token },
+        password: this.context.gateway.connection.password,
+      },
+    }),
+    isConnected: () => this.isConnected,
+    onUrlsChange: (urls) => {
+      this.catalogIconUrls = urls;
+    },
+  });
   private readonly gateway = new GatewayPageController(this, {
     getGateway: () => this.context?.gateway,
     onIdentityChange: () => {
@@ -116,6 +133,7 @@ export class PluginsPage extends OpenClawLightDomElement {
     isConnected: () => this.gateway.connected,
     capture: () => this.gateway.capture(),
     isCurrent: (scope) => this.gateway.isCurrent(scope),
+    onEntriesChanged: () => this.syncCatalogIcons(),
   });
 
   private readonly consentController = new PluginsConsentController({
@@ -206,6 +224,10 @@ export class PluginsPage extends OpenClawLightDomElement {
         const completedSave = this.configAutoSaveStatus === "saving" && nextStatus === "saved";
         this.configAutoSaveStatus = nextStatus;
         this.requestUpdate();
+        if (this.installWizard?.stage === "configuring" && runtimeConfig.state.connected) {
+          void runtimeConfig.ensureLoaded();
+          void runtimeConfig.ensureSchemaLoaded();
+        }
         if (completedSave && this.pluginConfigEditPending) {
           this.pluginConfigEditPending = false;
           void this.refreshCatalog();
@@ -231,6 +253,7 @@ export class PluginsPage extends OpenClawLightDomElement {
     this.discovery.disconnect();
     this.subscriptions.clear();
     this.pluginIcons.reset();
+    this.catalogIcons.reset();
     super.disconnectedCallback();
   }
 
@@ -299,6 +322,7 @@ export class PluginsPage extends OpenClawLightDomElement {
       (change.identityChanged || change.connectionChanged || iconAuthChanged)
     ) {
       this.pluginIcons.reset();
+      this.catalogIcons.reset();
       this.busy = {};
     }
     if (shouldRefreshAfterChange) {
@@ -529,6 +553,7 @@ export class PluginsPage extends OpenClawLightDomElement {
       const result = await loadPluginDiscoveryDetail(scope.client, detail.id);
       if (this.gateway.isCurrent(scope) && this.catalogDetail === detail) {
         this.catalogDetail = { ...detail, result };
+        this.syncCatalogIcons();
       }
     } catch (error) {
       if (this.gateway.isCurrent(scope) && this.catalogDetail === detail) {
@@ -543,6 +568,18 @@ export class PluginsPage extends OpenClawLightDomElement {
     this.context.navigate("plugins", {
       pathname: pathForRoute("plugins", this.context.basePath),
     });
+  }
+
+  private syncCatalogIcons() {
+    const detail = this.catalogDetail?.result;
+    this.catalogIcons.sync(
+      [
+        ...(this.discovery.result?.items ?? []),
+        ...this.discovery.featured,
+        ...(detail ? [detail.plugin] : []),
+      ],
+      detail?.detail.author?.imageUrl ? [detail.detail.author.imageUrl] : [],
+    );
   }
 
   private updateEnabled(pluginId: string, enabled: boolean, key?: string): Promise<void> {
@@ -603,14 +640,16 @@ export class PluginsPage extends OpenClawLightDomElement {
       detail: this.detail,
       pageNotice: this.pageNotice,
       iconUrls: this.iconUrls,
+      catalogIconUrls: this.catalogIconUrls,
       catalogDetail: this.catalogDetail,
       catalogDetailTab: this.catalogDetailTab,
       installWizard: this.installWizard,
-      mutationBlockedReason: blockedReason,
       canMutate: this.canMutate(),
+      mutationBlockedReason: blockedReason,
       canEditConfig: this.canEditConfig(),
       discovery: this.discovery,
       consentController: this.consentController,
+      installWizardController: this.installWizardController,
       actions: {
         selectHubTab: (tab) => this.selectHubTab(tab),
         closeCatalogDetail: () => this.closeCatalogDetail(),
@@ -618,17 +657,6 @@ export class PluginsPage extends OpenClawLightDomElement {
         selectCatalogDetailTab: (tab) => {
           this.catalogDetailTab = tab;
         },
-        openInstallWizard: (result) => this.installWizardController.open(result),
-        closeInstallWizard: () => this.installWizardController.close(),
-        beginInstallWizard: () => this.installWizardController.begin(),
-        continueInstallPolicyWarning: () => this.installWizardController.continuePolicyWarning(),
-        retryInstallWizard: () => this.installWizardController.retry(),
-        patchInstallWizardConfig: (path, value) =>
-          this.installWizardController.patchConfiguration(path, value),
-        removeInstallWizardConfig: (path) => this.installWizardController.removeConfiguration(path),
-        saveInstallWizardConfiguration: () => void this.installWizardController.saveConfiguration(),
-        manageInstalledWizardPlugin: () => this.installWizardController.manage(),
-        cancelConsent: () => this.installWizardController.cancelConsent(),
         setInventoryExpanded: (expanded) => {
           this.inventoryExpanded = expanded;
         },
@@ -666,10 +694,6 @@ export class PluginsPage extends OpenClawLightDomElement {
           this.pluginConfigEditPending = false;
           void this.context.runtimeConfig.refresh({ discardPendingChanges: true });
         },
-        retryConfig: () => {
-          void this.context.runtimeConfig.retry();
-          void this.context.runtimeConfig.refreshSchema();
-        },
         closeSettingsDetail: (parentRoute) => {
           this.detail = null;
           this.context.navigate(parentRoute, {
@@ -698,3 +722,5 @@ declare global {
     "openclaw-plugins-page": PluginsPage;
   }
 }
+
+export { PluginsPage };
