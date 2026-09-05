@@ -83,7 +83,7 @@ function withPlugin(
   return { ...current, plugins };
 }
 
-class PluginsPage extends OpenClawLightDomElement {
+export class PluginsPage extends OpenClawLightDomElement {
   @consume({ context: applicationContext, subscribe: true })
   private context!: ApplicationContext;
 
@@ -757,5 +757,3 @@ declare global {
     "openclaw-plugins-page": PluginsPage;
   }
 }
-
-export { PluginsPage };
