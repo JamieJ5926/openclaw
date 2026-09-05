@@ -1,3 +1,4 @@
+import { t } from "../../i18n/index.ts";
 import type { PluginCatalogItem, PluginListResult } from "../../lib/plugins/index.ts";
 
 export function mergePluginCatalogItem(
@@ -15,4 +16,18 @@ export function mergePluginCatalogItem(
     plugins.push(plugin);
   }
   return { ...current, plugins };
+}
+
+export function pluginMutationBlockedReason(params: {
+  connected: boolean;
+  hasAdminAccess: boolean;
+  mutationAllowed: boolean | undefined;
+}): string | null {
+  if (!params.connected) {
+    return t("pluginsPage.connectToChange");
+  }
+  if (!params.hasAdminAccess) {
+    return t("pluginsPage.adminRequired");
+  }
+  return params.mutationAllowed === false ? t("pluginsPage.changesDisabled") : null;
 }
