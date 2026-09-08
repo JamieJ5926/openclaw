@@ -51,7 +51,15 @@ export class ShellPanelOwner {
     ) => void,
   ) {}
 
+  get assistantRestorationPending(): boolean {
+    const element = this.host.assistantPanelElement;
+    return this.restoredPanels.has(element) && this.host.lazyCustomElements.isPreloading(element);
+  }
+
   reset(): void {
+    for (const element of this.restoredPanels) {
+      this.host.lazyCustomElements.resetPreload(element);
+    }
     this.restoredPanels.clear();
   }
 

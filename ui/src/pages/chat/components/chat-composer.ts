@@ -134,15 +134,15 @@ export function renderChatComposer(props: ChatComposerProps) {
   const hasVisualAttachments = (props.attachments ?? []).some(
     (attachment) => !isLargePastedTextAttachment(attachment),
   );
-  const contextNotice = renderContextNotice(
-    props.selectedSession,
-    props.sessions?.defaults?.contextTokens ?? null,
-    {
-      messages: props.messages,
-      providerUsage: props.providerUsage,
-    },
-  );
-  const composerControls = props.composerControls ?? nothing;
+  const contextNotice = props.initialMetadataPending
+    ? nothing
+    : renderContextNotice(props.selectedSession, props.sessions?.defaults?.contextTokens ?? null, {
+        messages: props.messages,
+        providerUsage: props.providerUsage,
+      });
+  const composerControls = props.initialMetadataPending
+    ? nothing
+    : (props.composerControls ?? nothing);
   const composerLeadControl = props.permissionPicker
     ? renderChatPermissionPicker(props.permissionPicker)
     : nothing;

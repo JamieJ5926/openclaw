@@ -451,8 +451,10 @@ export abstract class ChatPaneContext extends ChatPaneLifecycle {
       // A logical reconnect can retain the browser client and skip full startup.
       // Disconnect cleanup drops transient tool rows, so reload this pane's
       // active-run snapshot before secondary session surfaces hydrate.
+      this.beginInitialComposerPreparation();
       const historyRefresh = refreshPageChat(state, {
         startup: true,
+        onInitialModelCatalogSettled: () => this.completeInitialComposerPreparation(),
         awaitHistory: true,
         deferBranches: true,
         historyLoad: resumedHistory,
@@ -539,6 +541,7 @@ export abstract class ChatPaneContext extends ChatPaneLifecycle {
       this.headerBranches.clear();
       this.headerPlatform = null;
       void this.loadHeaderPlatform(startupClient, startupGeneration);
+      this.beginInitialComposerPreparation();
       if (catalogRouteKey) {
         void this.loadCatalogSession(catalogRouteKey, false);
         state.requestUpdate?.();
@@ -547,6 +550,7 @@ export abstract class ChatPaneContext extends ChatPaneLifecycle {
       void syncSelectedSessionMessageSubscription(state, { force: true });
       const historyRefresh = refreshPageChat(state, {
         startup: true,
+        onInitialModelCatalogSettled: () => this.completeInitialComposerPreparation(),
         awaitHistory: true,
         deferBranches: true,
         historyLoad: resumedHistory,

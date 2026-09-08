@@ -66,7 +66,11 @@ import {
   TERMINAL_PANEL_ELEMENT,
 } from "./lazy-custom-element.ts";
 import { postNativeNavState, type NativeNavState } from "./native-nav-state.ts";
-import { readNativeHistoryState, type NativeHistoryState } from "./native-web-chrome.ts";
+import {
+  isNativeEmbedHost,
+  readNativeHistoryState,
+  type NativeHistoryState,
+} from "./native-web-chrome.ts";
 import { resolveOnboardingMode } from "./onboarding-mode.ts";
 import { CHAT_ROUTE_READY_EVENT } from "./route-transition.ts";
 import {
@@ -111,6 +115,7 @@ function equalShellRouteState(previous: ShellRouteState, next: ShellRouteState):
     previous.location?.search === next.location?.search &&
     previous.location?.hash === next.location?.hash &&
     previous.committedRouteId === next.committedRouteId &&
+    previous.committedRouteStatus === next.committedRouteStatus &&
     previous.committedLocation?.pathname === next.committedLocation?.pathname &&
     previous.committedLocation?.search === next.committedLocation?.search &&
     previous.committedLocation?.hash === next.committedLocation?.hash &&
@@ -150,8 +155,9 @@ class OpenClawShell
     () => this.shellChrome.cancelPendingLazyAction(),
     (canReload) => this.shellChrome.retryPendingLazyAction(canReload),
   );
+  readonly sidebarLoader = new LazyCustomElementRequestController(this);
   // Gates lazy-action replay on the element being rendered; while the shell is
-  // still splash-gated, replaying would loop through the open handlers forever.
+  // not mounted, replaying would loop through the open handlers forever.
   readonly queryRenderedElement = (tagName: string): Element | null =>
     this.renderRoot?.querySelector(tagName) ?? null;
   @query("openclaw-command-palette") commandPalette: CommandPaletteElement | undefined;
@@ -270,10 +276,19 @@ class OpenClawShell
     return routeSearch === undefined ? this.onboarding : resolveOnboardingMode(routeSearch);
   }
 
+  get assistantRestorationPending(): boolean {
+    return this.shellChrome.panels.assistantRestorationPending;
+  }
+
   get workspaceChromeVisible(): boolean {
     const routeId = this.routeState.routeId;
     // Hidden workspace chrome must not preload its sidebar and panel graphs.
-    return routeId !== undefined && !isSettingsNavigationRoute(routeId) && !this.onboardingMode;
+    return (
+      !isNativeEmbedHost() &&
+      routeId !== undefined &&
+      !isSettingsNavigationRoute(routeId) &&
+      !this.onboardingMode
+    );
   }
 
   storedOutboxScopeHost(context: ApplicationContext<RouteId>): StoredOutboxScopeHost {
@@ -457,6 +472,7 @@ class OpenClawShell
   }
 
   override disconnectedCallback() {
+    this.sidebarLoader.requestWhileActive(APP_SIDEBAR_ELEMENT, false);
     this.shellChrome.disconnect();
     syncControlUiSystemChrome();
     this.outboxStoreImport.dispose();
@@ -653,10 +669,7 @@ class OpenClawShell
 
   override updated(changed: PropertyValues<this>) {
     queueMicrotask(() =>
-      this.shellStartup.synchronize(
-        this.lazyCustomElements.visibleState?.status === "error" &&
-          this.lazyCustomElements.visibleState.element === APP_SIDEBAR_ELEMENT,
-      ),
+      this.shellStartup.synchronize(this.sidebarLoader.visibleState?.status === "error"),
     );
     this.syncDocumentTitle();
     // Theme and breakpoint owners sync their changes; route/runtime changes
@@ -743,14 +756,7 @@ class OpenClawShell
   }
 
   override render() {
-    if (
-      this.workspaceChromeVisible &&
-      this.lazyCustomElements.visibleState?.element !== APP_SIDEBAR_ELEMENT
-    ) {
-      this.lazyCustomElements.preload(APP_SIDEBAR_ELEMENT, {
-        reportError: this.startupSnapshot.stage !== "ready",
-      });
-    }
+    this.sidebarLoader.requestWhileActive(APP_SIDEBAR_ELEMENT, this.workspaceChromeVisible);
     return renderApplicationShell(this);
   }
 }

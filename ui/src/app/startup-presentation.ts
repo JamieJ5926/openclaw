@@ -81,10 +81,8 @@ export class StartupPresentationController {
       this.finish();
       return;
     }
-    // History can finish just after the chrome mounts. Start its feedback delay
-    // at this visible boundary so fast history never flashes a placeholder.
-    this.shownAt = undefined;
-    this.set({ stage: "chrome", placeholderVisible: false });
-    this.showAfterDelay();
+    // The transcript keeps the skeleton already painted with the chrome. Its
+    // minimum dwell and pulse must not restart at this presentation boundary.
+    this.set({ stage: "chrome", placeholderVisible: this.snapshot.placeholderVisible });
   }
 }

@@ -8,7 +8,7 @@ import type { RouteId } from "../app-routes.ts";
 import "../components/gateway-url-confirmation.ts";
 import "../components/github-link-hovercard-registration.ts";
 import { renderLazyElementState, renderLazyViewError } from "../components/lazy-view-error.ts";
-import { renderConnectingSplash } from "../components/loading-state.ts";
+import { renderLoadingState } from "../components/loading-state.ts";
 import { installTitleTooltips } from "../components/tooltip-title.ts";
 import { t } from "../i18n/index.ts";
 import { formatUiError } from "../lib/format-error.ts";
@@ -30,7 +30,7 @@ import {
   QUESTION_PAGE_ELEMENT,
   TERMINAL_PANEL_ELEMENT,
 } from "./lazy-custom-element.ts";
-import { nativeEmbedHost, isNativeEmbedHost, isNativeWebChromeHost } from "./native-web-chrome.ts";
+import { nativeEmbedHost, isNativeWebChromeHost } from "./native-web-chrome.ts";
 import { resolveOnboardingMode } from "./onboarding-mode.ts";
 import { isDesktopPanelAvailable } from "./panel-availability.ts";
 import { resolveGatewayCredentialsForUrlEdit } from "./settings.ts";
@@ -135,12 +135,7 @@ export class OpenClawApp extends OpenClawLightDomElement {
     void import("../components/session-progress-hovercard-registration.ts");
     this.resetLoginSensitivePresentation();
     this.runtime = bootstrapApplication();
-    if (
-      !this.runtime.warmBoot &&
-      !this.runtime.documentMode &&
-      !this.runtime.focusLocation &&
-      !isNativeEmbedHost()
-    ) {
+    if (!this.runtime.warmBoot && !this.runtime.documentMode && !this.runtime.focusLocation) {
       this.startupPresentation.start();
     } else {
       this.startupPresentation.finish();
@@ -285,7 +280,7 @@ export class OpenClawApp extends OpenClawLightDomElement {
     if (!lazyState || lazyState.element !== element) {
       return nothing;
     }
-    return html`<main class="connect-splash">
+    return html`<main class="lazy-view-state">
       ${renderLazyElementState(
         lazyState,
         () => this.lazyCustomElements.retry(),
@@ -402,11 +397,10 @@ export class OpenClawApp extends OpenClawLightDomElement {
   private renderFocusDashboard(
     gatewaySnapshot: ApplicationContext["gateway"]["snapshot"],
     gatewayConnected: boolean,
-    gatewayStartupStatus: string | undefined,
   ) {
     const route = this.focusDashboardRoute;
     if (route.kind === "loading") {
-      return renderConnectingSplash(gatewayStartupStatus);
+      return renderLoadingState();
     }
     if (route.kind === "not-found") {
       return html`<main class="board-document">
@@ -463,11 +457,7 @@ export class OpenClawApp extends OpenClawLightDomElement {
           isNativeWebChromeHost() ? null : () => this.closeDocument(this.context?.basePath ?? "")
         }
       ></openclaw-board-document>
-      ${
-        !gatewayConnected && gatewaySnapshot.lastError === null
-          ? renderConnectingSplash(gatewayStartupStatus)
-          : nothing
-      }
+      ${!gatewayConnected && gatewaySnapshot.lastError === null ? renderLoadingState() : nothing}
       ${gatewayConnected ? this.renderLazyDocumentState(DASHBOARD_DOCUMENT_ELEMENT) : nothing}
     `;
   }
@@ -505,12 +495,10 @@ export class OpenClawApp extends OpenClawLightDomElement {
   private renderDocument(context: ApplicationContext<RouteId>, runtime: ApplicationRuntime) {
     const gatewaySnapshot = context.gateway.snapshot;
     const gatewayConnected = gatewaySnapshot.phase === "connected";
-    const gatewayStartupStatus =
-      gatewaySnapshot.phase === "starting" ? t("common.gatewayStarting") : undefined;
     if (runtime.focusLocation?.status === "unsupported") {
-      return html`<main class="connect-splash" role="alert">
+      return html`<main class="lazy-view-state" role="alert">
         <div class="stack">
-          <span class="connect-splash__status">${t("focus.unsupported")}</span>
+          <span class="muted">${t("focus.unsupported")}</span>
           ${this.renderFocusEscape(t("common.back"))}
         </div>
       </main>`;
@@ -535,11 +523,7 @@ export class OpenClawApp extends OpenClawLightDomElement {
           .themeMode=${context.theme.resolvedMode}
           fullscreen
         ></openclaw-terminal-panel>
-        ${
-          !gatewayConnected && gatewaySnapshot.lastError === null
-            ? renderConnectingSplash(gatewayStartupStatus)
-            : nothing
-        }
+        ${!gatewayConnected && gatewaySnapshot.lastError === null ? renderLoadingState() : nothing}
         ${terminalAvailable ? this.renderLazyDocumentState(TERMINAL_PANEL_ELEMENT) : nothing}
         ${
           !terminalAvailable && (gatewayConnected || gatewaySnapshot.lastError)
@@ -570,11 +554,7 @@ export class OpenClawApp extends OpenClawLightDomElement {
           .documentControl=${focusTarget.control}
           .onDocumentClose=${() => this.closeDocument(context.basePath)}
         ></openclaw-desktop-panel>
-        ${
-          !gatewayConnected && gatewaySnapshot.lastError === null
-            ? renderConnectingSplash(gatewayStartupStatus)
-            : nothing
-        }
+        ${!gatewayConnected && gatewaySnapshot.lastError === null ? renderLoadingState() : nothing}
         ${desktopAvailable ? this.renderLazyDocumentState(DESKTOP_PANEL_ELEMENT) : nothing}
         ${
           !desktopAvailable && (gatewayConnected || gatewaySnapshot.lastError)
@@ -589,7 +569,7 @@ export class OpenClawApp extends OpenClawLightDomElement {
       `;
     }
     if (focusTarget?.kind === "dashboard") {
-      return this.renderFocusDashboard(gatewaySnapshot, gatewayConnected, gatewayStartupStatus);
+      return this.renderFocusDashboard(gatewaySnapshot, gatewayConnected);
     }
     // In the normal Control UI document, the Gateway lifecycle owns unresolved
     // first-connect state across every auth mode. Failures publish lastError
@@ -600,18 +580,10 @@ export class OpenClawApp extends OpenClawLightDomElement {
       gatewaySnapshot.lastError === null &&
       (gatewaySnapshot.phase === "starting" ||
         (gatewaySnapshot.phase === "connecting" && !this.loginGatePinned));
-    const warmConnectPending = initialConnectPending && runtime.warmBoot && !this.loginGatePinned;
-    if (initialConnectPending && !warmConnectPending) {
-      return renderConnectingSplash(
-        gatewayStartupStatus,
-        this.startupPresentation.snapshot.stage === "ready" ||
-          this.startupPresentation.snapshot.placeholderVisible,
-      );
-    }
     const shellOwnsRecovery =
       gatewaySnapshot.phase === "reconnecting" ||
       gatewaySnapshot.phase === "reload-required" ||
-      warmConnectPending;
+      initialConnectPending;
     const showLoginGate = !gatewayConnected && !shellOwnsRecovery;
     if (showLoginGate && !isOptionalElementDefined(LOGIN_GATE_ELEMENT)) {
       const loadState = this.loginGateLoader.visibleState;
@@ -626,7 +598,7 @@ export class OpenClawApp extends OpenClawLightDomElement {
             stale: loadState.stale,
             onRetry: () => this.loginGateLoader.retry(),
           })
-        : renderConnectingSplash();
+        : renderLoadingState();
     }
     if (showLoginGate) {
       return html`
@@ -685,7 +657,11 @@ export class OpenClawApp extends OpenClawLightDomElement {
           .context=${context}
           .gateway=${context.gateway}
         >
+          <span class="sr-only" role="status">
+            ${this.startupPresentation.snapshot.stage !== "ready" ? t("common.loading") : nothing}
+          </span>
           <openclaw-app-shell
+            aria-busy=${String(this.startupPresentation.snapshot.stage !== "ready")}
             .runtime=${runtime}
             .onboarding=${this.onboarding}
             .startupPresentation=${this.startupPresentation}

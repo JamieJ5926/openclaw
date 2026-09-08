@@ -1,14 +1,22 @@
 import type { RouteId } from "../app-routes.ts";
+import type { OpenClawAssistantPanel } from "../components/assistant-panel.ts";
 import type { ChatPaneElement } from "../pages/chat/route-draft-focus-handoff.ts";
 import type { ShellRouteState } from "./app-host-route-state.ts";
 import type { ApplicationContext } from "./context.ts";
 import type { StartupPresentationController } from "./startup-presentation.ts";
+
+type StartupChatPane = ChatPaneElement & {
+  compact?: boolean;
+  composerReady?: boolean;
+  transcriptPresentationReady?: boolean;
+};
 
 interface ShellStartupHost extends HTMLElement {
   readonly context: ApplicationContext<RouteId> | undefined;
   readonly startupPresentation?: StartupPresentationController;
   readonly routeState: ShellRouteState;
   readonly workspaceChromeVisible: boolean;
+  readonly assistantRestorationPending: boolean;
   readonly navigationSidebar: HTMLElement;
   requestUpdate(): void;
 }
@@ -27,13 +35,19 @@ export class ShellStartupOwner {
     if (!startup || startup.snapshot.stage === "ready" || !context) {
       return;
     }
+    const phase = context.gateway.snapshot.phase;
+    if (!sidebarFailed && (phase === "starting" || phase === "connecting")) {
+      return;
+    }
     const route = host.routeState;
     if (
       sidebarFailed ||
       route.routeFailed ||
-      (route.committedRouteId === "chat" && !route.committedSessionKey) ||
+      (route.committedRouteId === "chat" &&
+        route.committedRouteStatus === "success" &&
+        !route.committedSessionKey) ||
       (route.routeId && route.routeId !== "chat") ||
-      context.gateway.snapshot.phase !== "connected"
+      phase !== "connected"
     ) {
       startup.finish();
       return;
@@ -57,11 +71,16 @@ export class ShellStartupOwner {
         }
       });
     }
-    const pane = [...host.querySelectorAll<ChatPaneElement>("openclaw-chat-pane")].find(
+    const panes = [...host.querySelectorAll<StartupChatPane>("openclaw-chat-pane")].filter(
       (candidate) => candidate.presented && candidate.visuallyPresented,
     );
     const chromeReady = Boolean(
-      pane?.querySelector(".chat-pane__header") &&
+      !host.assistantRestorationPending &&
+      !host.querySelector<OpenClawAssistantPanel>("openclaw-assistant-panel")
+        ?.homePresentationPending &&
+      panes.length > 0 &&
+      panes.every((pane) => pane.composerReady) &&
+      panes.every((pane) => pane.querySelector(pane.compact ? ".chat" : ".chat-pane__header")) &&
       (!host.workspaceChromeVisible || host.navigationSidebar.querySelector(".sidebar-brand")) &&
       this.startupIdentityReady &&
       (context.agents.state.agentsList || context.agents.state.agentsError) &&
@@ -69,7 +88,8 @@ export class ShellStartupOwner {
     );
     startup.update(
       chromeReady,
-      Boolean(chromeReady && pane && (!pane.conversationPresented || pane.transcriptReady)),
+      chromeReady &&
+        panes.every((pane) => !pane.conversationPresented || pane.transcriptPresentationReady),
     );
   }
 }

@@ -140,6 +140,7 @@ export type ChatComposerProps = ChatAttachmentControlsProps & {
   typingActors?: readonly { id: string; label: string; preview?: string }[];
   onTypingChange?: (typing: boolean, preview?: string) => void;
   composerControls?: TemplateResult | typeof nothing;
+  initialMetadataPending?: boolean;
   anchoredNotices?: TemplateResult | typeof nothing;
   permissionPicker?: ChatPermissionPickerProps;
   onDraftChange: (next: string, mentions?: readonly HumanMention[]) => void;

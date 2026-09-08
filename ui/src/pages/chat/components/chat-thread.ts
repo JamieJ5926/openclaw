@@ -11,7 +11,7 @@ import {
   markdownSessionLinkFromKeyboardEvent,
 } from "../../../components/markdown-session-links.ts";
 import { handleMarkdownTableInteraction } from "../../../components/markdown-tables.ts";
-import { renderPanelLoadingSkeleton } from "../../../components/panel-loading-skeleton.ts";
+import { renderChatTranscriptSkeleton } from "../../../components/startup-chat-skeleton.ts";
 import { t } from "../../../i18n/index.ts";
 import { shouldHandleNavigationClick } from "../../../lib/navigation-click.ts";
 import { hydrateLinkFavicons } from "../link-favicon-loader.ts";
@@ -62,18 +62,18 @@ function renderTranscriptShell(
   const transcriptContents =
     projection.showLoadingSkeleton || projection.isEmpty
       ? html`
-          <div class="chat-thread-inner" ${ref(transcript.scrollElementRef)}>
+          <div
+            class="chat-thread-inner"
+            aria-busy=${String(projection.showLoadingSkeleton)}
+            ${ref(transcript.scrollElementRef)}
+          >
             ${historySentinel}
             ${
               projection.isEmpty && !projection.showLoadingSkeleton && historyHeader
                 ? historyHeader.template
                 : nothing
             }
-            ${
-              projection.showLoadingSkeleton
-                ? renderPanelLoadingSkeleton("chat", t("chat.thread.loading"))
-                : nothing
-            }
+            ${projection.showLoadingSkeleton ? renderChatTranscriptSkeleton() : nothing}
             ${projection.isEmpty && !projection.searchOpen ? renderWelcomeState(props) : nothing}
             ${
               projection.isEmpty && projection.searchOpen
@@ -92,6 +92,7 @@ function renderTranscriptShell(
           hydrateLinkFavicons(element, props.fetchLinkFavicon);
         }
       })}
+      ?inert=${props.startupLoading}
       role="log"
       aria-live="off"
       aria-relevant="additions"
@@ -143,7 +144,11 @@ function renderTranscriptShell(
         role="status"
         aria-live=${props.announceTranscript !== false ? "polite" : "off"}
         aria-atomic="true"
-        >${transcript.liveAnnouncementText}</span
+        >${
+          projection.showLoadingSkeleton && !props.startupLoading
+            ? t("chat.thread.loading")
+            : transcript.liveAnnouncementText
+        }</span
       >
       ${renderChatPositionRail({
         messages: projection.positionMessages,

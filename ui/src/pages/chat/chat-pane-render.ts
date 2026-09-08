@@ -72,7 +72,7 @@ import { workspaceResultConflictFromPlacement } from "./workspace-conflict.ts";
 
 export class ChatPane extends ChatPaneLayoutRender {
   override render() {
-    const state = this.state;
+    const { state, startupPresentation, initialPresentationManaged } = this;
     if (!state) {
       return html`<main class="app-shell app-shell--booting" aria-busy="true"></main>`;
     }
@@ -330,6 +330,7 @@ export class ChatPane extends ChatPaneLayoutRender {
     });
     const composerAvailability = {
       canSend:
+        (startupPresentation.stage === "ready" || state.connected) &&
         sessionDisabledBanner?.kind !== "composer-replacement" &&
         (catalogKey
           ? this.catalogSession?.canContinue === true
@@ -371,7 +372,7 @@ export class ChatPane extends ChatPaneLayoutRender {
       showThinking: state.settings.chatShowThinking,
       showToolCalls: state.settings.chatShowToolCalls,
       persistCommentary: state.settings.chatPersistCommentary !== false,
-      startupLoading: this.startupPresentation.stage !== "ready",
+      startupLoading: startupPresentation.stage !== "ready",
       loading: catalogKey ? this.catalogLoading : state.chatLoading,
       sending:
         placementStartupPending ||
@@ -447,6 +448,8 @@ export class ChatPane extends ChatPaneLayoutRender {
       realtimeTalkVideoPending: state.realtimeTalkVideoPending,
       realtimeTalkCameraError: state.realtimeTalkCameraError,
       connected: state.connected,
+      initialMetadataPending: initialPresentationManaged && startupPresentation.stage === "pending",
+      initialPresentationManaged,
       offline: gatewaySnapshot.offlineStable,
       gatewayClient: state.client,
       composerHoldToRecord: state.settings.composerHoldToRecord,

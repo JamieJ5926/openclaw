@@ -23,11 +23,6 @@
    both rail states. Guarded to wide viewports; narrow ones keep the gutter
    because the rail presents as a bottom strip there. */
 @media (min-width: 1121px) {
-  .content--chat:has(.chat-workbench) {
-    padding-left: 0;
-    padding-right: 0;
-  }
-
   .content--chat:has(.chat-workbench) .chat {
     border-top-right-radius: 0;
     border-bottom-right-radius: 0;
@@ -61,21 +56,6 @@
   min-width: 0;
   min-height: 0;
   flex: 1 1 0;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.chat-main__conversation {
-  --chat-composer-top-margin: 8px;
-  --chat-transcript-composer-underlap: 30px;
-  --chat-transcript-fade-height: 24px;
-  --chat-transcript-fade-stack-overlap: calc(20px * var(--openclaw-corner-radius-scale));
-
-  position: relative;
-  display: flex;
-  min-width: 0;
-  min-height: 0;
-  flex: 1 1 auto;
   flex-direction: column;
   overflow: hidden;
 }

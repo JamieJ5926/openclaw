@@ -10,7 +10,6 @@ import {
   handleQuestionPromptEvent,
 } from "../../app/question-prompt.ts";
 import { CHAT_ROUTE_READY_EVENT } from "../../app/route-transition.ts";
-import { READY_STARTUP_PRESENTATION } from "../../app/startup-presentation.ts";
 import { readPresenceEntries } from "../../app/user-profile.ts";
 import { BROWSER_ANNOTATION_EVENT } from "../../components/browser/browser-annotation.ts";
 import {
@@ -77,7 +76,6 @@ import { CHAT_COMPOSER_DRAFT_STORAGE_ERROR } from "./composer-persistence.ts";
 import { exportChatMarkdown } from "./export.ts";
 import { admitChatSubmission } from "./history-merge.ts";
 import { admitInitialTurnHandoff } from "./initial-turn-handoff.ts";
-import { scheduleCommittedChatScroll } from "./scroll.ts";
 import {
   applyChatCacheSnapshot,
   cacheChatSessionSnapshot,
@@ -586,15 +584,6 @@ export abstract class ChatPaneLifecycle extends ChatPaneSessionCreation {
   }
 
   override updated(changedProperties: Map<PropertyKey, unknown> = new Map()) {
-    const previousStartup = changedProperties.get("startupPresentation");
-    if (
-      previousStartup &&
-      previousStartup !== READY_STARTUP_PRESENTATION &&
-      this.startupPresentation.stage === "ready" &&
-      this.state
-    ) {
-      scheduleCommittedChatScroll(this.state, true, false, { contentChanged: true });
-    }
     void chatAvatars.refreshSenderAgentAvatars(this.state);
     if (!this.chatRouteReadyReported && this.querySelector(CHAT_COMPOSER_TEXTAREA_SELECTOR)) {
       // The outer router commit is not a meaningful chat paint. Keep the

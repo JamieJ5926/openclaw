@@ -26,6 +26,7 @@ type ShellPanelToggleState = {
   runtime: { context: ApplicationContext };
   terminalPanelElement: TestOptionalCustomElement;
   browserPanelElement: TestOptionalCustomElement;
+  assistantPanelElement: TestOptionalCustomElement;
 };
 
 function chromeOwner(shell: ShellPanelToggleState): ShellChromeOwner {
@@ -34,7 +35,7 @@ function chromeOwner(shell: ShellPanelToggleState): ShellChromeOwner {
 
 function configurePanelShell(
   element: TestOptionalCustomElement,
-  kind: "terminal" | "browser" = "terminal",
+  kind: "terminal" | "browser" | "assistant" = "terminal",
 ): ShellPanelToggleState {
   window.history.replaceState(null, "", "/usage");
   const shell = document.createElement("openclaw-app-shell") as unknown as ShellPanelToggleState;
@@ -44,6 +45,8 @@ function configurePanelShell(
       configurable: true,
       value: { messageHandlers: { openclawBrowser: { postMessage: vi.fn() } } },
     });
+  } else if (kind === "assistant") {
+    shell.assistantPanelElement = element;
   } else {
     shell.terminalPanelElement = element;
   }
@@ -57,7 +60,7 @@ function configurePanelShell(
           client: {},
           hello: {
             auth: { role: "operator", scopes: ["operator.admin"] },
-            features: { methods: ["terminal.open"] },
+            features: { methods: ["terminal.open", "openclaw.chat"] },
           },
         },
       },
@@ -170,6 +173,41 @@ describe("OpenClaw shell panel toggles", () => {
     expect(customElements.get(terminalElement.tagName)).toBeUndefined();
     expect(takeSessionPanelToggle("terminal")).toBe(event);
   });
+
+  it.each([false, true])(
+    "keeps restored assistant admission pending until its import settles (failure: %s)",
+    async (failure) => {
+      vi.stubGlobal("localStorage", createStorageMock());
+      localStorage.setItem("openclaw.custodian.panel.v1", JSON.stringify({ open: true }));
+      const element = createLazyElementSpec(
+        "restored assistant",
+        failure ? { firstError: new Error("offline") } : {},
+      );
+      const load = element.loadModule;
+      let release!: () => void;
+      const loading = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      vi.spyOn(element, "loadModule").mockImplementation(async () => {
+        await loading;
+        await load();
+      });
+      const shell = configurePanelShell(element, "assistant");
+      const owner = chromeOwner(shell);
+      owner.panels.restore();
+      expect(owner.panels.assistantRestorationPending).toBe(true);
+      release();
+      await vi.waitFor(() => expect(owner.panels.assistantRestorationPending).toBe(false));
+      if (failure) {
+        expect(shell.lazyCustomElements.visibleState?.status).toBe("error");
+        shell.lazyCustomElements.close();
+        owner.panels.restore();
+        expect(owner.panels.assistantRestorationPending).toBe(false);
+      } else {
+        expect(customElements.get(element.tagName)).toBeDefined();
+      }
+    },
+  );
 
   it.each(["context", "document"])(
     "does not repeat a dismissed restoration until the %s lifecycle resets",

@@ -1,64 +1,3 @@
-/* Initial admission and lazy routes have no known content geometry. */
-.connect-splash {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 100vh;
-  height: 100dvh;
-  max-height: 100%;
-  background: var(--bg);
-}
-
-.connect-splash__status {
-  margin-top: 16px;
-  color: var(--muted);
-  font-size: 14px;
-}
-
-.connect-splash--pending {
-  visibility: hidden;
-}
-
-.loading-indicator {
-  width: 96px;
-  height: 3px;
-  overflow: hidden;
-  border-radius: var(--radius-full);
-  background: var(--bg-muted);
-}
-
-.loading-indicator span {
-  display: block;
-  width: 40%;
-  height: 100%;
-  background: var(--muted);
-  animation: shimmer 1.5s ease-in-out infinite;
-}
-
-.shell[data-startup-stage] {
-  animation: fade-in 160ms var(--ease-out);
-}
-
-.shell[data-startup-stage="pending"] {
-  animation: none;
-  position: fixed;
-  inset: 0;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.shell[data-startup-placeholder="false"] openclaw-panel-loading-skeleton {
-  visibility: hidden;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .loading-indicator span,
-  .shell[data-startup-stage] {
-    animation: none;
-  }
-}
-
 openclaw-session-owner-chip {
   display: inline-flex;
   flex: none;
@@ -227,13 +166,6 @@ openclaw-session-owner-chip {
 
 .session-glyph__badge--unread {
   color: var(--accent);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .connect-splash {
-    opacity: 1;
-    animation: none;
-  }
 }
 
 /* Shared by the login gate and the Sessions, Tasks, and Cron routes. */

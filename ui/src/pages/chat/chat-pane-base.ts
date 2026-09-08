@@ -210,6 +210,34 @@ export abstract class ChatPaneBase extends OpenClawLightDomElement {
     this.notifyConversationPresentation(wasConversationPresented);
   }
   protected presentedChanged(_presented: boolean): void {}
+  protected initialPresentationManaged = false;
+  private initialComposerMetadataSettled = false;
+
+  protected beginInitialComposerPreparation(): void {
+    this.initialPresentationManaged ||= this.startupPresentation.stage !== "ready";
+  }
+
+  protected completeInitialComposerPreparation(): void {
+    if (this.initialComposerMetadataSettled) {
+      return;
+    }
+    this.initialComposerMetadataSettled = true;
+    this.requestUpdate();
+    this.dispatchEvent(
+      new Event(CHAT_PANE_LIFECYCLE_CHANGED_EVENT, { bubbles: true, composed: true }),
+    );
+  }
+
+  /** Initial model metadata is settled; its controls can join the chrome reveal. */
+  get composerReady(): boolean {
+    return (
+      !this.initialPresentationManaged ||
+      this.initialComposerMetadataSettled ||
+      this.startupPresentation.stage === "ready" ||
+      Boolean(parseCatalogSessionKey(this.sessionKey))
+    );
+  }
+
   /** True while the authoritative transcript for this pane is still being fetched. */
   get transcriptLoading(): boolean {
     if (parseCatalogSessionKey(this.sessionKey)) {
@@ -225,6 +253,13 @@ export abstract class ChatPaneBase extends OpenClawLightDomElement {
     }
     const phase = this.state ? getChatHistoryLoadState(this.state).phase : "idle";
     return phase === "committed" || phase === "failed";
+  }
+  get transcriptPresentationReady(): boolean {
+    return (
+      this.transcriptReady &&
+      (this.transcript.initialLayoutReady ||
+        Boolean(this.querySelector(".chat-history-error:not(.chat-history-error--inline)")))
+    );
   }
   protected get headerOutcomeOwner(): string {
     return `${this.connectionGeneration}:${this.headerPresentationGeneration}`;
@@ -298,6 +333,10 @@ export abstract class ChatPaneBase extends OpenClawLightDomElement {
     this.requestUpdate(),
   );
   protected readonly transcript = new ChatTranscriptController(this, {
+    onInitialLayoutReady: () =>
+      this.dispatchEvent(
+        new Event(CHAT_PANE_LIFECYCLE_CHANGED_EVENT, { bubbles: true, composed: true }),
+      ),
     onViewportResize: () => this.chatState.handleTranscriptResize(),
     onReaderScroll: () => this.state && handleChatScrollTakeover(this.state),
   });

@@ -122,7 +122,7 @@ describe("openclaw-router-outlet", () => {
     router.stop();
   });
 
-  it("replaces the loading indicator with the resolved route", async () => {
+  it("replaces the route skeleton with the resolved route", async () => {
     vi.useFakeTimers();
     const routeModule = deferred<TestModule>();
     const context = { label: "loaded" };
@@ -147,9 +147,7 @@ describe("openclaw-router-outlet", () => {
 
     const loadingState = outlet.querySelector('[role="status"]');
     expect(loadingState?.getAttribute("aria-label")).toBe("Loading…");
-    expect(loadingState?.querySelector(".loading-indicator")?.getAttribute("aria-hidden")).toBe(
-      "true",
-    );
+    expect(loadingState?.querySelector(".skeleton")?.getAttribute("aria-hidden")).toBe("true");
     expect(loadingState?.getAttribute("aria-busy")).toBeNull();
     expect(loadingState?.textContent?.trim()).toBe("");
     expect(outlet.textContent).not.toContain("Loading panel");
@@ -162,7 +160,7 @@ describe("openclaw-router-outlet", () => {
 
     expect(outlet.querySelector('[data-testid="route-page"]')?.textContent).toBe("loaded");
     expect(outlet.querySelector('[role="status"]')).toBeNull();
-    expect(outlet.querySelector(".loading-indicator")).toBeNull();
+    expect(outlet.querySelector(".skeleton")).toBeNull();
     outlet.remove();
     router.stop();
   });

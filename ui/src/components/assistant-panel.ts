@@ -26,7 +26,10 @@ import {
 import { OpenClawLightDomElement } from "../lit/openclaw-element.ts";
 import { SubscriptionsController } from "../lit/subscriptions-controller.ts";
 import { getSafeLocalStorage } from "../local-storage.ts";
-import { CHAT_TRANSCRIPT_LOADING_CHANGED_EVENT } from "../pages/chat/chat-history-events.ts";
+import {
+  CHAT_PANE_LIFECYCLE_CHANGED_EVENT,
+  CHAT_TRANSCRIPT_LOADING_CHANGED_EVENT,
+} from "../pages/chat/chat-history-events.ts";
 import { buildHomeWorkContext, subscribeChatWorkContext } from "../pages/chat/chat-work-context.ts";
 import type { ChatPaneElement } from "../pages/chat/route-draft-focus-handoff.ts";
 import {
@@ -66,6 +69,7 @@ export class OpenClawAssistantPanel extends OpenClawLightDomElement {
   @property({ type: Boolean }) pageRouteFailed = false;
   @state() private homeStarted = false;
   private pendingPrimaryPane: ChatPaneElement | null = null;
+  private reportedHomePresentationPending = false;
   @state() private destination: AssistantDestination = "custodian";
   private readonly homeLoader = new LazyCustomElementRequestController(this);
   @property({ type: Number }) minimizeRequestId = 0;
@@ -188,6 +192,27 @@ export class OpenClawAssistantPanel extends OpenClawLightDomElement {
       this.dockLayout.open && this.destination === "home" && this.homeStarted,
     );
     this.dockLayout.syncReservation();
+  }
+
+  get homePresentationPending(): boolean {
+    return (
+      this.dockLayout.open &&
+      this.destination === "home" &&
+      this.available &&
+      !this.suppressed &&
+      this.homeLoader.visibleState?.status !== "error" &&
+      !this.querySelector("openclaw-home-session openclaw-chat-pane")
+    );
+  }
+
+  override updated(): void {
+    const pending = this.homePresentationPending;
+    if (pending !== this.reportedHomePresentationPending) {
+      this.reportedHomePresentationPending = pending;
+      this.dispatchEvent(
+        new Event(CHAT_PANE_LIFECYCLE_CHANGED_EVENT, { bubbles: true, composed: true }),
+      );
+    }
   }
 
   private primaryChatPane(): ChatPaneElement | undefined {

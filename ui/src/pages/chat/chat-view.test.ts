@@ -1948,6 +1948,24 @@ describe("chat transcript rendering", () => {
     expect(announcement.textContent).toBe("");
   });
 
+  it("announces uncached history loading after startup without duplicating cold feedback", () => {
+    const container = document.createElement("div");
+    const transcript = createTestTranscript();
+    renderChatInto(container, { transcript, loading: true });
+    const announcement = requireElement(container, ".chat-transcript-announcement", "status");
+    expect(announcement.getAttribute("role")).toBe("status");
+    expect(announcement.textContent).toBe(t("chat.thread.loading"));
+    expect(container.querySelector(".chat-thread-inner")?.getAttribute("aria-busy")).toBe("true");
+
+    renderChatInto(container, { transcript, loading: true, startupLoading: true });
+    expect(announcement.textContent).toBe("");
+    expect(container.querySelector(".chat-thread")?.hasAttribute("inert")).toBe(true);
+
+    renderChatInto(container, { transcript, loading: false });
+    expect(announcement.textContent).toBe("");
+    expect(container.querySelector(".chat-thread-inner")?.getAttribute("aria-busy")).toBe("false");
+  });
+
   it("announces only a genuinely appended assistant row", () => {
     const transcript = createTestTranscript();
     const container = document.createElement("div");

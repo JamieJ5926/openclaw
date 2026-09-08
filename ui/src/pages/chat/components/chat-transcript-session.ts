@@ -6,6 +6,7 @@ import type { TranscriptAnnouncement } from "./chat-transcript-announcement.ts";
 import type { TranscriptRow } from "./chat-transcript-layout.ts";
 
 export type TranscriptCallbacks = {
+  onInitialLayoutReady?: () => void;
   onViewportResize?: () => void;
   onReaderScroll?: () => void;
 };

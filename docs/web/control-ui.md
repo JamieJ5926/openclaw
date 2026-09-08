@@ -21,7 +21,7 @@ For unmatched HTTP paths, the app-shell fallback respects the request's `Accept`
 
 It speaks **directly to the Gateway WebSocket** on the same port.
 
-While the initial connection or a route loads, a progress indicator keeps Gateway startup status visible. A cold chat startup reveals the workspace chrome together, then its transcript if history is still pending. Only unknown transcript content uses a delayed placeholder; the composer is always the real control. Existing cached sessions and history remain available on warm starts, and reconnecting preserves local drafts. Loading feedback respects your theme and reduced-motion preference.
+A cold chat startup uses regional skeletons: the workspace chrome, sidebar, and chat header reveal together, followed by the transcript if history is still pending. Skeletons appear after 150 ms and stay for at least 300 ms once shown. The composer is the real control, disabled until connected. Existing cached sessions and history paint directly on warm starts, and reconnecting preserves local drafts. Skeletons use the content layout and respect your theme and reduced-motion preference.
 
 Closed Terminal, Browser, Desktop, and Home/Ask OpenClaw panels initialize when you open them rather than during initial navigation. Panels saved as open still restore after a reload.
 

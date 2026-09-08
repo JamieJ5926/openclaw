@@ -236,7 +236,7 @@ export function projectChatTranscript(
     !props.startupLoading &&
     !hasRealtimeTalkConversation &&
     !hasTypingActors;
-  transcript.setContentReady(!props.loading && !props.startupLoading);
+  transcript.setContentReady(!props.loading);
   // 1:1 exchanges do not need an avatar gutter; group threads keep it to identify
   // multiple voices. The capped sessions list may omit the selected row, so absent
   // or unknown rows classify by key, with global aliases taking precedence.
@@ -268,7 +268,7 @@ export function projectChatTranscript(
       ? "none"
       : defaultAvatarPlacement);
   const showLoadingSkeleton =
-    props.startupLoading || (props.loading && chatItems.length === 0 && !hasTypingActors);
+    (props.loading || props.startupLoading === true) && chatItems.length === 0 && !hasTypingActors;
   const threadContextWindow =
     activeSession?.contextTokens ?? props.sessions?.defaults?.contextTokens ?? null;
   const activeContinuationByGroupKey = new Map<
