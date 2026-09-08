@@ -476,6 +476,7 @@ export abstract class ChatPaneSession extends ChatPaneTaskSuggestions {
       resolveChatAgentId(state) === agentId;
     if (!older) {
       this.catalogLoading = true;
+      state.transcriptLoadingChanged?.();
       this.catalogCursor = undefined;
       this.olderCursorsSeen.clear();
       this.historyObserverArmed = false;
@@ -543,6 +544,7 @@ export abstract class ChatPaneSession extends ChatPaneTaskSuggestions {
         if (!older) {
           this.catalogLoading = false;
           currentState.chatLoading = false;
+          currentState.transcriptLoadingChanged?.();
         }
         if (!older) {
           currentState.requestUpdate();

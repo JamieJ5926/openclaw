@@ -8,7 +8,7 @@ import type { RouteId } from "../app-routes.ts";
 import "../components/gateway-url-confirmation.ts";
 import "../components/github-link-hovercard-registration.ts";
 import { renderLazyElementState, renderLazyViewError } from "../components/lazy-view-error.ts";
-import { renderConnectingSplash } from "../components/loading-skeleton.ts";
+import { renderConnectingSplash } from "../components/loading-state.ts";
 import { installTitleTooltips } from "../components/tooltip-title.ts";
 import { t } from "../i18n/index.ts";
 import { formatUiError } from "../lib/format-error.ts";
@@ -30,10 +30,14 @@ import {
   QUESTION_PAGE_ELEMENT,
   TERMINAL_PANEL_ELEMENT,
 } from "./lazy-custom-element.ts";
-import { nativeEmbedHost, isNativeWebChromeHost } from "./native-web-chrome.ts";
+import { nativeEmbedHost, isNativeEmbedHost, isNativeWebChromeHost } from "./native-web-chrome.ts";
 import { resolveOnboardingMode } from "./onboarding-mode.ts";
 import { isDesktopPanelAvailable } from "./panel-availability.ts";
 import { resolveGatewayCredentialsForUrlEdit } from "./settings.ts";
+import {
+  startupPresentationContext,
+  StartupPresentationController,
+} from "./startup-presentation.ts";
 
 type FocusDashboardRouteState =
   | { kind: "loading" }
@@ -62,6 +66,13 @@ export class OpenClawApp extends OpenClawLightDomElement {
   @state() private onboarding = resolveOnboardingMode(globalThis.location?.search ?? "");
   @state() private focusDashboardRoute: FocusDashboardRouteState = { kind: "loading" };
 
+  private readonly startupProvider = new ContextProvider(this, {
+    context: startupPresentationContext,
+  });
+  private readonly startupPresentation = new StartupPresentationController((snapshot) => {
+    this.startupProvider.setValue(snapshot);
+    this.requestUpdate();
+  });
   private runtime: ApplicationRuntime | undefined;
   private readonly contextProvider = new ContextProvider(this, {
     context: applicationContext,
@@ -124,6 +135,16 @@ export class OpenClawApp extends OpenClawLightDomElement {
     void import("../components/session-progress-hovercard-registration.ts");
     this.resetLoginSensitivePresentation();
     this.runtime = bootstrapApplication();
+    if (
+      !this.runtime.warmBoot &&
+      !this.runtime.documentMode &&
+      !this.runtime.focusLocation &&
+      !isNativeEmbedHost()
+    ) {
+      this.startupPresentation.start();
+    } else {
+      this.startupPresentation.finish();
+    }
     const focusTarget = this.focusTarget;
     if (focusTarget?.kind === "terminal") {
       this.requestLazyDocument(TERMINAL_PANEL_ELEMENT);
@@ -160,6 +181,7 @@ export class OpenClawApp extends OpenClawLightDomElement {
   override disconnectedCallback() {
     // Stop reactive subscriptions before disposing their application sources.
     this.subscriptions.clear();
+    this.startupPresentation.dispose();
     this.focusDashboardAbort?.abort();
     this.focusDashboardAbort = null;
     this.lazyCustomElements.abandon();
@@ -187,6 +209,13 @@ export class OpenClawApp extends OpenClawLightDomElement {
       this.resetLoginSensitivePresentation();
     }
     const snapshot = gateway.snapshot;
+    if (
+      snapshot.lastError !== null ||
+      snapshot.phase === "reconnecting" ||
+      snapshot.phase === "reload-required"
+    ) {
+      this.startupPresentation.finish();
+    }
     const clientChanged = snapshot.client !== this.loginConnectionClient;
     if (clientChanged) {
       this.loginConnectionClient = snapshot.client;
@@ -573,7 +602,11 @@ export class OpenClawApp extends OpenClawLightDomElement {
         (gatewaySnapshot.phase === "connecting" && !this.loginGatePinned));
     const warmConnectPending = initialConnectPending && runtime.warmBoot && !this.loginGatePinned;
     if (initialConnectPending && !warmConnectPending) {
-      return renderConnectingSplash(gatewayStartupStatus);
+      return renderConnectingSplash(
+        gatewayStartupStatus,
+        this.startupPresentation.snapshot.stage === "ready" ||
+          this.startupPresentation.snapshot.placeholderVisible,
+      );
     }
     const shellOwnsRecovery =
       gatewaySnapshot.phase === "reconnecting" ||
@@ -655,6 +688,8 @@ export class OpenClawApp extends OpenClawLightDomElement {
           <openclaw-app-shell
             .runtime=${runtime}
             .onboarding=${this.onboarding}
+            .startupPresentation=${this.startupPresentation}
+            .startupSnapshot=${this.startupPresentation.snapshot}
           ></openclaw-app-shell>
         </openclaw-session-progress-hovercard-provider>
       </openclaw-github-link-hovercard-provider>

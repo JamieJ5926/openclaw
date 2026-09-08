@@ -231,8 +231,12 @@ export function projectChatTranscript(
   const hasRealtimeTalkConversation = (props.realtimeTalkConversation?.length ?? 0) > 0;
   const hasTypingActors = (props.typingActors?.length ?? 0) > 0;
   const isEmpty =
-    chatItems.length === 0 && !props.loading && !hasRealtimeTalkConversation && !hasTypingActors;
-  transcript.setContentReady(!props.loading);
+    chatItems.length === 0 &&
+    !props.loading &&
+    !props.startupLoading &&
+    !hasRealtimeTalkConversation &&
+    !hasTypingActors;
+  transcript.setContentReady(!props.loading && !props.startupLoading);
   // 1:1 exchanges do not need an avatar gutter; group threads keep it to identify
   // multiple voices. The capped sessions list may omit the selected row, so absent
   // or unknown rows classify by key, with global aliases taking precedence.
@@ -263,7 +267,8 @@ export function projectChatTranscript(
     (activeSession?.classification === "subagent" || isSubagentSessionKey(props.sessionKey)
       ? "none"
       : defaultAvatarPlacement);
-  const showLoadingSkeleton = props.loading && chatItems.length === 0 && !hasTypingActors;
+  const showLoadingSkeleton =
+    props.startupLoading || (props.loading && chatItems.length === 0 && !hasTypingActors);
   const threadContextWindow =
     activeSession?.contextTokens ?? props.sessions?.defaults?.contextTokens ?? null;
   const activeContinuationByGroupKey = new Map<

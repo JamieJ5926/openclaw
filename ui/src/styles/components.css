@@ -1,7 +1,4 @@
-/* ===========================================
-   Connect Splash (first connect with stored credentials)
-   =========================================== */
-
+/* Initial admission and lazy routes have no known content geometry. */
 .connect-splash {
   display: flex;
   flex-direction: column;
@@ -11,9 +8,6 @@
   height: 100dvh;
   max-height: 100%;
   background: var(--bg);
-  /* Stay invisible past fast handshakes so a quick connect paints nothing. */
-  opacity: 0;
-  animation: fade-in 0.3s var(--ease-out) 0.2s forwards;
 }
 
 .connect-splash__status {
@@ -22,112 +16,46 @@
   font-size: 14px;
 }
 
-.connect-splash--skeleton {
-  position: relative;
-  align-items: stretch;
+.connect-splash--pending {
+  visibility: hidden;
 }
 
-.connect-splash__layout {
-  display: grid;
-  grid-template-columns: 248px minmax(0, 1fr);
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-}
-
-.connect-splash__sidebar {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-  padding: 28px 24px;
-  border-right: 1px solid var(--border);
-  background: var(--bg);
-}
-
-.connect-splash__new-session {
-  height: 40px;
-  margin: 16px 0;
-}
-
-.connect-splash--skeleton .connect-splash__status {
-  position: absolute;
-  inset: auto 24px 12px;
-  margin: 0;
-  text-align: center;
-}
-
-.loading-skeleton {
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  gap: 32px;
-  width: 100%;
-  height: 100%;
-  min-width: 0;
-  min-height: min(50dvh, 360px);
-  padding: 24px 32px 40px;
-}
-
-.loading-skeleton__header {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding-bottom: 20px;
-  border-bottom: 1px solid var(--border);
-}
-
-.loading-skeleton__avatar {
-  flex: none;
-  width: 32px;
-  height: 32px;
+.loading-indicator {
+  width: 96px;
+  height: 3px;
+  overflow: hidden;
   border-radius: var(--radius-full);
+  background: var(--bg-muted);
 }
 
-.loading-skeleton__title {
-  width: 140px;
+.loading-indicator span {
+  display: block;
+  width: 40%;
+  height: 100%;
+  background: var(--muted);
+  animation: shimmer 1.5s ease-in-out infinite;
 }
 
-.loading-skeleton__messages {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 48px;
-  width: min(100%, 760px);
-  margin: 24px auto 0;
+.shell[data-startup-stage] {
+  animation: fade-in 160ms var(--ease-out);
 }
 
-.loading-skeleton__message {
-  display: grid;
-  gap: 14px;
-  width: 85%;
+.shell[data-startup-stage="pending"] {
+  animation: none;
+  position: fixed;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
-.loading-skeleton__message--user {
-  align-self: flex-end;
-  width: 48%;
+.shell[data-startup-placeholder="false"] openclaw-panel-loading-skeleton {
+  visibility: hidden;
 }
 
-.loading-skeleton__composer {
-  flex: none;
-  width: min(100%, 760px);
-  height: 112px;
-  margin: auto auto 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-}
-
-@media (max-width: 768px) {
-  .connect-splash__layout {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .connect-splash__sidebar {
-    display: none;
-  }
-
-  .loading-skeleton {
-    gap: 24px;
-    padding: 20px 20px 40px;
+@media (prefers-reduced-motion: reduce) {
+  .loading-indicator span,
+  .shell[data-startup-stage] {
+    animation: none;
   }
 }
 

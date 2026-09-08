@@ -371,6 +371,7 @@ export class ChatPane extends ChatPaneLayoutRender {
       showThinking: state.settings.chatShowThinking,
       showToolCalls: state.settings.chatShowToolCalls,
       persistCommentary: state.settings.chatPersistCommentary !== false,
+      startupLoading: this.startupPresentation.stage !== "ready",
       loading: catalogKey ? this.catalogLoading : state.chatLoading,
       sending:
         placementStartupPending ||

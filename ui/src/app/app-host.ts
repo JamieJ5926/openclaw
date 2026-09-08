@@ -33,6 +33,10 @@ import {
 import { showToast } from "../lib/toast.ts";
 import { OpenClawLightDomElement } from "../lit/openclaw-element.ts";
 import { SubscriptionsController } from "../lit/subscriptions-controller.ts";
+import {
+  CHAT_TRANSCRIPT_LOADING_CHANGED_EVENT,
+  CHAT_PANE_LIFECYCLE_CHANGED_EVENT,
+} from "../pages/chat/chat-history-events.ts";
 import type { ChatPage } from "../pages/chat/chat-page.ts";
 import type { NewSessionTarget } from "../pages/new-session/location.ts";
 import { selectShellRouteState, type ShellRouteState } from "./app-host-route-state.ts";
@@ -45,6 +49,7 @@ import {
   type StoredOutboxScopeHost,
 } from "./app-shell-gateway.ts";
 import { ShellNavigationOwner, type ShellNavigationHost } from "./app-shell-navigation.ts";
+import { ShellStartupOwner } from "./app-shell-startup.ts";
 import { renderApplicationShell, type ShellViewHost } from "./app-shell-view.ts";
 import type { ApplicationRuntime } from "./bootstrap.ts";
 import type { ApplicationContext, ApplicationNavigationOptions } from "./context.ts";
@@ -63,6 +68,7 @@ import {
 import { postNativeNavState, type NativeNavState } from "./native-nav-state.ts";
 import { readNativeHistoryState, type NativeHistoryState } from "./native-web-chrome.ts";
 import { resolveOnboardingMode } from "./onboarding-mode.ts";
+import { CHAT_ROUTE_READY_EVENT } from "./route-transition.ts";
 import {
   changedServerUiPrefs,
   isApplyingServerUiPrefs,
@@ -74,6 +80,11 @@ import {
   retryStaleChunkReloadWhenReachable,
   scheduleStaleChunkReload,
 } from "./stale-chunk-reload.ts";
+import {
+  READY_STARTUP_PRESENTATION,
+  type StartupPresentation,
+  type StartupPresentationController,
+} from "./startup-presentation.ts";
 
 const APP_SIDEBAR_TAG = "openclaw-app-sidebar";
 const APP_SIDEBAR_ELEMENT = {
@@ -95,6 +106,7 @@ i18n.setLocaleLoadRecovery({
 function equalShellRouteState(previous: ShellRouteState, next: ShellRouteState): boolean {
   return (
     previous.routeId === next.routeId &&
+    previous.routeFailed === next.routeFailed &&
     previous.location?.pathname === next.location?.pathname &&
     previous.location?.search === next.location?.search &&
     previous.location?.hash === next.location?.hash &&
@@ -112,6 +124,9 @@ class OpenClawShell
 {
   @property({ attribute: false }) runtime: ApplicationRuntime | undefined;
   @property({ attribute: false }) onboarding = false;
+  @property({ attribute: false }) startupPresentation?: StartupPresentationController;
+  @property({ attribute: false }) startupSnapshot: StartupPresentation = READY_STARTUP_PRESENTATION;
+  private readonly shellStartup = new ShellStartupOwner(this);
 
   @state() navDrawerOpen = false;
   @state() desktopNavigationExpanded = false;
@@ -255,7 +270,7 @@ class OpenClawShell
     return routeSearch === undefined ? this.onboarding : resolveOnboardingMode(routeSearch);
   }
 
-  private get workspaceChromeVisible(): boolean {
+  get workspaceChromeVisible(): boolean {
     const routeId = this.routeState.routeId;
     // Hidden workspace chrome must not preload its sidebar and panel graphs.
     return routeId !== undefined && !isSettingsNavigationRoute(routeId) && !this.onboardingMode;
@@ -298,6 +313,9 @@ class OpenClawShell
 
   constructor() {
     super();
+    this.addEventListener(CHAT_ROUTE_READY_EVENT, () => this.requestUpdate());
+    this.addEventListener(CHAT_TRANSCRIPT_LOADING_CHANGED_EVENT, () => this.requestUpdate());
+    this.addEventListener(CHAT_PANE_LIFECYCLE_CHANGED_EVENT, () => this.requestUpdate());
     this.subscriptions
       .effect(
         () => this.context,
@@ -634,6 +652,12 @@ class OpenClawShell
   }
 
   override updated(changed: PropertyValues<this>) {
+    queueMicrotask(() =>
+      this.shellStartup.synchronize(
+        this.lazyCustomElements.visibleState?.status === "error" &&
+          this.lazyCustomElements.visibleState.element === APP_SIDEBAR_ELEMENT,
+      ),
+    );
     this.syncDocumentTitle();
     // Theme and breakpoint owners sync their changes; route/runtime changes
     // can change whether the committed shell uses the chat background.
@@ -719,8 +743,13 @@ class OpenClawShell
   }
 
   override render() {
-    if (this.workspaceChromeVisible) {
-      this.lazyCustomElements.preload(APP_SIDEBAR_ELEMENT);
+    if (
+      this.workspaceChromeVisible &&
+      this.lazyCustomElements.visibleState?.element !== APP_SIDEBAR_ELEMENT
+    ) {
+      this.lazyCustomElements.preload(APP_SIDEBAR_ELEMENT, {
+        reportError: this.startupSnapshot.stage !== "ready",
+      });
     }
     return renderApplicationShell(this);
   }

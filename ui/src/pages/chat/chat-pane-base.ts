@@ -25,6 +25,10 @@ import {
   listQuestionPrompts,
   type QuestionPrompt,
 } from "../../app/question-prompt.ts";
+import {
+  startupPresentationContext,
+  READY_STARTUP_PRESENTATION,
+} from "../../app/startup-presentation.ts";
 import type { PresencePayload } from "../../app/user-profile.ts";
 import type { MarkdownRenderOptions } from "../../components/markdown-render-options.ts";
 import { SessionProgressCardController } from "../../components/session-progress-card-controller.ts";
@@ -140,6 +144,9 @@ export abstract class ChatPaneBase extends OpenClawLightDomElement {
   });
   @consume({ context: applicationContext, subscribe: true })
   protected context!: ChatPageContext;
+  @consume({ context: startupPresentationContext, subscribe: true })
+  @property({ attribute: false })
+  protected startupPresentation = READY_STARTUP_PRESENTATION;
   @property({ attribute: false }) paneId = "single";
   @property({ attribute: false }) presentationId = "single";
   @property({ attribute: false }) chatMessagesBySession?: ChatMessageCache;
@@ -205,11 +212,17 @@ export abstract class ChatPaneBase extends OpenClawLightDomElement {
   protected presentedChanged(_presented: boolean): void {}
   /** True while the authoritative transcript for this pane is still being fetched. */
   get transcriptLoading(): boolean {
+    if (parseCatalogSessionKey(this.sessionKey)) {
+      return this.catalogLoading;
+    }
     const phase = this.state ? getChatHistoryLoadState(this.state).phase : "idle";
     return phase === "pending-connection" || phase === "in-flight";
   }
   /** The initial authoritative transcript has a visible result, including errors. */
   get transcriptReady(): boolean {
+    if (parseCatalogSessionKey(this.sessionKey)) {
+      return this.catalogRequestedSessionKey === this.sessionKey && !this.catalogLoading;
+    }
     const phase = this.state ? getChatHistoryLoadState(this.state).phase : "idle";
     return phase === "committed" || phase === "failed";
   }

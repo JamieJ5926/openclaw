@@ -4,7 +4,7 @@ import { isSessionRouteId } from "../app-route-paths.ts";
 import { isRouteId, type RouteId } from "../app-routes.ts";
 import { icons } from "../components/icons.ts";
 import { renderLazyElementModal } from "../components/lazy-view-error.ts";
-import { renderConnectingSplash } from "../components/loading-skeleton.ts";
+import { renderConnectingSplash } from "../components/loading-state.ts";
 import { renderNewSessionLink } from "../components/new-session-link.ts";
 import {
   renderLazySettingsSidebar,
@@ -67,6 +67,7 @@ import {
   normalizeChatSendShortcut,
 } from "./settings.ts";
 import { renderCollapsedAssistantToggles } from "./shell-assistant-toggles.ts";
+import type { StartupPresentation } from "./startup-presentation.ts";
 import { createUpdateProgressWatcher } from "./update-confirmation.ts";
 
 const EMPTY_SESSION_HAS_DRAFT = () => false;
@@ -87,6 +88,7 @@ export interface ShellViewHost extends DevicePairSetupHost {
   readonly onboardingMode: boolean;
   readonly outboxStoreRuntime: OutboxStoreRuntime | null;
   readonly routeState: ShellRouteState;
+  readonly startupSnapshot?: StartupPresentation;
   readonly settingsPreloadTimers: Map<EventTarget, ReturnType<typeof globalThis.setTimeout>>;
   readonly settingsSidebarRenderer: SettingsSidebarModule["renderSettingsSidebar"] | null;
   readonly settingsSidebarLoadFailed: boolean;
@@ -122,7 +124,10 @@ export function renderApplicationShell(host: ShellViewHost) {
     return nothing;
   }
   if (host.routeState.routeId === undefined) {
-    return renderConnectingSplash();
+    return renderConnectingSplash(
+      undefined,
+      host.startupSnapshot?.stage === "ready" || host.startupSnapshot?.placeholderVisible,
+    );
   }
   const gatewaySnapshot = context.gateway.snapshot;
   const config = context.config.current;
@@ -404,7 +409,11 @@ export function renderApplicationShell(host: ShellViewHost) {
           ></openclaw-keyboard-shortcuts-dialog>`
         : nothing
     }
+    ${host.startupSnapshot?.stage === "pending" ? renderConnectingSplash(undefined, host.startupSnapshot.placeholderVisible) : nothing}
     <div
+      data-startup-stage=${host.startupSnapshot?.stage ?? "ready"}
+      data-startup-placeholder=${host.startupSnapshot?.stage === "ready" ? nothing : String(host.startupSnapshot?.placeholderVisible ?? false)}
+      ?inert=${host.startupSnapshot?.stage === "pending"}
       class="shell ${chatLikeRoute ? "shell--chat" : ""} ${
         navCollapsed ? "shell--nav-collapsed" : ""
       } ${mobileNavLayout ? "shell--mobile-nav" : ""} ${

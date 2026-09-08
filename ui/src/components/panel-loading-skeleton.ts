@@ -98,7 +98,6 @@ class PanelLoadingSkeleton extends OpenClawLitElement {
 
     .row,
     .toolbar,
-    .bubble,
     .card,
     .summary {
       display: flex;
@@ -191,18 +190,20 @@ class PanelLoadingSkeleton extends OpenClawLitElement {
       background: color-mix(in srgb, var(--bg) 76%, transparent);
     }
 
-    .bubble {
-      width: 82%;
-      min-height: 58px;
-      padding: 12px;
-      align-items: flex-start;
-      border-radius: 12px;
-      background: color-mix(in srgb, var(--bg-muted) 76%, transparent);
+    :host([data-panel-skeleton="chat"]) {
+      padding: 0;
+      font-size: var(--chat-text-size);
     }
 
-    .bubble.user {
-      width: 58%;
-      margin-left: auto;
+    .transcript-copy {
+      display: grid;
+      grid-auto-rows: 1.5em;
+      align-items: center;
+    }
+
+    .transcript-copy .line {
+      height: 1em;
+      border-radius: var(--radius-sm);
     }
 
     .discussion-frame {
@@ -342,10 +343,8 @@ class PanelLoadingSkeleton extends OpenClawLitElement {
         `;
       case "chat":
         return html`
-          <div class="conversation">
-            <div class="bubble"><div class="copy">${this.line()}${this.line("medium")}</div></div>
-            <div class="bubble user"><div class="copy">${this.line("medium")}</div></div>
-            <div class="bubble"><div class="copy">${this.line()}${this.line("short")}</div></div>
+          <div class="transcript-copy">
+            ${this.line()}${this.line("medium")}${this.line("long")}
           </div>
         `;
       case "desktop":
