@@ -328,6 +328,8 @@ export const en = {
       failedOptionsIntro: "These didn't work just now:",
       findMeLater:
         "You can always find me later — run `openclaw` in a terminal, or open Settings in the dashboard.",
+      optionalSearch:
+        "Web search setup is optional. Choose a provider with `{command}`, or say `configure search` in Settings > Ask OpenClaw. You can skip without changing your setup.",
       hatchingNow: "Hatching your agent now…",
       keepingCurrent: "Keeping the working AI you already have.",
       lookAroundManual: "No — I'll configure it manually",
