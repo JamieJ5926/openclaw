@@ -60,14 +60,9 @@ export function renderArtTile(
   onIconError?: () => void,
   className = "plugins-tile",
 ): TemplateResult {
-  const art = pluginArtPath(slug);
-  if (art) {
-    return html`<span class=${className}>
-      <img src=${art} alt="" loading="lazy" decoding="async" />
-    </span>`;
-  }
+  // The resolved plugin-owned icon is authoritative; bundled UI art is the legacy fallback.
   if (iconUrl) {
-    return html`<span class=${className}>
+    return html`<span class=${className} data-plugin-icon-id=${slug}>
       <img
         class="plugins-icon"
         src=${iconUrl}
@@ -78,10 +73,17 @@ export function renderArtTile(
       />
     </span>`;
   }
+  const art = pluginArtPath(slug);
+  if (art) {
+    return html`<span class=${className} data-plugin-icon-id=${slug}>
+      <img src=${art} alt="" loading="lazy" decoding="async" />
+    </span>`;
+  }
   const [from, to] = pluginFallbackGradient(slug);
   const monogram = pluginMonogram(name);
   return html`<span
     class=${`${className} ${className}--fallback`}
+    data-plugin-icon-id=${slug}
     style=${`--plugins-art-a:${from};--plugins-art-b:${to}`}
     aria-hidden="true"
   >
