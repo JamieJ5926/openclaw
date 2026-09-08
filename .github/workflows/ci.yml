@@ -1,4 +1,4 @@
-name: Temporary Android KVM access diagnostic
+name: Temporary Android catalog native observation
 on:
   workflow_dispatch:
 permissions:
@@ -11,7 +11,7 @@ jobs:
   native:
     if: github.repository == 'openclaw/openclaw'
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 35
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     steps:
@@ -23,6 +23,8 @@ jobs:
           sparse-checkout: .proof/android-catalog-native
       - name: Run one bounded native observation
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_WORKFLOW_SHA"

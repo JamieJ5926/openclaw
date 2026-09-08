@@ -4,7 +4,9 @@ export ANDROID_HOME="$SDK_ROOT" ANDROID_SDK_ROOT="$SDK_ROOT"
 export ANDROID_AVD_HOME="$TRIAL/avd" ANDROID_USER_HOME="$TRIAL/android-user"
 export PATH="$TRIAL/runtime/node_modules/.bin:$SDK_ROOT/platform-tools:$SDK_ROOT/emulator:$SDK_ROOT/cmdline-tools/latest/bin:/usr/bin:/bin"
 mkdir "$ANDROID_AVD_HOME" "$ANDROID_USER_HOME"
-test -r /dev/kvm && test -w /dev/kvm
+test -r /dev/kvm
+test -w /dev/kvm
+/usr/bin/perl "$INPUT/kvm-access-probe.pl" > "$EVIDENCE/public/kvm-runtime.json"
 emulator -accel-check
 printf 'no\n' | avdmanager create avd --name catalog-result --package 'system-images;android-36;google_apis;x86_64' --device pixel_2 --path "$ANDROID_AVD_HOME/catalog-result.avd"
 cat "$ANDROID_AVD_HOME/catalog-result.avd/config.ini" > "$EVIDENCE/public/avd-config.ini"

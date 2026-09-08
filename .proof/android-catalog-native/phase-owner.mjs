@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import {spawn, spawnSync} from 'node:child_process';
 import {createInterface} from 'node:readline';
 
-export const WRITE_LIMIT=24*1024**3;
-export const PRIOR_HOSTED_CARRY=15812194304;
+export const WRITE_LIMIT=32*1024**3;
+export const PRIOR_HOSTED_CARRY=15948570624;
 export const INITIAL_HOLD=PRIOR_HOSTED_CARRY+128*1024**2;
 const CONTROL_LIMIT=65536;
 export function writeControl(path,value){
@@ -31,7 +31,7 @@ export const systemdOwner={
 
 export async function reconcilePhase(directory,owner=systemdOwner){
   const plan=JSON.parse(fs.readFileSync(directory+'/plan.json'));
-  if(!/^android-catalog-hosted-\d+-(prepare|native|finalize)$/.test(plan.id))throw Error('Unexpected owned unit identity');
+  if(!/^android-catalog-hosted-\d+-(access|prepare|native|finalize)$/.test(plan.id))throw Error('Unexpected owned unit identity');
   const unit=plan.id+'.service',observations=[];
   let observed=await owner.inspect(unit),stop=null;
   observations.push(observed);
