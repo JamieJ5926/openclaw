@@ -142,17 +142,6 @@
   padding: 12px 14px 0;
 }
 
-/* Keep settings, split view, and run status together in the footer's middle
-   track. The track is sized to content, so this group shrinks before it ever
-   pushes mic and send off the right edge. */
-.agent-chat__composer-controls {
-  display: flex;
-  position: relative;
-  align-items: center;
-  gap: var(--chat-composer-chip-gap);
-  min-width: 0;
-}
-
 .agent-chat__composer-controls .chat-controls__model-settings {
   gap: 4px;
 }
@@ -2932,12 +2921,6 @@
   }
 }
 @container chat-composer (max-width: 480px) {
-  .agent-chat__input--mobile-toolbar .agent-chat__composer-controls {
-    flex: 1 1 0;
-    min-width: 0;
-    order: 3;
-  }
-
   .agent-chat__input .chat-controls__model-trigger {
     gap: 3px;
     justify-content: center;
@@ -2965,13 +2948,6 @@
   }
 }
 @media (max-width: 560px) {
-  .agent-chat__input--mobile-toolbar .agent-chat__composer-controls {
-    flex: 1 1 0;
-    min-width: 0;
-    margin-inline-start: auto;
-    overflow: visible;
-  }
-
   .agent-chat__input--mobile-toolbar .chat-controls__inline-select-chevron,
   .agent-chat__input--mobile-toolbar .chat-controls__inline-select-chevron svg {
     width: var(--chat-mobile-row-chevron-size);

@@ -1,6 +1,7 @@
 import type { RouteId } from "../app-routes.ts";
 import type { OpenClawAssistantPanel } from "../components/assistant-panel.ts";
 import type { ChatPaneElement } from "../pages/chat/route-draft-focus-handoff.ts";
+import { hasPresentedReplacement } from "../plugins/control-ui-view-presentation.ts";
 import type { ShellRouteState } from "./app-host-route-state.ts";
 import type { ApplicationContext } from "./context.ts";
 import type { StartupPresentationController } from "./startup-presentation.ts";
@@ -37,6 +38,10 @@ export class ShellStartupOwner {
     }
     const phase = context.gateway.snapshot.phase;
     if (!sidebarFailed && (phase === "starting" || phase === "connecting")) {
+      return;
+    }
+    if (hasPresentedReplacement(host, "workspace")) {
+      startup.finish();
       return;
     }
     const route = host.routeState;
@@ -89,7 +94,17 @@ export class ShellStartupOwner {
     startup.update(
       chromeReady,
       chromeReady &&
-        panes.every((pane) => !pane.conversationPresented || pane.transcriptPresentationReady),
+        [
+          ...host.querySelectorAll<HTMLElementTagNameMap["openclaw-custodian-surface"]>(
+            "openclaw-assistant-panel openclaw-custodian-surface",
+          ),
+        ].every((surface) => surface.transcriptPresentationReady) &&
+        panes.every(
+          (pane) =>
+            !pane.conversationPresented ||
+            pane.transcriptPresentationReady ||
+            hasPresentedReplacement(pane, "transcript"),
+        ),
     );
   }
 }

@@ -2,6 +2,7 @@ import { html, nothing, type TemplateResult } from "lit";
 import { ref, type RefOrCallback } from "lit/directives/ref.js";
 import { t } from "../i18n/index.ts";
 import { icons } from "./icons.ts";
+import "../styles/rail-header.css";
 import "../styles/chat/startup-layout.css";
 import "../styles/chat/composer-surface.css";
 
@@ -25,6 +26,7 @@ type ChatComposerSurfaceInput = {
   lead: ComposerContent;
   context?: ComposerContent;
   controls?: ComposerContent;
+  reserveControls?: boolean;
   actions: ComposerContent;
 };
 
@@ -70,7 +72,7 @@ export function renderChatComposerSurface(props: {
                     <div class="agent-chat__composer-meta agent-chat__composer-context">
                       ${input.context ?? nothing}
                     </div>
-                    ${input.controls && input.controls !== nothing ? html`<div class="agent-chat__composer-controls">${input.controls}</div>` : nothing}
+                    ${input.reserveControls || (input.controls && input.controls !== nothing) ? html`<div class="agent-chat__composer-controls ${input.reserveControls ? "agent-chat__composer-controls--reserved" : ""}">${input.controls ?? nothing}</div>` : nothing}
                     <div class="agent-chat__composer-actions">${input.actions}</div>
                   </div>
                 </div>
@@ -86,6 +88,7 @@ export function renderChatComposerSurface(props: {
 export function renderPendingChatComposer(placeholder: string) {
   return renderChatComposerSurface({
     input: {
+      reserveControls: true,
       editor: html`<textarea
         disabled
         aria-label=${t("chat.composer.composerInput")}

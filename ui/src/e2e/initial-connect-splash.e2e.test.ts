@@ -228,16 +228,20 @@ describeControlUiE2e("Control UI initial connection skeleton E2E", () => {
         await proofContentPainted(page, proof, skeleton),
         "connecting proof must contain the transcript skeleton",
       ).toBe(true);
-      expect(await shell.evaluate((element) => getComputedStyle(element).animationName)).not.toBe(
+      expect(await shell.evaluate((element) => getComputedStyle(element).animationName)).toBe(
         "none",
       );
+      const pulseOwner = page.locator("openclaw-app");
+      expect(
+        await pulseOwner.evaluate((element) => getComputedStyle(element).animationName),
+      ).not.toBe("none");
       await page.setViewportSize({ width: 390, height: 844 });
       await page.emulateMedia({ reducedMotion: "reduce" });
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,
       );
       expect(
-        await shell.evaluate((element) =>
+        await pulseOwner.evaluate((element) =>
           Number.parseFloat(getComputedStyle(element).animationDuration),
         ),
       ).toBeLessThanOrEqual(0.00001);

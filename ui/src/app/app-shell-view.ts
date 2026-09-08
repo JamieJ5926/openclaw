@@ -36,6 +36,7 @@ import { canGoBackInNativeEmbed } from "./browser.ts";
 import type { ApplicationContext, ApplicationNavigationOptions } from "./context.ts";
 import { resolveControlUiAuthToken } from "./control-ui-auth.ts";
 import { gatewayPresentationScope } from "./gateway-presentation-scope.ts";
+import { initialSessionIdentity } from "./initial-session-identity.ts";
 import {
   DEBUG_OVERLAY_ELEMENT,
   isOptionalElementDefined,
@@ -67,7 +68,7 @@ import {
   normalizeChatSendShortcut,
 } from "./settings.ts";
 import { renderCollapsedAssistantToggles } from "./shell-assistant-toggles.ts";
-import type { StartupPresentation } from "./startup-presentation.ts";
+import type { StartupPresentation, StartupPresentationController } from "./startup-presentation.ts";
 import { createUpdateProgressWatcher } from "./update-confirmation.ts";
 
 const EMPTY_SESSION_HAS_DRAFT = () => false;
@@ -83,6 +84,7 @@ export interface ShellViewHost extends DevicePairSetupHost {
   readonly onboardingMemoryImportElement: OptionalCustomElement;
   readonly lazyCustomElements: LazyCustomElementRequestController;
   readonly sidebarLoader: LazyCustomElementRequestController;
+  prepareDockReservations(): void;
   readonly nativeHistoryState: NativeHistoryState;
   readonly navDrawerOpen: boolean;
   readonly navigationSidebar: HTMLElement;
@@ -90,6 +92,7 @@ export interface ShellViewHost extends DevicePairSetupHost {
   readonly outboxStoreRuntime: OutboxStoreRuntime | null;
   readonly routeState: ShellRouteState;
   readonly startupSnapshot?: StartupPresentation;
+  readonly startupPresentation?: StartupPresentationController;
   readonly settingsPreloadTimers: Map<EventTarget, ReturnType<typeof globalThis.setTimeout>>;
   readonly settingsSidebarRenderer: SettingsSidebarModule["renderSettingsSidebar"] | null;
   readonly settingsSidebarLoadFailed: boolean;
@@ -141,7 +144,6 @@ export function renderApplicationShell(host: ShellViewHost) {
   const updateBusy = overlaySnapshot.updateRunning || overlaySnapshot.updateReconciliationPending;
   const watchUpdateProgress = createUpdateProgressWatcher(context);
   const terminalAvailable = isTerminalAvailable(gatewaySnapshot, config.terminalEnabled ?? false);
-  const browserPanelAvailable = isBrowserPanelSurfaceAvailable(gatewaySnapshot);
   const desktopPanelAvailable = isDesktopPanelAvailable(gatewaySnapshot);
   const homePanelAvailable = isHomePanelAvailable(context.gateway);
   const custodianPanelAvailable =
@@ -164,7 +166,6 @@ export function renderApplicationShell(host: ShellViewHost) {
     activeRoute === "plugin"
       ? pluginTabRefFromSearch(host.routeState.location?.search ?? "")
       : null;
-  const activePluginTabId = activePluginRef ? pluginTabKey(activePluginRef) : "";
   // Onboarding renders without any navigation chrome, so the settings takeover
   // must not reserve its fixed sidebar column (the grid would stay off-center).
   const nativeEmbed = isNativeEmbedHost();
@@ -176,6 +177,9 @@ export function renderApplicationShell(host: ShellViewHost) {
       activeRoute === "skills" ||
       activeRoute === "cron");
   const settingsTakeover = isSettingsTakeover(activeRoute) && !host.onboardingMode && !nativeEmbed;
+  if (host.startupSnapshot?.stage === "pending") {
+    host.prepareDockReservations();
+  }
   const runtimeConfig = context.runtimeConfig.state;
   const onboarding = host.onboardingMode;
   const memoryImportActive = onboarding && activeRoute !== "custodian";
@@ -245,6 +249,10 @@ export function renderApplicationShell(host: ShellViewHost) {
     }
   };
   const uiSettings = context.theme.settings;
+  const { location = globalThis.location, committedSessionKey } = host.routeState;
+  const presentationSessionKey =
+    committedSessionKey ||
+    initialSessionIdentity(location, context, host.activeSessionKey).sessionKey;
   // The new-session draft shares the chat layout: full-height pane that owns
   // its scrolling and pins the composer dock to the bottom.
   const chatLikeRoute = sessionRoute || activeRoute === "new-session";
@@ -252,7 +260,7 @@ export function renderApplicationShell(host: ShellViewHost) {
     Object.assign(host.navigationSidebar, {
       basePath: context.basePath,
       activeRouteId: activeRoute,
-      activePluginTabId,
+      activePluginTabId: activePluginRef ? pluginTabKey(activePluginRef) : "",
       enabledRouteIds: host.enabledRouteIds(),
       sessionKey: host.activeSessionKey,
       connected: gatewayConnected,
@@ -396,6 +404,7 @@ export function renderApplicationShell(host: ShellViewHost) {
         : nothing
     }
     <div
+      ?data-startup-managed=${host.startupPresentation?.started}
       data-startup-stage=${host.startupSnapshot?.stage ?? "ready"}
       data-startup-placeholder=${host.startupSnapshot?.stage === "ready" ? nothing : String(host.startupSnapshot?.placeholderVisible ?? false)}
       class="shell ${chatLikeRoute ? "shell--chat" : ""} ${
@@ -586,7 +595,7 @@ export function renderApplicationShell(host: ShellViewHost) {
         ${nativeEmbed ? navigationContent : nothing}
         ${
           host.startupSnapshot?.stage === "pending" && chatLikeRoute
-            ? renderStartupChatSkeleton(host.activeSessionKey, assistantName)
+            ? renderStartupChatSkeleton(presentationSessionKey, assistantName, uiSettings)
             : nothing
         }
         <openclaw-router-outlet
@@ -617,7 +626,7 @@ export function renderApplicationShell(host: ShellViewHost) {
                 ?inert=${navDrawerOpen}
                 data-chat-autotype-exempt
                 .client=${gatewayConnected ? gatewaySnapshot.client : null}
-                .available=${browserPanelAvailable}
+                .available=${isBrowserPanelSurfaceAvailable(gatewaySnapshot)}
                 .remoteAvailable=${isBrowserPanelAvailable(gatewaySnapshot)}
                 .suppressed=${settingsTakeover || nativeEmbed}
                 .resourceBasePath=${context.resourceBasePath}

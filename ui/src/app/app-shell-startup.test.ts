@@ -1,11 +1,27 @@
 /* @vitest-environment jsdom */
 import type { RouterState } from "@openclaw/uirouter";
+import { html } from "lit";
 import { afterEach, expect, it, vi } from "vitest";
+import type {
+  ControlUiReplacement,
+  ControlUiSurfaceProps,
+  ControlUiViewContext,
+} from "../../../src/plugin-sdk/control-ui.js";
+import { GatewayBrowserClient } from "../api/gateway.ts";
 import type { RouteId } from "../app-routes.ts";
+import "../plugins/control-ui-view.runtime.ts";
 import { createInitializationContext } from "../pages/chat/chat-pane.test-support.ts";
+import { createControlUiPluginHost } from "../plugins/control-ui-host.ts";
+import {
+  ControlUiPluginRuntime,
+  type ControlUiPluginOwner,
+} from "../plugins/control-ui-runtime.ts";
+import { createApplicationContextProvider } from "../test-helpers/application-context.ts";
 import { selectShellRouteState, type ShellRouteState } from "./app-host-route-state.ts";
 import { ShellStartupOwner } from "./app-shell-startup.ts";
 import { StartupPresentationController } from "./startup-presentation.ts";
+
+vi.mock("../pages/chat/chat-pane.ts", () => ({}));
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -203,3 +219,117 @@ it("keeps chat available after sidebar recovery is dismissed before connection",
     startup.dispose();
   }
 });
+
+it.each(["workspace", "transcript"] as const)(
+  "follows the mounted %s replacement while retaining wrapped default readiness",
+  async (surface) => {
+    const { host, startup, owner } = startupHarness();
+    const pane = document.createElement("openclaw-chat-pane");
+    Object.defineProperties(pane, {
+      presented: { value: true },
+      visuallyPresented: { value: true },
+      composerReady: { value: true },
+      conversationPresented: { value: true },
+      transcriptPresentationReady: { value: false },
+    });
+    pane.innerHTML = '<div class="chat-pane__header"></div>';
+    if (surface !== "workspace") {
+      host.append(pane);
+    }
+    const listeners = new Set<() => void>();
+    const abort = new AbortController();
+    const runtime = new ControlUiPluginRuntime(() => host.context);
+    vi.spyOn(runtime, "isCurrent").mockReturnValue(true);
+    const pluginOwner: Omit<ControlUiPluginOwner, "host"> = {
+      abort,
+      client: new GatewayBrowserClient({ url: "ws://localhost" }),
+      descriptor: {
+        pluginId: "test",
+        name: "Test",
+        revision: "1",
+        entryUrl: "/test.js",
+        styles: [],
+      },
+      disposers: new Set(),
+      contributions: {
+        pages: new Map(),
+        navigation: new Map(),
+        panels: new Map(),
+        actions: new Map(),
+        accessories: new Map(),
+        widgets: new Map(),
+        replacements: new Map(),
+      },
+      selections: new Map(),
+    };
+    const pluginHost = createControlUiPluginHost(() => host.context, runtime, pluginOwner);
+    let replacement: ControlUiReplacement<typeof surface> = {
+      id: "startup",
+      label: "Startup replacement",
+      surface,
+      mount(
+        container: HTMLElement,
+        context: ControlUiViewContext<ControlUiSurfaceProps[typeof surface]>,
+      ) {
+        const dispose = context.mountDefault(container);
+        return { dispose };
+      },
+    };
+    host.context = { ...host.context, plugins: runtime };
+    vi.spyOn(runtime, "selectedReplacement").mockImplementation(() => ({
+      key: "test/startup",
+      pluginId: "test",
+      value: replacement,
+      host: pluginHost,
+      signal: abort.signal,
+    }));
+    vi.spyOn(runtime, "subscribe").mockImplementation((listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    });
+    const view = Object.assign(document.createElement("openclaw-plugin-view"), {
+      surface,
+      defaultView: surface === "workspace" ? html`${pane}` : html`<div class="chat-thread"></div>`,
+      defaultHost: surface === "workspace" ? host : pane,
+    });
+    if (surface === "transcript") {
+      pane.append(view);
+    } else {
+      host.append(view);
+    }
+    const provider = createApplicationContextProvider(host.context);
+    provider.append(host);
+    document.body.append(provider);
+    startup.start();
+    try {
+      await vi.waitFor(() =>
+        expect(
+          view.querySelector(surface === "workspace" ? "openclaw-chat-pane" : ".chat-thread"),
+        ).not.toBeNull(),
+      );
+      owner.synchronize(false);
+      await Promise.resolve();
+      owner.synchronize(false);
+      expect(startup.snapshot.stage).not.toBe("ready");
+      replacement = {
+        id: "startup",
+        label: "Startup replacement",
+        surface,
+        mount(container: HTMLElement) {
+          container.textContent = "Replacement is mounted";
+        },
+      };
+      for (const notify of listeners) {
+        notify();
+      }
+      await vi.waitFor(() => expect(view.textContent).toBe("Replacement is mounted"));
+      owner.synchronize(false);
+      await vi.waitFor(() => expect(startup.snapshot.stage).toBe("ready"));
+    } finally {
+      startup.dispose();
+      provider.remove();
+      abort.abort();
+      runtime.dispose();
+    }
+  },
+);

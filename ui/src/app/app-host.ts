@@ -9,7 +9,7 @@ import {
   titleForRoute,
 } from "../app-navigation.ts";
 import "../components/resizable-divider.ts";
-import { isSessionRouteId } from "../app-route-paths.ts";
+import { isSessionRouteId, routeIdFromPath } from "../app-route-paths.ts";
 import { APP_ROUTE_IDS, type RouteId } from "../app-routes.ts";
 import type {
   CommandPaletteElement,
@@ -39,6 +39,7 @@ import {
 } from "../pages/chat/chat-history-events.ts";
 import type { ChatPage } from "../pages/chat/chat-page.ts";
 import type { NewSessionTarget } from "../pages/new-session/location.ts";
+import { PLUGIN_SURFACE_PRESENTATION_CHANGED_EVENT } from "../plugins/control-ui-view-presentation.ts";
 import { selectShellRouteState, type ShellRouteState } from "./app-host-route-state.ts";
 import { OpenClawApp } from "./app-root.ts";
 import { ShellChromeOwner, type ShellChromeHost } from "./app-shell-chrome.ts";
@@ -285,7 +286,7 @@ class OpenClawShell
     // Hidden workspace chrome must not preload its sidebar and panel graphs.
     return (
       !isNativeEmbedHost() &&
-      routeId !== undefined &&
+      routeId != null &&
       !isSettingsNavigationRoute(routeId) &&
       !this.onboardingMode
     );
@@ -331,6 +332,7 @@ class OpenClawShell
     this.addEventListener(CHAT_ROUTE_READY_EVENT, () => this.requestUpdate());
     this.addEventListener(CHAT_TRANSCRIPT_LOADING_CHANGED_EVENT, () => this.requestUpdate());
     this.addEventListener(CHAT_PANE_LIFECYCLE_CHANGED_EVENT, () => this.requestUpdate());
+    this.addEventListener(PLUGIN_SURFACE_PRESENTATION_CHANGED_EVENT, () => this.requestUpdate());
     this.subscriptions
       .effect(
         () => this.context,
@@ -444,6 +446,21 @@ class OpenClawShell
     retainedLocal = false,
   ) {
     this.shellGateway.reconcileCommittedServerUiPrefs(runtimeConfig, needsRefresh, retainedLocal);
+  }
+
+  prepareDockReservations(): void {
+    const routeId =
+      this.routeState.routeId ?? routeIdFromPath(location.pathname, this.context?.basePath ?? "");
+    if (
+      !isNativeEmbedHost() &&
+      !this.onboardingMode &&
+      routeId != null &&
+      !isSettingsNavigationRoute(routeId)
+    ) {
+      this.shellChrome.panels.prepareReservations();
+    } else {
+      this.shellChrome.panels.releasePreparedReservations();
+    }
   }
 
   override connectedCallback() {
@@ -696,6 +713,8 @@ class OpenClawShell
     }
     if (this.workspaceChromeVisible) {
       this.shellChrome.panels.restore();
+    } else if (this.routeState.routeId !== undefined) {
+      this.shellChrome.panels.releasePreparedReservations();
     }
     if ((context.overlays?.snapshot.approvalQueue.length ?? 0) > 0) {
       this.lazyCustomElements.preload(this.execApprovalElement);

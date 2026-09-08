@@ -16,6 +16,7 @@ export const startupPresentationContext = createContext<StartupPresentation>(
 /** One document owns initial feedback; reconnects and background loads never rearm it. */
 export class StartupPresentationController {
   snapshot: StartupPresentation = READY_STARTUP_PRESENTATION;
+  started = false;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private chromeReady = false;
   private contentReady = false;
@@ -25,6 +26,7 @@ export class StartupPresentationController {
 
   start() {
     this.dispose();
+    this.started = true;
     this.chromeReady = false;
     this.contentReady = false;
     this.shownAt = undefined;

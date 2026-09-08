@@ -548,6 +548,17 @@
   min-width: 0;
 }
 
+/* Keep settings, split view, and run status together in the footer's middle
+   track. The track is sized to content, so this group shrinks before it ever
+   pushes mic and send off the right edge. */
+.agent-chat__composer-controls {
+  display: flex;
+  position: relative;
+  align-items: center;
+  gap: var(--chat-composer-chip-gap);
+  min-width: 0;
+}
+
 .agent-chat__composer-actions {
   display: flex;
   align-items: center;
@@ -1154,6 +1165,12 @@
    embedded composers keep the regular grouping instead of shedding labels and
    stretching the model control long before the row is under pressure. */
 @container chat-composer (max-width: 480px) {
+  .agent-chat__input--mobile-toolbar .agent-chat__composer-controls {
+    flex: 1 1 0;
+    min-width: 0;
+    order: 3;
+  }
+
   .agent-chat__composer-footer {
     --chat-composer-chip-icon: 16px;
     margin-bottom: 0;
@@ -1192,6 +1209,17 @@
    the secondary controls share one smaller box so model and effort can remain
    visible instead of collapsing into the model menu. */
 @media (max-width: 560px) {
+  .agent-chat__input--mobile-toolbar .agent-chat__composer-controls {
+    flex: 1 1 0;
+    min-width: 0;
+    margin-inline-start: auto;
+    overflow: visible;
+  }
+
+  .agent-chat__input--mobile-toolbar .agent-chat__composer-controls--reserved {
+    min-height: 44px;
+  }
+
   .agent-chat__input--mobile-toolbar {
     --chat-composer-min-height: 105px;
     --chat-mobile-row-target-size: 32px;

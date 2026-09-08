@@ -532,6 +532,7 @@ export function renderChatComposerView(context: ChatComposerViewContext) {
           ${composerLeadControl}`,
           context: contextNotice,
           controls: composerControls,
+          reserveControls: props.initialMetadataPending,
           actions: renderChatPrimaryActions(runControlsProps),
         }
       : undefined,

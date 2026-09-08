@@ -3,15 +3,22 @@ import { html, nothing, type TemplateResult } from "lit";
 import { property } from "lit/decorators.js";
 import { applicationContext, type ApplicationContext } from "../../app/context.ts";
 import { controlUiPublicAssetPath } from "../../app/public-assets.ts";
+import {
+  startupPresentationContext,
+  READY_STARTUP_PRESENTATION,
+  type StartupPresentation,
+} from "../../app/startup-presentation.ts";
 import { icons } from "../../components/icons.ts";
 import { markdownBlocks } from "../../components/markdown-blocks.ts";
 import { handleMarkdownCodeBlockClick } from "../../components/markdown-code-blocks.ts";
 import { handleMarkdownTableInteraction } from "../../components/markdown-tables.ts";
 import { renderPanelRefreshStatus } from "../../components/panel-refresh-status.ts";
-import "../../components/openclaw-mascot.ts";
+import { renderChatTranscriptSkeleton } from "../../components/startup-chat-skeleton.ts";
 import { t } from "../../i18n/index.ts";
+import "../../components/openclaw-mascot.ts";
 import { OpenClawLightDomElement } from "../../lit/openclaw-element.ts";
 import { SubscriptionsController } from "../../lit/subscriptions-controller.ts";
+import { CHAT_PANE_LIFECYCLE_CHANGED_EVENT } from "../chat/chat-history-events.ts";
 import "../../styles/chat/startup-layout.css";
 import "../../styles/chat/grouped.css";
 import "../../styles/chat/layout.css";
@@ -30,6 +37,13 @@ import { renderCustodianTranscriptEntry } from "./transcript.ts";
 class CustodianSurface extends OpenClawLightDomElement {
   @consume({ context: applicationContext, subscribe: true })
   private context!: ApplicationContext;
+
+  @consume({ context: startupPresentationContext, subscribe: true })
+  private startup: StartupPresentation = READY_STARTUP_PRESENTATION;
+
+  get transcriptPresentationReady(): boolean {
+    return !this.isUpdatePending && !this.store.transcript.refreshing;
+  }
 
   @property({ attribute: false }) store: CustodianSessionStore = custodianSessionStore;
   @property({ attribute: false }) onboarding = false;
@@ -87,6 +101,11 @@ class CustodianSurface extends OpenClawLightDomElement {
       if (lastMessage instanceof HTMLElement) {
         lastMessage.scrollIntoView?.({ block: "nearest" });
       }
+    }
+    if (this.startup.stage !== "ready") {
+      this.dispatchEvent(
+        new CustomEvent(CHAT_PANE_LIFECYCLE_CHANGED_EVENT, { bubbles: true, composed: true }),
+      );
     }
   }
 
@@ -152,6 +171,7 @@ class CustodianSurface extends OpenClawLightDomElement {
             handleMarkdownTableInteraction(event);
           }}
         >
+          ${this.startup.stage !== "ready" && store.messages.length === 0 ? renderChatTranscriptSkeleton() : nothing}
           ${alertCard}
           ${
             this.channelOnboardingError

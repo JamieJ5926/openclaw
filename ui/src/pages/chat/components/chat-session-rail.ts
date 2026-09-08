@@ -10,6 +10,7 @@ import { renderPanelEmptyState } from "../../../components/panel-empty-state.ts"
 import { renderPanelLoadingSkeleton } from "../../../components/panel-loading-skeleton.ts";
 import "../../../components/tooltip.ts";
 import "../../../components/web-awesome.ts";
+import "../../../styles/chat/session-rail.css";
 import { t } from "../../../i18n/index.ts";
 import { formatDurationCompact, formatTimeAgo, formatTimeMs } from "../../../lib/format.ts";
 import { detectTextDirection } from "../../../lib/text-direction.ts";

@@ -2,6 +2,7 @@ import type { Page } from "playwright";
 import { expect, it } from "vitest";
 import type { ApplicationRuntime } from "../app/bootstrap.ts";
 import {
+  defaultControlUiFeatureMethods,
   installMockGateway,
   startControlUiE2eServer,
   waitForControlUiRoute,
@@ -23,6 +24,7 @@ type PaintTrace = {
   maskedAt: Record<string, number>;
   revealedAt: Record<string, number>;
   cls: number;
+  containerDrift: Record<string, number>;
   shifts: Array<{
     at: number;
     value: number;
@@ -52,6 +54,7 @@ async function traceStartupPaints(page: Page) {
       maskedAt: {},
       revealedAt: {},
       cls: 0,
+      containerDrift: {},
       shifts: [],
     };
     (window as TraceWindow).startupPaintTrace = trace;
@@ -134,7 +137,34 @@ async function traceStartupPaints(page: Page) {
       }
       return true;
     };
+    const initialBounds = new Map<string, DOMRectReadOnly>();
     const sample = () => {
+      if (
+        initialBounds.size > 0 ||
+        document.querySelector('.shell[data-startup-placeholder="true"]')
+      ) {
+        for (const selector of [
+          ".shell-nav .sidebar",
+          ".chat-pane__header",
+          ".chat-thread",
+          ".agent-chat__composer-shell",
+        ]) {
+          const rect = [...document.querySelectorAll(selector)]
+            .map((element) => element.getBoundingClientRect())
+            .find((bounds) => bounds.width > 0 && bounds.height > 0);
+          if (!rect) {
+            continue;
+          }
+          const initial = initialBounds.get(selector) ?? rect;
+          initialBounds.set(selector, initial);
+          trace.containerDrift[selector] = Math.max(
+            trace.containerDrift[selector] ?? 0,
+            ...(["x", "y", "width", "height"] as const).map((key) =>
+              Math.abs(rect[key] - initial[key]),
+            ),
+          );
+        }
+      }
       const transcript = [...document.querySelectorAll(".chat-thread p")].find(
         (p) => p.textContent === text,
       );
@@ -145,6 +175,11 @@ async function traceStartupPaints(page: Page) {
         [
           "transcript",
           transcript?.closest(".chat-bubble") ?? document.querySelector(".chat-bubble"),
+        ],
+        ["assistantHeader", document.querySelector(".assistant-panel-title")],
+        [
+          "assistantTranscript",
+          document.querySelector(".assistant-panel .custodian__messages .chat-bubble"),
         ],
       ] as const;
       const visible: string[] = [];
@@ -253,14 +288,40 @@ suite.define(() => {
       },
     );
   });
-  it.each([false, true])(
-    "reveals startup in at most two stages (staggered: %s)",
-    async (staggered) => {
+  it.each([
+    { staggered: false, restoredDock: false },
+    { staggered: true, restoredDock: false },
+    { staggered: true, restoredDock: true },
+  ])(
+    "reveals startup in at most two stages (staggered: $staggered, restored dock: $restoredDock)",
+    async ({ staggered, restoredDock }) => {
       await suite.withPage(
         { viewport: { width: 1440, height: 900 }, colorScheme: "dark" },
         async ({ page }) => {
           const gateway = await installMockGateway(page, {
             communityInvite: false,
+            ...(restoredDock
+              ? {
+                  featureMethods: [
+                    ...defaultControlUiFeatureMethods,
+                    "openclaw.chat",
+                    "openclaw.chat.history",
+                  ],
+                  methodResponses: {
+                    "openclaw.chat.history": {
+                      turns: [
+                        { role: "user", text: "Review the startup state.", at: 1 },
+                        {
+                          role: "assistant",
+                          text: "The restored assistant transcript is ready.",
+                          at: 2,
+                        },
+                        { role: "user", text: "Keep the workspace usable.", at: 3 },
+                      ],
+                    },
+                  },
+                }
+              : {}),
             historyMessages: [
               ...(staggered
                 ? Array.from({ length: 60 }, (_, index) => ({
@@ -283,9 +344,24 @@ suite.define(() => {
               ),
             ],
             heldMethods: staggered
-              ? ["connect", "sessions.list", "agent.identity.get", "chat.startup", "models.list"]
+              ? [
+                  "connect",
+                  "sessions.list",
+                  "agent.identity.get",
+                  "chat.startup",
+                  "models.list",
+                  ...(restoredDock ? ["openclaw.chat.history", "openclaw.chat"] : []),
+                ]
               : [],
           });
+          if (restoredDock) {
+            await page.addInitScript(() => {
+              localStorage.setItem(
+                "openclaw.custodian.panel.v1",
+                JSON.stringify({ open: true, dock: "right", width: 440, height: 420 }),
+              );
+            });
+          }
           await traceStartupPaints(page);
           await page.goto(`${suite.server.baseUrl}chat/main`);
           let pendingBounds: Awaited<ReturnType<typeof startupRegionBounds>> | undefined;
@@ -293,6 +369,7 @@ suite.define(() => {
             await gateway.waitForRequest("connect");
             const pendingComposer = page.locator(".agent-chat__composer-combobox textarea").first();
             await pendingComposer.waitFor();
+            await page.locator('.shell[data-startup-placeholder="true"]').waitFor();
             expect(await pendingComposer.isDisabled()).toBe(true);
             const loadingStatus = page.locator(
               'openclaw-session-progress-hovercard-provider > [role="status"]',
@@ -325,7 +402,9 @@ suite.define(() => {
               ),
             ).toBe(false);
             await gateway.resolveDeferred("models.list");
-            await page.locator(".agent-chat__composer-combobox").waitFor();
+            await page
+              .locator(".content > openclaw-router-outlet .agent-chat__composer-combobox")
+              .waitFor();
             await expect
               .poll(() =>
                 page.evaluate(() =>
@@ -337,8 +416,16 @@ suite.define(() => {
               .poll(() => page.evaluate(() => (window as TraceWindow).startupPaintTrace.skeleton))
               .toBe(true);
             await gateway.resolveDeferred("chat.startup");
+            if (restoredDock) {
+              await gateway.waitForRequest("openclaw.chat.history");
+              expect(await page.getByText(historyText, { exact: true }).isVisible()).toBe(false);
+              await gateway.resolveDeferred("openclaw.chat.history");
+            }
           }
           await waitForControlUiRoute(page, { routeId: "chat" });
+          if (restoredDock) {
+            await page.locator(".assistant-panel").waitFor();
+          }
           await page.getByText(historyText, { exact: true }).waitFor();
           await expect
             .poll(() =>
@@ -357,8 +444,23 @@ suite.define(() => {
           expect(trace.seen).toEqual(
             expect.arrayContaining(["identity", "sessions", "header", "transcript"]),
           );
+          if (staggered) {
+            expect(Object.keys(trace.maskedAt)).toEqual(
+              expect.arrayContaining(["identity", "sessions", "header", "transcript"]),
+            );
+          }
+          if (restoredDock) {
+            await gateway.waitForRequest("openclaw.chat");
+            expect(trace.seen).toContain("assistantTranscript");
+          }
           expect(trace.reveals).toBeLessThanOrEqual(2);
           expect(trace.lost).toEqual([]);
+          if (staggered || trace.skeleton) {
+            expect(Object.keys(trace.containerDrift)).toHaveLength(4);
+          }
+          for (const [region, drift] of Object.entries(trace.containerDrift)) {
+            expect(drift, `${region} must stay fixed from its first skeleton`).toBe(0);
+          }
           expect(
             trace.cls,
             `startup must not shift the reserved layout: ${JSON.stringify(trace.shifts)}`,
@@ -391,18 +493,19 @@ suite.define(() => {
             await expect
               .poll(() =>
                 page
-                  .locator(".chat-thread")
+                  .locator(".content > openclaw-router-outlet .chat-thread")
                   .evaluate(
                     (thread) => thread.scrollHeight - thread.clientHeight - thread.scrollTop,
                   ),
               )
               .toBeLessThanOrEqual(2);
           }
-          await page.locator(".agent-chat__composer-combobox textarea").fill("Retain this draft");
+          const textarea = page.locator(
+            ".content > openclaw-router-outlet .agent-chat__composer-combobox textarea",
+          );
+          await textarea.fill("Retain this draft");
           await gateway.closeLatest();
-          await expect
-            .poll(() => page.locator(".agent-chat__composer-combobox textarea").inputValue())
-            .toBe("Retain this draft");
+          await expect.poll(() => textarea.inputValue()).toBe("Retain this draft");
           expect(await page.locator(".connect-splash").count()).toBe(0);
         },
       );
