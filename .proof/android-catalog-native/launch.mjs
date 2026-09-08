@@ -18,7 +18,7 @@ async function phase(name,seconds,operation,network){
   const id='android-catalog-hosted-'+process.env.GITHUB_RUN_ID+'-'+name;
   const plan={id,deadline:Date.now()+(seconds+30)*1000,limitBytes:WRITE_LIMIT,prechargedBytes:carry,allOldHoldsRemain:true};
   writeControl(directory+'/plan.json',plan);
-  const env={PATH:process.env.JAVA_HOME_17_X64+'/bin:'+process.env.PATH,JAVA_HOME:process.env.JAVA_HOME_17_X64,HOME:trial+'/home',TMPDIR:trial+'/tmp',TRIAL:trial,EVIDENCE:evidence,INPUT:input,SDK_ROOT:process.env.ANDROID_HOME};
+  const env={NODE_EXECUTABLE:process.execPath,PATH:process.env.JAVA_HOME_17_X64+'/bin:'+process.env.PATH,JAVA_HOME:process.env.JAVA_HOME_17_X64,HOME:trial+'/home',TMPDIR:trial+'/tmp',TRIAL:trial,EVIDENCE:evidence,INPUT:input,SDK_ROOT:process.env.ANDROID_HOME};
   const properties=['Type=exec','Restart=no','KillMode=control-group','RuntimeMaxSec='+seconds+'s','TimeoutStopSec=15s','MemoryMax=8G','MemorySwapMax=0','CPUQuota=200%','IOAccounting=yes','NoNewPrivileges=yes','WorkingDirectory='+input,'ExecStopPost='+process.execPath+' '+input+'/guard.mjs stop '+directory];
   if(!network)properties.push('PrivateNetwork=yes');
   if(name==='access'||name==='native')properties.push('SupplementaryGroups=kvm');

@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+test -x "$NODE_EXECUTABLE"
+"$NODE_EXECUTABLE" --version
 export ANDROID_HOME="$SDK_ROOT" ANDROID_SDK_ROOT="$SDK_ROOT"
 export ANDROID_AVD_HOME="$TRIAL/avd" ANDROID_USER_HOME="$TRIAL/android-user"
 export PATH="$TRIAL/runtime/node_modules/.bin:$SDK_ROOT/platform-tools:$SDK_ROOT/emulator:$SDK_ROOT/cmdline-tools/latest/bin:/usr/bin:/bin"
@@ -38,4 +40,4 @@ done
 adb -s emulator-5554 reverse tcp:18789 tcp:18789
 adb -s emulator-5554 install "$TRIAL/apk/candidate.apk"
 adb -s emulator-5554 shell am start -n ai.openclaw.app.debug/ai.openclaw.app.MainActivity
-node "$INPUT/drive.mjs"
+"$NODE_EXECUTABLE" "$INPUT/drive.mjs"
