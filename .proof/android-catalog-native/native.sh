@@ -14,8 +14,13 @@ printf 'no\n' | avdmanager create avd --name catalog-result --package 'system-im
 cat "$ANDROID_AVD_HOME/catalog-result.avd/config.ini" > "$EVIDENCE/public/avd-config.ini"
 emulator_pid= fixture_pid=
 cleanup() {
+  local original_status=$? diagnostic_status=0
   trap - EXIT
   set +e
+  if test -n "$emulator_pid"; then
+    "$NODE_EXECUTABLE" "$INPUT/diagnose-native.mjs" after-app
+    diagnostic_status=$?
+  fi
   if test -n "$emulator_pid"; then
     timeout 10 adb -s emulator-5554 emu kill
     kill "$emulator_pid" 2>/dev/null
@@ -23,6 +28,8 @@ cleanup() {
   fi
   if test -n "$fixture_pid"; then kill "$fixture_pid" 2>/dev/null; wait "$fixture_pid"; fi
   adb kill-server
+  if test "$original_status" -ne 0; then exit "$original_status"; fi
+  exit "$diagnostic_status"
 }
 trap cleanup EXIT
 trap 'exit 143' TERM
@@ -38,6 +45,7 @@ until test "$(timeout 5 adb -s emulator-5554 shell getprop sys.boot_completed 2>
   sleep 1
 done
 adb -s emulator-5554 reverse tcp:18789 tcp:18789
+"$NODE_EXECUTABLE" "$INPUT/diagnose-native.mjs" before-app
 adb -s emulator-5554 install "$TRIAL/apk/candidate.apk"
-adb -s emulator-5554 shell am start -n ai.openclaw.app.debug/ai.openclaw.app.MainActivity
+adb -s emulator-5554 shell am start -W -n ai.openclaw.app.debug/ai.openclaw.app.MainActivity
 "$NODE_EXECUTABLE" "$INPUT/drive.mjs"
