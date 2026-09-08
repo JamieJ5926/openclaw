@@ -568,8 +568,14 @@ internal class TalkRealtimeClient(
       try {
         check(supportsCamera && current != null) { "Camera is off; enable it in Talk first" }
         val message = current.captureMessage(peer.maxMessageBytes)
-        check(!closed && isCurrent() && camera === current && cameraOperation == operation) { "Camera changed before the image could be sent" }
-        peer.send(message)
+        peer.send(message) { send ->
+          withCurrentCall {
+            // Camera mutations and this final SDK call are Main-confined. Check
+            // the sampled preview after admission callbacks, with no intervening await.
+            check(camera === current && cameraOperation == operation) { "Camera changed before the image could be sent" }
+            send()
+          }
+        }
         buildJsonObject { put("text", "One current camera image was attached.") }
       } catch (error: kotlinx.coroutines.CancellationException) {
         throw error
@@ -606,7 +612,7 @@ internal class TalkRealtimeClient(
             encode(buildJsonObject { put("error", "Tool result exceeds the Realtime message budget") })
           }
         }
-      peer.send(output)
+      peer.send(output, ::withCurrentCall)
       if (toolBatch.complete(callId) == true) sendResponse()
     } catch (error: kotlinx.coroutines.CancellationException) {
       throw error
@@ -624,6 +630,7 @@ internal class TalkRealtimeClient(
             put("type", "response.create")
             put("event_id", eventId)
           }.toString(),
+          ::withCurrentCall,
         )
       } catch (error: kotlinx.coroutines.CancellationException) {
         throw error
@@ -637,13 +644,16 @@ internal class TalkRealtimeClient(
   private suspend fun cancelResponse(id: String) {
     if (closed || !remember(cancelledResponses, id)) return
     try {
+      // These controls cancel only this peer's already-owned output. Selection
+      // retirement must not suppress cleanup; the peer still fences physical close.
       peer.send(
         buildJsonObject {
           put("type", "response.cancel")
           put("response_id", id)
         }.toString(),
+        withSend = { it() },
       )
-      peer.send("{\"type\":\"output_audio_buffer.clear\"}")
+      peer.send("{\"type\":\"output_audio_buffer.clear\"}", withSend = { it() })
     } catch (error: kotlinx.coroutines.CancellationException) {
       throw error
     } catch (_: Exception) {
@@ -672,7 +682,9 @@ internal class TalkRealtimeClient(
       }
       val id = responseState.cancel()
       if (id != null) cancelResponse(id)
-      if (id == null && responseState.responseId == null && !responseState.createInFlight && !gatewayTranscripts) peer.send("{\"type\":\"output_audio_buffer.clear\"}")
+      if (id == null && responseState.responseId == null && !responseState.createInFlight && !gatewayTranscripts) {
+        peer.send("{\"type\":\"output_audio_buffer.clear\"}", withSend = { it() })
+      }
     }
 
   suspend fun close() =
