@@ -43,6 +43,7 @@ import { mirrorDeliveredSourceReplyToTranscript } from "../../infra/outbound/sou
 import { maybeResolveIdLikeTarget } from "../../infra/outbound/target-resolver.js";
 import { resolveOutboundTarget } from "../../infra/outbound/targets.js";
 import { getAgentScopedMediaLocalRoots } from "../../media/local-roots.js";
+import { resolveAgentScopedOutboundMediaAccess } from "../../media/read-capability.js";
 import { extractToolPayload } from "../../plugin-sdk/tool-payload.js";
 import {
   getPluginRuntimeGatewayRequestScope,
@@ -541,6 +542,26 @@ export const sendHandlers: GatewayRequestHandlers = {
           normalizeOptionalString(request.agentId) ??
           (sessionKey ? resolveSessionAgentId({ sessionKey, config: cfg }) : undefined);
         const accountId = normalizeOptionalString(request.accountId) ?? undefined;
+        const resolvedMediaAccess =
+          request.action === "send"
+            ? resolveAgentScopedOutboundMediaAccess({
+                cfg,
+                agentId,
+                sessionKey,
+                messageProvider: sessionKey ? undefined : channel,
+                accountId,
+              })
+            : undefined;
+        // Gateway identities omit trusted sender aliases; expose roots/workspace
+        // only so a host reader cannot bypass alias-based group read policy.
+        const mediaAccess = resolvedMediaAccess
+          ? {
+              localRoots: resolvedMediaAccess.localRoots,
+              ...(resolvedMediaAccess.workspaceDir
+                ? { workspaceDir: resolvedMediaAccess.workspaceDir }
+                : {}),
+            }
+          : undefined;
         if (request.action === "send") {
           await hydrateAttachmentParamsForAction({
             cfg,
@@ -548,9 +569,11 @@ export const sendHandlers: GatewayRequestHandlers = {
             accountId,
             args: request.params,
             action: "send",
-            mediaPolicy: resolveAttachmentMediaPolicy({
-              mediaLocalRoots: getAgentScopedMediaLocalRoots(cfg, agentId),
-            }),
+            mediaPolicy: resolveAttachmentMediaPolicy(
+              mediaAccess
+                ? { mediaAccess, mediaLocalRoots: mediaAccess.localRoots }
+                : { mediaLocalRoots: getAgentScopedMediaLocalRoots(cfg, agentId) },
+            ),
           });
         }
         const gatewayClientScopes = client?.connect?.scopes ?? [];
@@ -592,7 +615,9 @@ export const sendHandlers: GatewayRequestHandlers = {
               sessionId: normalizeOptionalString(request.sessionId) ?? undefined,
               inboundEventKind: request.inboundTurnKind,
               agentId,
-              mediaLocalRoots: getAgentScopedMediaLocalRoots(cfg, agentId),
+              ...(mediaAccess
+                ? { mediaAccess, mediaLocalRoots: mediaAccess.localRoots }
+                : { mediaLocalRoots: getAgentScopedMediaLocalRoots(cfg, agentId) }),
               toolContext: request.toolContext,
               dryRun: false,
               gatewayClientScopes: dispatchGatewayClientScopes,

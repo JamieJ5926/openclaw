@@ -201,6 +201,7 @@ export const telegramMessageActions: ChannelMessageActionAdapter = {
     params,
     cfg,
     accountId,
+    mediaAccess,
     mediaLocalRoots,
     mediaReadFile,
     sessionKey,
@@ -224,7 +225,14 @@ export const telegramMessageActions: ChannelMessageActionAdapter = {
           : {}),
       },
       cfg,
-      { mediaLocalRoots, mediaReadFile, sessionKey, inboundEventKind, gatewayClientScopes },
+      {
+        ...(mediaAccess !== undefined ? { mediaAccess } : {}),
+        mediaLocalRoots,
+        mediaReadFile,
+        sessionKey,
+        inboundEventKind,
+        gatewayClientScopes,
+      },
     );
   },
 };
