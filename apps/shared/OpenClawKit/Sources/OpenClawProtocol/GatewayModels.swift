@@ -21688,6 +21688,7 @@ public struct PluginCatalogEntry: Codable, Sendable {
     public let hasicon: Bool?
     public let install: PluginCatalogInstallAction?
     public let error: String?
+    public let categories: [String]?
     public let category: String?
     public let removable: Bool?
 
@@ -21708,6 +21709,7 @@ public struct PluginCatalogEntry: Codable, Sendable {
         hasicon: Bool? = nil,
         install: PluginCatalogInstallAction? = nil,
         error: String? = nil,
+        categories: [String]? = nil,
         category: String? = nil,
         removable: Bool? = nil)
     {
@@ -21727,6 +21729,7 @@ public struct PluginCatalogEntry: Codable, Sendable {
         self.hasicon = hasicon
         self.install = install
         self.error = error
+        self.categories = categories
         self.category = category
         self.removable = removable
     }
@@ -21748,6 +21751,7 @@ public struct PluginCatalogEntry: Codable, Sendable {
         case hasicon = "hasIcon"
         case install
         case error
+        case categories
         case category
         case removable
     }
