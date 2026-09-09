@@ -3222,6 +3222,7 @@ describe("createTelegramBot", () => {
       message: {
         chat: { id: 42, type: "group", title: "Ops" },
         text: "@openclaw_bot thoughts?",
+        entities: [{ type: "mention", offset: 0, length: "@openclaw_bot".length }],
         date: 1736380920,
         message_id: 202,
         from: { id: 203, is_bot: false, first_name: "Avery" },
