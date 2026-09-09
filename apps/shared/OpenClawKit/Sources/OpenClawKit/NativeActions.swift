@@ -11,7 +11,7 @@ public struct OpenClawNativeOwnerRef: Codable, Hashable, Sendable {
         self.profileID = profileID
     }
 
-    // Gateway namespaces preserve UTF-8 identity, including Unicode spelling.
+    /// Gateway namespaces preserve UTF-8 identity, including Unicode spelling.
     public static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.gatewayID.utf8.elementsEqual(rhs.gatewayID.utf8) &&
             lhs.profileID.utf8.elementsEqual(rhs.profileID.utf8)

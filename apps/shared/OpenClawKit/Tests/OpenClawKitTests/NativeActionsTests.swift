@@ -4,7 +4,7 @@ import Testing
 
 struct NativeActionsTests {
     @Test(arguments: 0..<4)
-    func selectorsPreserveExactUTF8(field: Int) throws {
+    func `selectors preserve exact UTF 8`(field: Int) throws {
         func reference(_ suffix: String) -> OpenClawNativeRunRef {
             OpenClawNativeRunRef(
                 session: OpenClawNativeSessionRef(
@@ -28,7 +28,7 @@ struct NativeActionsTests {
     }
 
     @Test
-    func decodingDoesNotFillInOrNormalizeOwnerFields() throws {
+    func `decoding does not fill in or normalize owner fields`() throws {
         let data = Data(
             #"{"gatewayID":" Gateway-A ","profileID":"Profile-A"}"#.utf8)
         let owner = try JSONDecoder().decode(OpenClawNativeOwnerRef.self, from: data)
