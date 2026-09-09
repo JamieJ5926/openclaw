@@ -113,7 +113,7 @@ async function expectHeaderCopy(page: Page, active: "plugins" | "skills") {
     active === "plugins"
       ? {
           title: "Plugins",
-          subtitle: "Browse installed plugins and open their settings.",
+          subtitle: "Extend your Claw with tools",
           docs: "https://docs.openclaw.ai/plugins/manage-plugins",
         }
       : {
