@@ -34,9 +34,10 @@ describe("plugin-boundary-report", () => {
 
     expect(summaryResult.exitCode).toBe(0);
     expect(summaryResult.stderr).toBe("");
-    expect(summary.compat?.removalPendingCount).toBe(8);
+    expect(summary.compat?.removalPendingCount).toBe(9);
     expect(summary.compat?.removalPendingDueCount).toEqual(expect.any(Number));
     expect(summary.compat?.removalPending?.map((record) => record.code)).toEqual([
+      "sdk-untrusted-context-identifier-aliases",
       "plugin-sdk-media-understanding-public-demotion",
       "plugin-sdk-memory-host-core-public-demotion",
       "plugin-sdk-channel-lifecycle-subpath",
@@ -46,6 +47,19 @@ describe("plugin-boundary-report", () => {
       "plugin-sdk-infra-runtime-subpath",
       "plugin-sdk-plugin-config-runtime-public-demotion",
     ]);
+    const contextAliases = summary.compat?.removalPending?.find(
+      (record) => record.code === "sdk-untrusted-context-identifier-aliases",
+    );
+    expect(contextAliases).toMatchObject({
+      removeAfter: "2026-09-08",
+      dueForReview: true,
+      blocker: expect.stringContaining("published-plugin artifact sweep verifies reader migration"),
+    });
+    expect(contextAliases?.blocker).toEqual(
+      expect.stringContaining(
+        "SDK/security owners explicitly approve removal in a breaking SDK major release",
+      ),
+    );
     for (const record of summary.compat?.removalPending ?? []) {
       expect(record.removeAfter).toMatch(/^\d{4}-\d{2}-\d{2}$/u);
       expect(record.blocker).toEqual(expect.stringMatching(/retain|replacement/iu));
@@ -76,7 +90,7 @@ describe("plugin-boundary-report", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
-    expect(result.stdout).toContain("removalPending=8");
+    expect(result.stdout).toContain("removalPending=9");
     expect(result.stdout).not.toContain("agent-harness-sdk-alias");
     expect(result.stdout).toMatch(/blocker=.*retain the public/iu);
     expect(result.stdout).toMatch(/readerRefs=\d+ readers=/u);

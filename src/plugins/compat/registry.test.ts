@@ -87,6 +87,21 @@ describe("plugin compatibility registry", () => {
     );
 
     expect(staleRemovalWindows).toEqual([]);
+    const contextAliases = records.get("sdk-untrusted-context-identifier-aliases");
+    expect(contextAliases).toMatchObject({
+      status: "removal-pending",
+      introduced: "2026-07-22",
+      deprecated: "2026-07-22",
+      warningStarts: "2026-07-22",
+      removeAfter: "2026-09-08",
+      docsPath: "/plugins/compatibility",
+    });
+    expect(contextAliases?.replacement).toContain(
+      "published-plugin artifact sweep verifies reader migration",
+    );
+    expect(contextAliases?.replacement).toContain(
+      "SDK/security owners explicitly approve removal in a breaking SDK major release",
+    );
     for (const code of [
       "plugin-sdk-config-runtime-subpath",
       "plugin-sdk-channel-reply-pipeline-subpath",

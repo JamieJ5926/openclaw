@@ -282,14 +282,14 @@ export const PLUGIN_COMPAT_RECORDS = [
   },
   {
     code: "sdk-untrusted-context-identifier-aliases",
-    status: "deprecated",
+    status: "removal-pending",
     owner: "sdk",
     introduced: "2026-07-22",
     deprecated: "2026-07-22",
     warningStarts: "2026-07-22",
     removeAfter: "2026-09-08",
     replacement:
-      "`MsgContext.ChannelPromptContext`, `MsgContext.ChannelStructuredContext`, `ChannelStructuredContextEntry`, `SupplementalContextFacts.channelStructuredContext`, and `buildChannelMetadata`",
+      "`MsgContext.ChannelPromptContext`, `MsgContext.ChannelStructuredContext`, `ChannelStructuredContextEntry`, `SupplementalContextFacts.channelStructuredContext`, and `buildChannelMetadata`; retain the shipped aliases until a published-plugin artifact sweep verifies reader migration and SDK/security owners explicitly approve removal in a breaking SDK major release",
     docsPath: "/plugins/compatibility",
     surfaces: [
       "openclaw/plugin-sdk reply-runtime MsgContext.UntrustedContext and UntrustedStructuredContext",
@@ -300,7 +300,7 @@ export const PLUGIN_COMPAT_RECORDS = [
     diagnostics: ["TypeScript deprecated SDK alias annotations"],
     tests: ["src/auto-reply/reply/inbound-context.test.ts"],
     releaseNote:
-      "Untrusted-named prompt-context SDK identifiers remain wired as deprecated aliases of the channel-named fields while plugins migrate.",
+      "Channel prompt-context SDK alias removal is pending published-plugin reader verification and breaking-release approval; the aliases and runtime normalization remain unchanged.",
   },
   {
     code: "bundled-channel-sdk-compat-facades",
