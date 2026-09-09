@@ -573,7 +573,6 @@ enum class GatewayMethod(
   ModelsList("models.list"),
   ModelsAuthStatus("models.authStatus"),
   ModelsAuthLogout("models.authLogout"),
-  ModelsAuthSetApiKey("models.authSetApiKey"),
   ToolsCatalog("tools.catalog"),
   ToolsEffective("tools.effective"),
   ToolsInvoke("tools.invoke"),
@@ -928,6 +927,7 @@ enum class GatewayMethod(
   SkillsWorkshopRead("skills.workshop.read"),
   SessionPublicShareSet("session.publicShare.set"),
   ClawsMonitors("claws.monitors"),
+  ModelsAuthSetApiKey("models.authSetApiKey"),
 }
 
 enum class GatewayEvent(

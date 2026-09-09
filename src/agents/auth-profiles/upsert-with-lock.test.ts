@@ -53,6 +53,43 @@ describe("upsertAuthProfileWithLockOrThrow", () => {
     expect(store.profiles["sample:manual-api-key"]).toEqual(original);
   });
 
+  it("preserves current API-key policy and metadata under the write lock", async () => {
+    const store: AuthProfileStore = {
+      version: 1,
+      profiles: {
+        "sample:work": {
+          type: "api_key",
+          provider: "sample",
+          key: "old-key",
+          copyToAgents: false,
+          displayName: "Private work key",
+          email: "fixture@example.test",
+          metadata: { accountId: "kept" },
+        },
+      },
+    };
+    hoisted.updateAuthProfileStoreWithLock.mockImplementation(
+      async ({ updater }: { updater: (store: AuthProfileStore) => boolean }) => {
+        updater(store);
+        return store;
+      },
+    );
+    await upsertAuthProfileWithLockOrThrow({
+      profileId: "sample:work",
+      credential: { type: "api_key", provider: "sample", key: "replacement-key" },
+      preserveApiKeyMetadata: true,
+    });
+    expect(store.profiles["sample:work"]).toEqual({
+      type: "api_key",
+      provider: "sample",
+      key: "replacement-key",
+      copyToAgents: false,
+      displayName: "Private work key",
+      email: "fixture@example.test",
+      metadata: { accountId: "kept" },
+    });
+  });
+
   it("fails with the canonical retry guidance when the locked update fails", async () => {
     hoisted.updateAuthProfileStoreWithLock.mockResolvedValue(null);
 

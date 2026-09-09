@@ -7,9 +7,15 @@ import {
   resolveAuthProfileOrder,
   resolvePersistedAuthProfileOwnerAgentDir,
 } from "../../agents/auth-profiles.js";
+import {
+  listCandidateAuthProfileStores,
+  loadCandidateAuthProfileStore,
+} from "../../agents/auth-profiles/candidate-stores.js";
+import { resolveSharedAuthStorePath } from "../../agents/auth-profiles/path-resolve.js";
 import { upsertAuthProfileWithLockOrThrow } from "../../agents/auth-profiles/profiles.js";
 import type { AuthProfileCredential } from "../../agents/auth-profiles/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { resolvePathViaExistingAncestorSync } from "../../infra/boundary-path.js";
 import { registerSecretValueForRedaction } from "../../logging/secret-redaction-registry.js";
 import { applyAuthProfileConfig } from "../../plugins/provider-auth-helpers.js";
 import { normalizeSecretInput } from "../../utils/normalize-secret-input.js";
@@ -83,14 +89,37 @@ export async function saveModelProviderApiKey(params: {
     : replacementId
       ? resolvePersistedAuthProfileOwnerAgentDir({ agentDir: params.agentDir, profileId })
       : params.agentDir;
+  const localCandidates = connectionId
+    ? (await listCandidateAuthProfileStores({ cfg: config })).filter(
+        (candidate) =>
+          candidate.databasePath !==
+          resolvePathViaExistingAncestorSync(resolveSharedAuthStorePath()),
+      )
+    : [];
+  const validateSharedBinding = () => {
+    if (
+      localCandidates.some(
+        (candidate) => loadCandidateAuthProfileStore(candidate)?.profiles[profileId],
+      )
+    ) {
+      throw new Error(
+        "An agent already overrides this shared key. Remove that agent's override before replacing the shared key.",
+      );
+    }
+  };
+  const validateReplacement = (existing: AuthProfileCredential | undefined) => {
+    validateCurrentCredential(existing);
+    validateSharedBinding();
+  };
   if (store) {
-    validateCurrentCredential(store.profiles[profileId]);
+    validateReplacement(store.profiles[profileId]);
   }
   await upsertAuthProfileWithLockOrThrow({
     profileId,
     credential: { type: "api_key", provider, key },
     agentDir,
-    ...(params.bindProviderConfig ? { validateCurrentCredential } : {}),
+    preserveApiKeyMetadata: true,
+    ...(params.bindProviderConfig ? { validateCurrentCredential: validateReplacement } : {}),
   });
   await updateConfig((current) => {
     const id = params.bindProviderConfig ? configuredKey(current) : undefined;
@@ -99,6 +128,7 @@ export async function saveModelProviderApiKey(params: {
         "The provider connection changed during the key update. Reopen the connection and save the key again.",
       );
     }
+    validateSharedBinding();
     const next = applyAuthProfileConfig(current, { profileId, provider, mode: "api_key" });
     if (!id || !next.models?.providers?.[id]) {
       return next;

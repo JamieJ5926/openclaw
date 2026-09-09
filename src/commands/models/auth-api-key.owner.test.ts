@@ -17,9 +17,19 @@ import type { ModelProviderConfig } from "../../config/types.models.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { closeOpenClawAgentDatabasesForTest } from "../../state/openclaw-agent-db.js";
 import { closeOpenClawStateDatabaseForTest } from "../../state/openclaw-state-db.js";
+import { createQueuedWizardPrompter } from "../../test-utils/plugin-setup-wizard.js";
+import { agentsAddCommand } from "../agents.commands.add.js";
+import { createTestRuntime } from "../test-runtime-config-helpers.js";
 import { saveModelProviderApiKey } from "./auth-api-key.js";
 import { removeModelAuthCredentials } from "./auth-logout.js";
 import { loadValidConfigOrThrow } from "./shared.js";
+
+const wizardMocks = vi.hoisted(() => ({ createClackPrompter: vi.fn() }));
+vi.mock("../../wizard/clack-prompter.js", () => wizardMocks);
+vi.mock("../../cli/terminal-interactivity.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../cli/terminal-interactivity.js")>()),
+  isTerminalInteractive: () => true,
+}));
 
 let stateDir: string;
 const agentDir = (id: string) => path.join(stateDir, "agents", id, "agent");
@@ -59,6 +69,84 @@ afterEach(() => {
 });
 
 describe("API-key storage and selection owners", () => {
+  it.each(["writer", "reader"])(
+    "rejects a shared-key replacement shadowed by %s without changing credentials or config",
+    async (owner) => {
+      const profileId = "sample:manual-api-key";
+      await upsertAuthProfileWithLockOrThrow({
+        agentDir: agentDir(owner),
+        profileId,
+        credential: { type: "api_key", provider: "sample", key: "kept-local-key" },
+      });
+      writeConfig({
+        agents: { ownership: "explicit", entries: { writer: {}, reader: {} } },
+        models: { providers: { sample: { ...providerConnection, apiKey: "kept-global-key" } } },
+      });
+      const before = fs.readFileSync(path.join(stateDir, "openclaw.json"), "utf8");
+      await expect(
+        saveModelProviderApiKey({
+          provider: "sample",
+          apiKey: "rejected-new-key",
+          agentDir: agentDir("writer"),
+          bindProviderConfig: true,
+        }),
+      ).rejects.toThrow("An agent already overrides this shared key");
+      expect(fs.readFileSync(path.join(stateDir, "openclaw.json"), "utf8")).toBe(before);
+      expect(loadPersistedAuthProfileStore(agentDir(owner))?.profiles[profileId]).toMatchObject({
+        key: "kept-local-key",
+      });
+      expect(loadPersistedAuthProfileStore()?.profiles[profileId]).toBeUndefined();
+    },
+  );
+
+  it("keeps a replaced private key out of the destination while guided agent creation copies a portable sibling", async () => {
+    const source = agentDir("source");
+    await upsertAuthProfileWithLockOrThrow({
+      agentDir: source,
+      profileId: "sample:private",
+      credential: { type: "api_key", provider: "sample", key: "old-private", copyToAgents: false },
+    });
+    await upsertAuthProfileWithLockOrThrow({
+      agentDir: source,
+      profileId: "sample:portable",
+      credential: { type: "api_key", provider: "sample", key: "copied-sibling" },
+    });
+    await setAuthProfileOrder({
+      agentDir: source,
+      provider: "sample",
+      order: ["sample:private", "sample:portable"],
+    });
+    writeConfig({
+      agents: {
+        ownership: "explicit",
+        defaults: { skipBootstrap: true },
+        entries: { source: { agentDir: source } },
+      },
+      plugins: { allow: [] },
+    });
+    await saveModelProviderApiKey({
+      provider: "sample",
+      apiKey: "replacement-private",
+      agentDir: source,
+      bindProviderConfig: true,
+    });
+    const wizard = createQueuedWizardPrompter({
+      textValues: ["destination", path.join(stateDir, "destination-workspace")],
+      selectValues: ["source"],
+      confirmValues: [true, false],
+    });
+    wizardMocks.createClackPrompter.mockReturnValue(wizard.prompter);
+    await agentsAddCommand({}, createTestRuntime());
+    expect(wizard.outro).toHaveBeenCalledWith('Agent "destination" ready.');
+    const destination = loadPersistedAuthProfileStore(agentDir("destination"));
+    expect(destination?.profiles["sample:private"]).toBeUndefined();
+    expect(destination?.profiles["sample:portable"]).toMatchObject({ key: "copied-sibling" });
+    expect(loadPersistedAuthProfileStore(source)?.profiles["sample:private"]).toMatchObject({
+      key: "replacement-private",
+      copyToAgents: false,
+    });
+  });
+
   it("keeps a global provider binding resolvable by another agent after a key edit", async () => {
     writeConfig({
       models: { providers: { sample: { ...providerConnection, apiKey: "old-inline" } } },

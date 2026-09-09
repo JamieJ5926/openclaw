@@ -404,8 +404,8 @@ describeControlUiE2e("Control UI Models mocked Gateway E2E", () => {
       }
 
       const openrouterCard = page.locator(".model-providers__row", { hasText: "OpenRouter" });
-      await openrouterCard.waitFor();
-      await expect.poll(async () => openrouterCard.textContent()).toContain("API key");
+      const replaceKey = openrouterCard.getByRole("button", { name: "Replace key" });
+      await expect.poll(() => replaceKey.isVisible()).toBe(true);
       await expect.poll(async () => openrouterCard.textContent()).toContain("$12.34");
 
       // openai qualifies via its available catalog model despite having no

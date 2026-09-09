@@ -23,6 +23,10 @@ vi.mock("../../agents/auth-profiles.js", async () => ({
 vi.mock("../../agents/auth-profiles/profiles.js", () => ({
   upsertAuthProfileWithLockOrThrow: mocks.upsertAuthProfileWithLockOrThrow,
 }));
+vi.mock("../../agents/auth-profiles/candidate-stores.js", () => ({
+  listCandidateAuthProfileStores: async () => [],
+  loadCandidateAuthProfileStore: () => null,
+}));
 vi.mock("./shared.js", () => ({
   loadValidConfigOrThrow: mocks.loadValidConfigOrThrow,
   updateConfig: mocks.updateConfig,
