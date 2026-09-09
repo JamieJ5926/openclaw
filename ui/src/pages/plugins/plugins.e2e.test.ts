@@ -441,7 +441,9 @@ describeControlUiE2e("Control UI Plugins mocked Gateway E2E", () => {
       const detailTabs = page.locator('wa-tab-group[aria-label="Plugin details"]');
       await detailTabs.waitFor();
       expect(
-        (await detailTabs.locator("wa-tab").allTextContents()).map((text) => text.trim()).sort(),
+        (await detailTabs.locator("wa-tab").allTextContents())
+          .map((text) => text.trim())
+          .toSorted(),
       ).toEqual(["Advanced", "Compatibility", "Configuration", "README", "Skills", "Versions"]);
       expect(await page.getByText("52.2k", { exact: true }).count()).toBe(1);
       expect(await page.getByText("Capabilities match the stated purpose.").count()).toBe(1);
