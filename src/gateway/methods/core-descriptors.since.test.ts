@@ -192,6 +192,7 @@ describe("core gateway method release trains", () => {
       "plugins.controlUi.status",
       "update.runs.get",
       "update.runs.list",
+      "update.report",
     ]) {
       expect(methods.find((candidate) => candidate.name === method)?.since).toBe("2026.9");
     }

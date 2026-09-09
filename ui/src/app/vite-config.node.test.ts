@@ -400,6 +400,9 @@ describe("Control UI Vite config", () => {
     const resultAliasIndex = aliases.findIndex(
       (alias) => alias.find === "@openclaw/normalization-core/result",
     );
+    const stableStringifyAliasIndex = aliases.findIndex(
+      (alias) => alias.find === "@openclaw/normalization-core/stable-stringify",
+    );
     const rootAliasIndex = aliases.findIndex(
       (alias) => alias.find === "@openclaw/normalization-core",
     );
@@ -407,8 +410,13 @@ describe("Control UI Vite config", () => {
       find: "@openclaw/normalization-core/result",
       replacement: path.join(repoRoot, "packages/normalization-core/src/result.ts"),
     });
+    expect(aliases[stableStringifyAliasIndex]).toEqual({
+      find: "@openclaw/normalization-core/stable-stringify",
+      replacement: path.join(repoRoot, "packages/normalization-core/src/stable-stringify.ts"),
+    });
     expect(resultAliasIndex).toBeGreaterThanOrEqual(0);
-    expect(rootAliasIndex).toBeGreaterThan(resultAliasIndex);
+    expect(stableStringifyAliasIndex).toBeGreaterThanOrEqual(0);
+    expect(rootAliasIndex).toBeGreaterThan(stableStringifyAliasIndex);
   });
 
   it("uses Node package resolution for external packages inherited by worktrees", () => {
@@ -498,7 +506,7 @@ describe("Control UI Vite config", () => {
     expect(source.configView).not.toBe(en.configView);
     expect(flat.get("activity.title")).toBe("Activity");
     expect(flat.get("memoryImport.title")).toBe("Import assistant memory");
-    expect(flat.get("login.failure.authRequired.title")).toBe("Auth required");
+    expect(flat.get("login.failure.authRequired.title")).toBe("This Gateway expects its token");
     expect(flat.get("sessionsView.runsOnDevice")).toBe("Runs on device");
     expect(flat.get("pluginConsent.widenedTitle")).toBe("What changed");
     expect(flat.get("configPage.themeImported")).toBe("Imported {name}.");
