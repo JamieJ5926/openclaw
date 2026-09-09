@@ -64,12 +64,12 @@ describe("renderInstalledPlugins", () => {
       createPlugin({ id: "context", name: "Context" }),
       createPlugin({ id: "uncategorized", name: "Uncategorized" }),
     ] as Array<ReturnType<typeof createPlugin> & { categories?: string[] }>;
-    plugins[0].categories = ["voice"];
-    plugins[1].categories = ["web", "channels"];
-    plugins[2].categories = ["channels", "web"];
-    plugins[3].categories = ["models"];
-    plugins[4].categories = ["memory"];
-    plugins[5].categories = ["context"];
+    plugins[0]!.categories = ["voice"];
+    plugins[1]!.categories = ["web", "channels"];
+    plugins[2]!.categories = ["channels", "web"];
+    plugins[3]!.categories = ["models"];
+    plugins[4]!.categories = ["memory"];
+    plugins[5]!.categories = ["context"];
 
     const container = mount(baseProps({ result: createResult(plugins) }));
     const groups = [...container.querySelectorAll<HTMLElement>("[data-plugin-category]")];

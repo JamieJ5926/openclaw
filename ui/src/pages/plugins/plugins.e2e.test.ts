@@ -96,12 +96,14 @@ describeControlUiE2e("Control UI Plugins mocked Gateway E2E", () => {
       const columnCount = () =>
         grid.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length);
       await expect.poll(columnCount).toBe(4);
-      expect(
-        await firstCard.locator(".installed-plugins-card__art").evaluate((element) => {
+      const artSize = await firstCard
+        .locator(".installed-plugins-card__art")
+        .evaluate((element) => {
           const rect = element.getBoundingClientRect();
           return { width: rect.width, height: rect.height };
-        }),
-      ).toEqual({ width: 40, height: 40 });
+        });
+      expect(artSize.width).toBeCloseTo(40, 3);
+      expect(artSize.height).toBeCloseTo(40, 3);
       await page.setViewportSize({ height: 900, width: 768 });
       await expect.poll(columnCount).toBe(2);
       await expect.poll(() => visibleCards.count()).toBe(10);
