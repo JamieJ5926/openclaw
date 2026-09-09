@@ -18,8 +18,11 @@ import { runQueuedStoreWrite, type StoreWriterTiming } from "../../shared/store-
 import { withOpenClawAgentDatabaseReadOnly } from "../../state/openclaw-agent-db-readonly.js";
 import type { DB as OpenClawAgentKyselyDatabase } from "../../state/openclaw-agent-db.generated.js";
 import {
+  getOpenClawAgentDatabaseIfOpen,
+  openOpenClawAgentDatabase,
   resolveIncognitoOpenClawAgentSqlitePath,
   resolveOpenClawAgentSqlitePath,
+  withOpenClawAgentDatabaseAsync,
   type OpenClawAgentDatabase,
   type OpenClawAgentDatabaseOptions,
 } from "../../state/openclaw-agent-db.js";
@@ -33,7 +36,7 @@ import type {
 import { resolveSqliteTargetFromSessionStorePath } from "./session-sqlite-target.js";
 import { normalizeStoreSessionKey } from "./store-entry.js";
 import { SQLITE_SESSION_WRITER_QUEUES } from "./store-writer-state.js";
-import type { SessionEntry } from "./types.js";
+import type { InternalSessionEntry, SessionEntry } from "./types.js";
 
 type SessionSqliteDatabase = Pick<
   OpenClawAgentKyselyDatabase,
@@ -98,8 +101,39 @@ const SQLITE_SESSION_SLOW_WRITE_MS = 1_000;
 const SQLITE_SESSION_WRITE_ERROR_MAX_CHARS = 2_048;
 const SQLITE_TRANSCRIPT_READ_QUERY_CHUNK_SIZE = 400;
 
+/** Checks the freshly read identity and lifecycle before a synchronous transcript mutation. */
+export function transcriptWriteScopeIsCurrent(
+  entry:
+    | Pick<InternalSessionEntry, "sessionId" | "activeWriterRunId" | "lifecycleRevision">
+    | undefined,
+  sessionId: string,
+  scope: SessionTranscriptWriteScope,
+): boolean {
+  return (
+    entry !== undefined &&
+    entry.sessionId === sessionId &&
+    (scope.expectedLifecycleRevision === undefined ||
+      entry.lifecycleRevision === scope.expectedLifecycleRevision) &&
+    (scope.expectedWriterRunId === undefined ||
+      entry.activeWriterRunId === scope.expectedWriterRunId)
+  );
+}
+
 export function getSessionKysely(database: import("node:sqlite").DatabaseSync) {
   return getNodeSqliteKysely<SessionSqliteDatabase>(database);
+}
+
+export function withSqliteSessionDatabase<T>(
+  options: OpenClawAgentDatabaseOptions,
+  operation: (database: OpenClawAgentDatabase) => T,
+  assertCurrent?: () => void,
+): T | Promise<T> {
+  assertCurrent?.();
+  if (getOpenClawAgentDatabaseIfOpen(options)) {
+    return operation(openOpenClawAgentDatabase(options));
+  }
+  // The caller keeps its FIFO section while the existing owner joins the integrity child.
+  return withOpenClawAgentDatabaseAsync(options, operation, assertCurrent);
 }
 
 export async function runExclusiveSqliteSessionWrite<T>(
