@@ -224,10 +224,7 @@ export function renderPluginsPage(model: PluginsPageViewModel) {
                 inspection: detail?.inspection ?? null,
                 inspectionError: detail?.error ?? null,
                 configSchema: pluginConfigSchema(configAnalysis.schema, detailPluginId),
-                hostControlsSchema: pluginHostControlsSchema(
-                  configAnalysis.schema,
-                  detailPluginId,
-                ),
+                hostControlsSchema: pluginHostControlsSchema(configAnalysis.schema, detailPluginId),
                 backHref: pathForRoute(settingsParentRoute, context.basePath),
                 backLabel:
                   settingsParentRoute === "plugins" ? t("tabs.plugins") : t("nav.settings"),
