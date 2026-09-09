@@ -13,6 +13,7 @@ import {
 import { loadPersistedAuthProfileStore } from "../../agents/auth-profiles/persisted.js";
 import { upsertAuthProfileWithLockOrThrow } from "../../agents/auth-profiles/profiles.js";
 import { resolveProviderEntryApiKeyProfileReference } from "../../agents/model-auth-provider-config.js";
+import type { ModelProviderConfig } from "../../config/types.models.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { closeOpenClawAgentDatabasesForTest } from "../../state/openclaw-agent-db.js";
 import { closeOpenClawStateDatabaseForTest } from "../../state/openclaw-state-db.js";
@@ -22,11 +23,20 @@ import { loadValidConfigOrThrow } from "./shared.js";
 
 let stateDir: string;
 const agentDir = (id: string) => path.join(stateDir, "agents", id, "agent");
-const providerConnection = {
+const providerConnection: ModelProviderConfig = {
   baseUrl: "http://127.0.0.1:9/v1",
-  api: "openai-completions" as const,
-  auth: "api-key" as const,
-  models: [{ id: "model", name: "Synthetic" }],
+  api: "openai-completions",
+  auth: "api-key",
+  models: [
+    {
+      id: "model",
+      name: "Synthetic",
+      reasoning: false,
+      input: ["text"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      maxTokens: 8192,
+    },
+  ],
 };
 function writeConfig(config: OpenClawConfig) {
   fs.writeFileSync(path.join(stateDir, "openclaw.json"), JSON.stringify(config));
