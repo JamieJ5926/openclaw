@@ -1,9 +1,11 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it } from "vitest";
 import type { ChatItem } from "../../lib/chat/chat-types.ts";
+import { coalesceAgentRunFrames } from "./chat-agent-run-grouping.ts";
 import {
   assistantGroupCanOwnActiveRunStatus,
   collapseCompletedTurnWork,
+  coalesceActivityRuns,
   groupMessages,
 } from "./chat-thread-grouping.ts";
 import { buildCachedChatItems, resetChatThreadState } from "./chat-thread.ts";
@@ -232,5 +234,113 @@ describe("cached group content classification", () => {
       },
       { kind: "group", role: "assistant" },
     ]);
+  });
+});
+
+describe("explicit answer visibility across continuations", () => {
+  beforeEach(() => resetChatThreadState());
+
+  it.each([
+    { phase: "final_answer", tool: true },
+    { phase: "final_answer", tool: false },
+    { phase: "commentary", tool: true },
+    { phase: "commentary", tool: false },
+  ] as const)(
+    "preserves an answer before $phase with intervening tool=$tool",
+    ({ phase, tool }) => {
+      const signed = (text: string, messagePhase: string) => ({
+        type: "text",
+        text,
+        textSignature: JSON.stringify({ v: 1, id: text, phase: messagePhase }),
+      });
+      const messages = [
+        { role: "user", content: "Investigate", timestamp: 1, __openclaw: { runId: "run" } },
+        {
+          role: "assistant",
+          content: [signed("Substantive answer", "final_answer")],
+          timestamp: 2,
+          __openclaw: { runId: "run" },
+        },
+        ...(tool
+          ? [
+              {
+                role: "toolResult",
+                toolCallId: "call",
+                toolName: "read",
+                content: "Evidence",
+                timestamp: 3,
+                __openclaw: { runId: "run" },
+              },
+            ]
+          : []),
+        {
+          role: "assistant",
+          content: [signed("Later update", phase)],
+          timestamp: 4,
+          __openclaw: { runId: "run" },
+        },
+      ];
+      // Exercise the renderer's complete grouping pipeline, including a history reload.
+      for (const history of [messages, structuredClone(messages)]) {
+        const items = coalesceAgentRunFrames(
+          coalesceActivityRuns(
+            collapseCompletedTurnWork(cachedGroups(history), {
+              sessionKey: "agent:main:dashboard:answers",
+              runWorking: false,
+            }),
+          ),
+        );
+        const parts = items.flatMap((item) =>
+          item.kind === "agent-run-frame" ? item.parts : [item],
+        );
+        const visible = parts.flatMap((item) =>
+          item.kind === "group" ? item.messages.map(({ message }) => message) : [],
+        );
+        expect(visible).toContainEqual(messages[1]);
+        expect(visible).toContainEqual(messages.at(-1));
+        if (tool && phase === "final_answer") {
+          expect(parts.find((item) => item.kind === "work-group")).toMatchObject({
+            groups: [{ role: "tool" }],
+          });
+        }
+        if (phase === "commentary") {
+          expect(
+            parts.filter((item) => item.kind === "group" && item.role === "assistant"),
+          ).toHaveLength(2);
+        }
+      }
+    },
+  );
+
+  it("preserves mixed-phase answer text when later tools and an answer arrive", () => {
+    const answer = {
+      role: "assistant",
+      content: ["commentary", "final_answer"].map((phase) => ({
+        type: "text",
+        text: phase === "commentary" ? "Checking" : "Substantive answer",
+        textSignature: JSON.stringify({ v: 1, id: phase, phase }),
+      })),
+      timestamp: 2,
+    };
+    const items = collapseCompletedTurnWork(
+      cachedGroups([
+        { role: "user", content: "Investigate", timestamp: 1 },
+        answer,
+        {
+          role: "toolResult",
+          toolCallId: "call",
+          toolName: "read",
+          content: "Evidence",
+          timestamp: 3,
+        },
+        { role: "assistant", phase: "final_answer", content: "Later update", timestamp: 4 },
+      ]),
+      { sessionKey: "agent:main:dashboard:answers", runWorking: false },
+    );
+    expect(
+      items
+        .filter((item) => item.kind === "group")
+        .flatMap((item) => item.messages.map(({ message }) => message)),
+    ).toContainEqual(answer);
   });
 });

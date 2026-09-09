@@ -1,5 +1,9 @@
 import { asNullableRecord as asRecord } from "@openclaw/normalization-core/record-coerce";
 import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
+import {
+  extractAssistantTextForPhase,
+  resolveAssistantMessagePhase,
+} from "../../../../src/shared/chat-message-content.js";
 import type { ChatItem, MessageGroup } from "../../lib/chat/chat-types.ts";
 import { normalizeRoleForGrouping } from "../../lib/chat/message-normalizer.ts";
 import { resolveMessageVisibleContent } from "../../lib/chat/message-visibility.ts";
@@ -21,7 +25,13 @@ function assistantMessageKind(message: unknown, visibleContent: MessageGroup["vi
   if (isKeyedAssistantStreamFallbackMessage(message)) {
     return "commentary";
   }
-  return visibleContent === "none" ? "activity" : "reply";
+  // A response can contain both phases; any explicit answer remains visible.
+  if (extractAssistantTextForPhase(message, { phase: "final_answer" })) {
+    return "final_answer";
+  }
+  return (
+    resolveAssistantMessagePhase(message) ?? (visibleContent === "none" ? "activity" : "reply")
+  );
 }
 
 function stampReplyAttribution(
@@ -210,7 +220,12 @@ function isCollapsibleWorkGroup(item: TurnRenderItem): item is MessageGroup {
     return false;
   }
   const role = item.role.toLowerCase();
-  return role === "tool" || (role === "assistant" && !assistantGroupIsForwardedBoundary(item));
+  return (
+    role === "tool" ||
+    (role === "assistant" &&
+      !assistantGroupIsForwardedBoundary(item) &&
+      assistantMessageKind(item.messages[0]?.message, item.visibleContent) !== "final_answer")
+  );
 }
 
 function groupHasVisibleReplyContent(group: MessageGroup, includeText = true): boolean {
@@ -225,12 +240,15 @@ export function assistantGroupCanOwnActiveRunStatus(group: MessageGroup): boolea
   );
 }
 
-// History carries no final-vs-commentary marker (commentary exists only as
-// live stream segments), so the last assistant group with visible content
-// stands in for the final reply. Turns whose last content is commentary
-// merely collapse less; the visible reply is never folded away.
+// Unphased providers keep the last-visible-reply policy. Explicit commentary
+// cannot move the completed-work boundary past an already delivered answer.
 function isFinalReplyGroup(item: TurnRenderItem): boolean {
-  return item.kind === "group" && !item.isStreaming && assistantGroupCanOwnActiveRunStatus(item);
+  return (
+    item.kind === "group" &&
+    !item.isStreaming &&
+    assistantGroupCanOwnActiveRunStatus(item) &&
+    assistantMessageKind(item.messages[0]?.message, item.visibleContent) !== "commentary"
+  );
 }
 
 function turnUserMessages(turn: TurnRenderItem[]): unknown[] {
