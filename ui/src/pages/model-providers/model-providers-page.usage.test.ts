@@ -20,8 +20,9 @@ afterEach(() => {
 });
 
 describe("ModelProvidersPage usage convergence", () => {
-  it("refreshes account quotas from the page Refresh button", async () => {
-    const { context, request, snapshot } = createHarness("main");
+  it("keeps account quotas during config saves and refreshes them from the page", async () => {
+    const { context, request, snapshot, runtimeConfig, notifyRuntimeConfig } =
+      createHarness("main");
     snapshot.hello = {
       type: "hello-ok",
       protocol: 3,
@@ -42,6 +43,12 @@ describe("ModelProvidersPage usage convergence", () => {
     });
     const page = appendPage(context);
     await vi.waitFor(() => expect(page.textContent).toContain("90% left"));
+    runtimeConfig.state.configSaving = true;
+    notifyRuntimeConfig();
+    await page.updateComplete;
+    expect(page.textContent).toContain("90% left");
+    runtimeConfig.state.configSaving = false;
+    notifyRuntimeConfig();
     usedPercent = 90;
     page.querySelector<HTMLButtonElement>(".settings-section__actions button")?.click();
     await vi.waitFor(() => expect(page.textContent).toContain("10% left"));
