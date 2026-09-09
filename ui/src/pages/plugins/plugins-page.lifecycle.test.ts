@@ -65,7 +65,7 @@ describe("PluginsPage lifecycle confirmation", () => {
           name: "Community Thing",
           family: "code-plugin",
           official: false,
-          categories: ["tools"],
+          categories: [],
         },
         local: {
           present: false,
