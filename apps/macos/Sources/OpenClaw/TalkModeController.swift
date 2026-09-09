@@ -5,7 +5,42 @@ import OpenClawKit
 @MainActor
 @Observable
 final class TalkModeController {
-    static let shared = TalkModeController()
+    static var shared: TalkModeController {
+        AppStateStore.shared.voiceRuntime.talkController
+    }
+
+    struct Owners: Sendable {
+        let runtime: TalkModeRuntime
+        let wake: VoiceWakeRuntime
+        let hotkey: VoicePushToTalkHotkey
+        let overlay: TalkOverlayController
+        let interruptMonitor: TalkSpeechInterruptMonitor
+    }
+
+    typealias OwnersProvider = @MainActor @Sendable () -> Owners
+    @ObservationIgnored private let state: AppVoiceRuntime.State
+    @ObservationIgnored private let owners: OwnersProvider
+    @ObservationIgnored private let publishTalk: AppVoiceRuntime.PublishTalk
+
+    static func liveOwners() -> Owners {
+        let voice = AppStateStore.shared.voiceRuntime
+        return Owners(
+            runtime: voice.talkRuntime,
+            wake: voice.wake,
+            hotkey: voice.hotkey,
+            overlay: voice.talkOverlay,
+            interruptMonitor: voice.interruptMonitor)
+    }
+
+    init(
+        state: @escaping AppVoiceRuntime.State = { AppStateStore.shared },
+        owners: @escaping OwnersProvider = TalkModeController.liveOwners,
+        publishTalk: @escaping AppVoiceRuntime.PublishTalk = AppVoiceRuntime.livePublishTalk)
+    {
+        self.state = state
+        self.owners = owners
+        self.publishTalk = publishTalk
+    }
 
     private let logger = Logger(subsystem: "ai.openclaw", category: "talk.controller")
     private static let transcriptLimit = 20
@@ -27,25 +62,27 @@ final class TalkModeController {
     }
 
     func setEnabled(_ enabled: Bool) async {
+        guard !enabled || self.state() != nil else { return }
+        let owners = self.owners()
         let transitionID = UUID()
         self.transitionID = transitionID
         // Preference updates must not reopen PTT during Talk admission or audio teardown.
-        VoicePushToTalkHotkey.shared.setTalkSuppressed(true)
+        owners.hotkey.setTalkSuppressed(true)
         self.logger.info("talk enabled=\(enabled)")
         if enabled {
             self.partialTranscript = ""
             self.recentTranscripts = []
-            TalkOverlayController.shared.present()
+            owners.overlay.present()
         } else {
-            TalkOverlayController.shared.dismiss()
+            owners.overlay.dismiss()
         }
-        TalkSpeechInterruptMonitor.shared.setEnabled(enabled && AppStateStore.shared.talkShiftToStopEnabled)
+        owners.interruptMonitor.setEnabled(enabled && self.state()?.talkShiftToStopEnabled == true)
         if !enabled {
             let previousShutdown = self.shutdownTask
             self.shutdownTask = Task {
                 // Disable invalidates a suspended startup immediately. A repeated disable still
                 // joins the original shutdown before PTT or another Talk start can acquire audio.
-                await TalkModeRuntime.shared.setEnabled(false)
+                await owners.runtime.setEnabled(false)
                 await previousShutdown?.value
             }
         }
@@ -53,7 +90,7 @@ final class TalkModeController {
         if enabled, self.wakePauseLease == nil {
             let lease = UUID()
             self.wakePauseLease = lease
-            self.wakePauseTask = Task { await VoiceWakeRuntime.shared.pauseForPushToTalk(lease: lease) }
+            self.wakePauseTask = Task { await owners.wake.pauseForPushToTalk(lease: lease) }
         }
         // Overlapping transitions share the acquisition until the latest Off has shut down.
         // A replaced caller may release its wake handoff only after this insertion is acknowledged.
@@ -61,7 +98,7 @@ final class TalkModeController {
         guard self.transitionID == transitionID else { return }
         await shutdown?.value
         if enabled, self.transitionID == transitionID {
-            await TalkModeRuntime.shared.setEnabled(true)
+            await owners.runtime.setEnabled(true)
         }
 
         guard self.transitionID == transitionID else { return }
@@ -70,9 +107,9 @@ final class TalkModeController {
         let lease = self.wakePauseLease
         self.wakePauseLease = nil
         self.wakePauseTask = nil
-        VoicePushToTalkHotkey.shared.setTalkSuppressed(false)
+        owners.hotkey.setTalkSuppressed(false)
         if let lease {
-            await VoiceWakeRuntime.shared.resumeAfterPushToTalk(lease: lease)
+            await owners.wake.resumeAfterPushToTalk(lease: lease)
         }
     }
 
@@ -82,24 +119,23 @@ final class TalkModeController {
         if phase == .idle || phase == .thinking {
             self.updateLevel(0)
         }
-        TalkOverlayController.shared.updatePhase(phase)
+        self.owners().overlay.updatePhase(phase)
 
         if phase != previousPhase {
-            Self.playPhaseSound(phase, previousPhase: previousPhase)
+            self.playPhaseSound(phase, previousPhase: previousPhase)
         }
         self.publishPhase()
     }
 
     private func publishPhase() {
-        let state = AppStateStore.shared
-        // Preview projections stay local, including shutdown's idle phase.
-        guard !state.isPreview else { return }
+        guard let state = self.state(), state.voiceRuntime.isActive else { return }
         let effectivePhase = self.isPaused ? "paused" : self.phase.rawValue
-        Task { await GatewayConnection.shared.talkMode(enabled: state.talkEnabled, phase: effectivePhase) }
+        let enabled = state.talkEnabled
+        Task { [publishTalk] in await publishTalk(enabled, effectivePhase) }
     }
 
-    private static func playPhaseSound(_ phase: TalkModePhase, previousPhase: TalkModePhase) {
-        let state = AppStateStore.shared
+    private func playPhaseSound(_ phase: TalkModePhase, previousPhase: TalkModePhase) {
+        guard let state = self.state() else { return }
         guard !state.isPreview, state.talkPhaseSoundsEnabled else { return }
         let soundName: String? = switch phase {
         case .thinking:
@@ -126,7 +162,7 @@ final class TalkModeController {
             let response = clamped > self.level ? 0.45 : 0.18
             self.level += (clamped - self.level) * response
         }
-        TalkOverlayController.shared.updateLevel(self.level)
+        self.owners().overlay.updateLevel(self.level)
     }
 
     /// Playback level published while agent speech plays; nil (path without
@@ -167,10 +203,11 @@ final class TalkModeController {
         guard self.isPaused != paused else { return }
         self.logger.info("talk paused=\(paused)")
         self.isPaused = paused
-        TalkOverlayController.shared.updatePaused(paused)
-        guard !AppStateStore.shared.isPreview else { return }
+        let owners = self.owners()
+        owners.overlay.updatePaused(paused)
+        guard self.state()?.voiceRuntime.isActive == true else { return }
         self.publishPhase()
-        Task { await TalkModeRuntime.shared.setPaused(paused) }
+        Task { await owners.runtime.setPaused(paused) }
     }
 
     func togglePaused() {
@@ -178,11 +215,13 @@ final class TalkModeController {
     }
 
     func stopSpeaking(reason: TalkStopReason = .userTap) {
-        Task { await TalkModeRuntime.shared.stopSpeaking(reason: reason) }
+        let runtime = self.owners().runtime
+        Task { await runtime.stopSpeaking(reason: reason) }
     }
 
     func exitTalkMode() {
-        Task { await AppStateStore.shared.setTalkEnabled(false) }
+        guard let state = self.state() else { return }
+        Task { await state.setTalkEnabled(false) }
     }
 }
 

@@ -7,8 +7,6 @@ import Speech
 /// Observes right Option and starts a push-to-talk capture while it is held.
 @MainActor
 final class VoicePushToTalkHotkey {
-    static let shared = VoicePushToTalkHotkey()
-
     private var globalMonitor: Any?
     private var localMonitor: Any?
     private var active = false
@@ -99,7 +97,26 @@ final class VoicePushToTalkHotkey {
 /// Records speech while the hotkey is held.
 @MainActor
 final class VoicePushToTalk {
-    static let shared = VoicePushToTalk()
+    static var shared: VoicePushToTalk {
+        AppStateStore.shared.voiceRuntime.ptt
+    }
+
+    private let state: AppVoiceRuntime.State
+    private let wake: VoiceWakeRuntime
+    private let sessions: VoiceSessionCoordinator
+    private let permissions: VoicePermissions
+
+    init(
+        state: @escaping AppVoiceRuntime.State,
+        wake: VoiceWakeRuntime,
+        sessions: VoiceSessionCoordinator,
+        permissions: VoicePermissions)
+    {
+        self.state = state
+        self.wake = wake
+        self.sessions = sessions
+        self.permissions = permissions
+    }
 
     private let logger = Logger(subsystem: "ai.openclaw", category: "voicewake.ptt")
 
@@ -134,8 +151,8 @@ final class VoicePushToTalk {
     }
 
     func begin() {
-        guard voiceWakeSupported, self.holdID == nil else { return }
-        let snapshot = VoiceSessionCoordinator.shared.snapshot()
+        guard self.permissions.supported(), self.state() != nil, self.holdID == nil else { return }
+        let snapshot = self.sessions.snapshot()
         // Retire the old capture, but retain its overlay and wake lease until admission
         // commits or cancels. Dismissing here would animate out the replacement overlay.
         self.retireCapture()
@@ -149,27 +166,27 @@ final class VoicePushToTalk {
             defer {
                 if self.holdID == sessionID { self.startupTask = nil }
             }
-            let granted = await PermissionManager.ensureVoiceWakePermissions(interactive: true)
+            let granted = await self.permissions.ensure(true)
             guard !Task.isCancelled, self.holdID == sessionID else { return }
-            guard granted, VoiceSessionCoordinator.shared.snapshot().token == snapshot.token else {
+            guard granted, self.sessions.snapshot().token == snapshot.token else {
                 self.end(cancelled: true)
                 return
             }
 
             // The startup task owns acquisition until its acknowledgement; end must not remove
             // a lease before the wake actor has inserted it.
-            await VoiceWakeRuntime.shared.pauseForPushToTalk(lease: sessionID)
+            await self.wake.pauseForPushToTalk(lease: sessionID)
             guard !Task.isCancelled, self.holdID == sessionID else {
-                await VoiceWakeRuntime.shared.resumeAfterPushToTalk(lease: sessionID)
+                await self.wake.resumeAfterPushToTalk(lease: sessionID)
                 return
             }
             let previousLease = self.pauseLease
             self.pauseLease = sessionID
             if let previousLease {
                 // Acquisition precedes release so wake cannot restart between held sessions.
-                Task { await VoiceWakeRuntime.shared.resumeAfterPushToTalk(lease: previousLease) }
+                Task { [wake] in await wake.resumeAfterPushToTalk(lease: previousLease) }
             }
-            guard VoiceSessionCoordinator.shared.snapshot().token == snapshot.token else {
+            guard self.sessions.snapshot().token == snapshot.token else {
                 self.end(cancelled: true)
                 return
             }
@@ -178,7 +195,10 @@ final class VoicePushToTalk {
     }
 
     private func startCapture(sessionID: UUID) {
-        let config = self.makeConfig()
+        guard let config = self.makeConfig() else {
+            self.end(cancelled: true)
+            return
+        }
         self.activeConfig = config
         self.isCapturing = true
         self.logger.info("ptt begin adopted_prefix_len=\(self.adoptedPrefix.count, privacy: .public)")
@@ -191,7 +211,7 @@ final class VoicePushToTalk {
                 committed: adoptedPrefix,
                 volatile: "",
                 isFinal: false)
-        self.overlayToken = VoiceSessionCoordinator.shared.startSession(
+        self.overlayToken = self.sessions.startSession(
             source: .pushToTalk,
             text: adoptedPrefix,
             attributed: adoptedAttributed,
@@ -333,7 +353,7 @@ final class VoicePushToTalk {
             volatile: self.volatile,
             isFinal: isFinal)
         if let token = self.overlayToken {
-            VoiceSessionCoordinator.shared.updatePartial(token: token, text: snapshot, attributed: attributed)
+            self.sessions.updatePartial(token: token, text: snapshot, attributed: attributed)
         }
     }
 
@@ -365,15 +385,15 @@ final class VoicePushToTalk {
         self.logger.info("ptt finalize reason=\(reason, privacy: .public) len=\(finalText.count, privacy: .public)")
         if let token {
             if forward {
-                VoiceSessionCoordinator.shared.finalize(
+                self.sessions.finalize(
                     token: token, text: finalText, sendChime: chime, autoSendAfter: nil)
-                VoiceSessionCoordinator.shared.sendNow(token: token, reason: reason)
+                self.sessions.sendNow(token: token, reason: reason)
             } else {
-                VoiceSessionCoordinator.shared.dismiss(token: token, reason: .explicit, outcome: .empty)
+                self.sessions.dismiss(token: token, reason: .explicit, outcome: .empty)
             }
         }
         if let lease {
-            Task { await VoiceWakeRuntime.shared.resumeAfterPushToTalk(lease: lease) }
+            Task { [wake] in await wake.resumeAfterPushToTalk(lease: lease) }
         }
     }
 
@@ -400,8 +420,8 @@ final class VoicePushToTalk {
     }
 
     @MainActor
-    private func makeConfig() -> Config {
-        let state = AppStateStore.shared
+    private func makeConfig() -> Config? {
+        guard let state = self.state() else { return nil }
         return Config(
             micID: state.voiceWakeMicID.isEmpty ? nil : state.voiceWakeMicID,
             localeID: state.voiceWakeLocaleID,
