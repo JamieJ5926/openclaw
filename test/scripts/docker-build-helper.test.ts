@@ -7235,7 +7235,7 @@ fs.appendFileSync(process.env.FIXTURE_DOCKER_CAPTURE, JSON.stringify({ args, sta
 
   it("uses the selected release's legacy gateway client only after frozen authorization", () => {
     const runner = readFileSync(GATEWAY_NETWORK_DOCKER_E2E_PATH, "utf8");
-    expect(runner).toContain('[[ "$FROZEN_CONTEXT" == "1" ]]');
+    expect(runner).toContain('openclaw_resolve_frozen_gateway_network_layout "$SOURCE_ROOT"');
     expect(runner).toContain("scripts/e2e/lib/gateway-network/client.mjs");
     expect(runner).toContain('-v "$LEGACY_GATEWAY_LIB:/app/scripts/e2e/lib:ro"');
     expect(runner).toContain("node /app/scripts/e2e/lib/gateway-network/client.mjs");

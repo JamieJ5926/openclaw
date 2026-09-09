@@ -33,27 +33,27 @@ openclaw_prepare_frozen_target_context() {
   [ "$authorization_status" -eq 1 ] && return 1
   [ "$authorization_status" -eq 0 ] || return "$authorization_status"
 
-  if [ "$(git -C "$source_root" rev-parse HEAD 2>/dev/null)" != "$OPENCLAW_SELECTED_SHA" ]; then
-    echo "selected source checkout does not match OPENCLAW_SELECTED_SHA" >&2
-    return 2
-  fi
+  openclaw_frozen_target_source validate "$source_root" || return 2
 }
 
 openclaw_resolve_frozen_target_file() {
   local source_root="${1:?missing selected source root}" \
     relative_path="${2:?missing selected relative path}" \
-    fallback_path="${3:-}" context_status=0
+    fallback_path="${3:-}" context_status=0 source_status=0 source_operation=has
   local frozen_missing_path="${4-$fallback_path}"
 
   openclaw_prepare_frozen_target_context "$source_root" || context_status=$?
   case "$context_status" in
     0)
-      if openclaw_frozen_target_source_has_path "$source_root" "$relative_path"; then
-        printf '%s\n' "$source_root/$relative_path"
-        return
-      fi
-      printf '%s\n' "$frozen_missing_path"
-      return
+      # The shipped survivor scenario is the sole directory-owned caller.
+      [ "$relative_path" != scripts/e2e/lib/upgrade-survivor ] || source_operation=directory
+      openclaw_frozen_target_source "$source_operation" "$source_root" "$relative_path" || source_status=$?
+      case "$source_status" in
+        0) printf '%s\n' "$source_root/$relative_path" ;;
+        1) printf '%s\n' "$frozen_missing_path" ;;
+        *) return "$source_status" ;;
+      esac
+      return 0
       ;;
     1) ;;
     *) return "$context_status" ;;
@@ -61,20 +61,50 @@ openclaw_resolve_frozen_target_file() {
   printf '%s\n' "$fallback_path"
 }
 
+openclaw_frozen_target_source() {
+  local operation="${1:?missing source operation}" source_root="${2:?missing selected source root}" helper
+  shift 2
+  helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/frozen-target-source.mjs" || return 2
+  node "$helper" "$operation" "$source_root" "${OPENCLAW_SELECTED_SHA:-}" "$@"
+}
+
 openclaw_frozen_target_source_has_path() {
-  local source_root="${1:?missing selected source root}" relative_path="${2:?missing relative path}"
-  git -C "$source_root" cat-file -e "$OPENCLAW_SELECTED_SHA:$relative_path" 2>/dev/null
+  openclaw_frozen_target_source has "$@"
 }
 
 openclaw_frozen_target_source_contains() {
-  local source_root="${1:?missing selected source root}" relative_path="${2:?missing relative path}" needle="${3:?missing text}"
-  # Do not use grep -q here: every caller has pipefail enabled, and a matching
-  # early exit can turn git show's SIGPIPE into a false "capability absent".
-  git -C "$source_root" show "$OPENCLAW_SELECTED_SHA:$relative_path" 2>/dev/null | grep -F -- "$needle" >/dev/null
+  openclaw_frozen_target_source contains "$@"
+}
+
+# Boolean data and read errors travel separately, including inside caller `if`s.
+openclaw_frozen_target_source_flag() {
+  local status=0
+  openclaw_frozen_target_source "$@" || status=$?
+  case "$status" in
+    0) printf '1' ;;
+    1) printf '0' ;;
+    *) return "$status" ;;
+  esac
+}
+
+openclaw_resolve_frozen_gateway_network_layout() {
+  local source_root="${1:?missing selected source root}" authorization_status=0 has_old has_new
+  export OPENCLAW_FROZEN_TARGET_GATEWAY_NETWORK_LEGACY_LIB=""
+  openclaw_prepare_frozen_target_context "$source_root" || authorization_status=$?
+  [ "$authorization_status" -eq 1 ] && return 0
+  [ "$authorization_status" -eq 0 ] || return "$authorization_status"
+
+  has_old="$(openclaw_frozen_target_source_flag has "$source_root" scripts/e2e/lib/gateway-network/client.mjs)" || return 2
+  if [ "$has_old" = 1 ]; then
+    has_new="$(openclaw_frozen_target_source_flag has "$source_root" scripts/e2e/lib/gateway-network/client.mts)" || return 2
+    if [ "$has_new" = 0 ]; then
+      export OPENCLAW_FROZEN_TARGET_GATEWAY_NETWORK_LEGACY_LIB="$source_root/scripts/e2e/lib"
+    fi
+  fi
 }
 
 openclaw_resolve_frozen_upgrade_survivor_capabilities() {
-  local source_root="${1:?missing selected source root}" authorization_status=0
+  local source_root="${1:?missing selected source root}" authorization_status=0 has_trust has_legacy
 
   export OPENCLAW_FROZEN_UPGRADE_SURVIVOR_CLAWHUB_MODE="current"
   openclaw_prepare_frozen_target_context "$source_root" || authorization_status=$?
@@ -83,15 +113,17 @@ openclaw_resolve_frozen_upgrade_survivor_capabilities() {
 
   # The older shipped installer fetched its official companion through ClawHub
   # and therefore owns a three-request audit instead of the current idle ledger.
-  if ! openclaw_frozen_target_source_has_path "$source_root" src/infra/clawhub-install-trust.ts &&
-    openclaw_frozen_target_source_contains \
-      "$source_root" src/plugins/clawhub.ts 'from "../infra/clawhub.js"'; then
-    export OPENCLAW_FROZEN_UPGRADE_SURVIVOR_CLAWHUB_MODE="legacy"
+  has_trust="$(openclaw_frozen_target_source_flag has "$source_root" src/infra/clawhub-install-trust.ts)" || return 2
+  if [ "$has_trust" = 0 ]; then
+    has_legacy="$(openclaw_frozen_target_source_flag contains "$source_root" src/plugins/clawhub.ts 'from "../infra/clawhub.js"')" || return 2
+    if [ "$has_legacy" = 1 ]; then
+      export OPENCLAW_FROZEN_UPGRADE_SURVIVOR_CLAWHUB_MODE="legacy"
+    fi
   fi
 }
 
 openclaw_resolve_frozen_live_cli_backend_package_mode() {
-  local source_root="${1:?missing selected source root}" authorization_status=0
+  local source_root="${1:?missing selected source root}" authorization_status=0 has_resolver
 
   export OPENCLAW_FROZEN_TARGET_LIVE_CLI_BACKEND_PACKAGE_MODE="current"
 
@@ -101,14 +133,14 @@ openclaw_resolve_frozen_live_cli_backend_package_mode() {
 
   # Older selected releases have no package resolver. Derive that one released
   # capability before Docker so the container never receives control-plane SHAs.
-  if ! openclaw_frozen_target_source_contains \
-    "$source_root" scripts/print-cli-backend-live-metadata.ts 'resolveCliBackendDockerPackages'; then
+  has_resolver="$(openclaw_frozen_target_source_flag contains "$source_root" scripts/print-cli-backend-live-metadata.ts 'resolveCliBackendDockerPackages')" || return 2
+  if [ "$has_resolver" = 0 ]; then
     export OPENCLAW_FROZEN_TARGET_LIVE_CLI_BACKEND_PACKAGE_MODE="legacy"
   fi
 }
 
 openclaw_resolve_frozen_update_channel_dry_run_mode() {
-  local source_root="${1:?missing selected source root}" authorization_status=0
+  local source_root="${1:?missing selected source root}" authorization_status=0 has_old has_new
 
   export OPENCLAW_UPDATE_CHANNEL_DRY_RUN_PACKAGE_COMPAT="0" \
     OPENCLAW_UPDATE_CHANNEL_DIRTY_BLOCK_EXIT_ZERO_COMPAT="0"
@@ -118,19 +150,22 @@ openclaw_resolve_frozen_update_channel_dry_run_mode() {
 
   # The old CLI routed only an explicit dev request to Git. Recognize that
   # exact historical owner shape; backports and unknown future shapes stay strict.
-  if openclaw_frozen_target_source_contains \
+  has_old="$(openclaw_frozen_target_source_flag contains \
     "$source_root" src/cli/update-cli/update-command.ts \
-    'const switchToGit = requestedChannel === "dev" && installKind !== "git";' &&
-    ! openclaw_frozen_target_source_contains \
+    'const switchToGit = requestedChannel === "dev" && installKind !== "git";')" || return 2
+  if [ "$has_old" = 1 ]; then
+    has_new="$(openclaw_frozen_target_source_flag contains \
       "$source_root" src/cli/update-cli/update-command.ts \
-      'selectedChannel === "dev" && explicitTag === null'; then
-    export OPENCLAW_UPDATE_CHANNEL_DRY_RUN_PACKAGE_COMPAT="1" \
-      OPENCLAW_UPDATE_CHANNEL_DIRTY_BLOCK_EXIT_ZERO_COMPAT="1"
+      'selectedChannel === "dev" && explicitTag === null')" || return 2
+    if [ "$has_new" = 0 ]; then
+      export OPENCLAW_UPDATE_CHANNEL_DRY_RUN_PACKAGE_COMPAT="1" \
+        OPENCLAW_UPDATE_CHANNEL_DIRTY_BLOCK_EXIT_ZERO_COMPAT="1"
+    fi
   fi
 }
 
 openclaw_resolve_frozen_plugin_harness_capabilities() {
-  local source_root="${1:?missing selected source root}" authorization_status=0
+  local source_root="${1:?missing selected source root}" authorization_status=0 has_old has_new has_tts has_discovery has_sqlite has_uninstall
 
   export OPENCLAW_FROZEN_TARGET_PLUGIN_UNINSTALL_MODE="current" \
     OPENCLAW_FROZEN_PLUGIN_PRERELEASE_FIXTURE_DIALECT="current"
@@ -141,15 +176,22 @@ openclaw_resolve_frozen_plugin_harness_capabilities() {
 
   # The old plugin sweep asserted removal but predated the canonical disabled
   # marker. Only that selected, packaged assertion dialect may relax the marker.
-  if openclaw_frozen_target_source_contains "$source_root" scripts/e2e/lib/plugins/assertions.mjs 'function assertPluginTgzRemoved()' &&
-    ! openclaw_frozen_target_source_contains "$source_root" scripts/e2e/lib/plugins/assertions.mjs 'function assertPluginUninstallConfigState('; then
-    export OPENCLAW_FROZEN_TARGET_PLUGIN_UNINSTALL_MODE="legacy"
+  has_old="$(openclaw_frozen_target_source_flag contains "$source_root" scripts/e2e/lib/plugins/assertions.mjs 'function assertPluginTgzRemoved()')" || return 2
+  if [ "$has_old" = 1 ]; then
+    has_new="$(openclaw_frozen_target_source_flag contains "$source_root" scripts/e2e/lib/plugins/assertions.mjs 'function assertPluginUninstallConfigState(')" || return 2
+    if [ "$has_new" = 0 ]; then
+      export OPENCLAW_FROZEN_TARGET_PLUGIN_UNINSTALL_MODE="legacy"
+    fi
   fi
 
-  if openclaw_frozen_target_source_contains "$source_root" src/config/types.messages.ts 'tts?: TtsConfig;' &&
-    openclaw_frozen_target_source_contains "$source_root" src/config/types.plugins.ts 'bundledDiscovery?: "compat" | "allowlist";' &&
-    openclaw_frozen_target_source_contains "$source_root" src/plugin-sdk/session-store-runtime.ts 'before SQLite migration' &&
-    ! openclaw_frozen_target_source_has_path "$source_root" src/plugins/uninstall-package-plan.ts; then
+  has_tts="$(openclaw_frozen_target_source_flag contains "$source_root" src/config/types.messages.ts 'tts?: TtsConfig;')" || return 2
+  [ "$has_tts" = 1 ] || return 0
+  has_discovery="$(openclaw_frozen_target_source_flag contains "$source_root" src/config/types.plugins.ts 'bundledDiscovery?: "compat" | "allowlist";')" || return 2
+  [ "$has_discovery" = 1 ] || return 0
+  has_sqlite="$(openclaw_frozen_target_source_flag contains "$source_root" src/plugin-sdk/session-store-runtime.ts 'before SQLite migration')" || return 2
+  [ "$has_sqlite" = 1 ] || return 0
+  has_uninstall="$(openclaw_frozen_target_source_flag has "$source_root" src/plugins/uninstall-package-plan.ts)" || return 2
+  if [ "$has_uninstall" = 0 ]; then
     export OPENCLAW_FROZEN_PLUGIN_PRERELEASE_FIXTURE_DIALECT="legacy"
   fi
 }
@@ -177,63 +219,15 @@ openclaw_resolve_frozen_agent_bundle_mcp_contract() {
   [ "$authorization_status" -eq 0 ] || return "$authorization_status"
   trusted_helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/frozen-target-compat.sh" || return 2
 
-  # Walk committed trees so only a successfully read tree can prove absence.
-  # This reader is deliberately local to the bundle contract, not the other dialects.
+  # Resolve the reader and parser from tooling, never from the selected checkout.
   resolved="$(node --input-type=module -e '
-import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
 const [root, sha, trustedHelper] = process.argv.slice(1);
 const fail = (message) => { throw new Error(message); };
-const git = (...args) => {
-  try {
-    return execFileSync("git", ["-C", root, ...args], {
-      encoding: "utf8",
-      env: { ...process.env, GIT_NO_LAZY_FETCH: "1", GIT_NO_REPLACE_OBJECTS: "1" },
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: 30_000,
-      maxBuffer: 16 * 1024 * 1024,
-    });
-  } catch {
-    fail(`unable to read selected bundle source (${args[0]})`);
-  }
-};
 try {
-  const version = /^git version (\d+)\.(\d+)/.exec(git("--version"));
-  if (!version || Number(version[1]) < 2 ||
-      (Number(version[1]) === 2 && Number(version[2]) < 45)) {
-    fail("frozen bundle source reads require Git 2.45 or newer (no lazy fetch)");
-  }
-  if (git("rev-parse", "HEAD").trim() !== sha) {
-    fail("selected source checkout does not match OPENCLAW_SELECTED_SHA");
-  }
-  if (git("cat-file", "-t", sha).trim() !== "commit") {
-    fail("selected bundle source must be a commit");
-  }
-  const rootTree = git("rev-parse", `${sha}^{tree}`).trim();
-  const read = (relativePath) => {
-    let tree = rootTree;
-    const parts = relativePath.split("/");
-    for (let i = 0; i < parts.length; i++) {
-      const entries = git("ls-tree", "-z", tree).split("\0").filter(Boolean).map((line) => {
-        const match = /^([0-7]{6}) (blob|tree|commit) ([0-9a-f]{40})\t([\s\S]+)$/.exec(line);
-        if (!match) fail("invalid selected bundle tree entry");
-        return { mode: match[1], type: match[2], oid: match[3], name: match[4] };
-      });
-      const entry = entries.find((candidate) => candidate.name === parts[i]);
-      if (!entry) return null;
-      if (i < parts.length - 1) {
-        if (entry.mode !== "040000" || entry.type !== "tree") {
-          fail(`expected committed directory for ${relativePath}`);
-        }
-        tree = entry.oid;
-      } else {
-        if (!["100644", "100755"].includes(entry.mode) || entry.type !== "blob") {
-          fail(`expected regular committed file for ${relativePath}`);
-        }
-        return git("cat-file", "blob", entry.oid);
-      }
-    }
-  };
+  const { createFrozenTargetSource } = await import(new URL("./frozen-target-source.mjs", pathToFileURL(trustedHelper)));
+  const { readText: read } = createFrozenTargetSource(root, sha);
   const required = (relativePath) => {
     const source = read(relativePath);
     if (source === null) fail(`missing required bundle source: ${relativePath}`);
@@ -308,7 +302,7 @@ try {
   }
   process.stdout.write(`${manager === null ? "legacy" : "current"}:${client.path}`);
 } catch (error) {
-  console.error(`frozen bundle contract: ${error.message}`);
+  console.error(`frozen bundle contract: unable to read selected bundle source: ${error.message}`);
   process.exitCode = 2;
 }
 ' "$source_root" "$OPENCLAW_SELECTED_SHA" "$trusted_helper")" || return 2
@@ -319,6 +313,8 @@ try {
 
 openclaw_resolve_frozen_core_harness_capabilities() {
   local source_root="${1:?missing selected source root}" authorization_status=0
+  local has_access has_last_run has_hooks has_setup has_default_hooks has_memory has_migrations has_repair
+  local has_extract has_model_prompt has_fragments has_filter has_all_tools has_catalog
 
   export OPENCLAW_FROZEN_TARGET_ONBOARD_CASES="" \
     OPENCLAW_FROZEN_TARGET_ONBOARD_SESSION_MEMORY_HOOK_MODE="required" \
@@ -333,38 +329,52 @@ openclaw_resolve_frozen_core_harness_capabilities() {
 
   # Older onboarding schemas do not accept the guided fixture's full wizard
   # consent record. Run their own established non-interactive coverage.
-  if ! openclaw_frozen_target_source_contains "$source_root" src/config/zod-schema.ts 'accessMode:' &&
-    openclaw_frozen_target_source_contains "$source_root" src/config/zod-schema.ts 'lastRunAt:'; then
-    export OPENCLAW_FROZEN_TARGET_ONBOARD_CASES="local-basic,remote-non-interactive,reset,channels,skills"
+  has_access="$(openclaw_frozen_target_source_flag contains "$source_root" src/config/zod-schema.ts 'accessMode:')" || return 2
+  if [ "$has_access" = 0 ]; then
+    has_last_run="$(openclaw_frozen_target_source_flag contains "$source_root" src/config/zod-schema.ts 'lastRunAt:')" || return 2
+    if [ "$has_last_run" = 1 ]; then
+      export OPENCLAW_FROZEN_TARGET_ONBOARD_CASES="local-basic,remote-non-interactive,reset,channels,skills"
+    fi
   fi
 
   # Before default-hook onboarding, quickstart offered only the hooks it found
   # in the workspace. A successful old quickstart therefore cannot promise a
   # session-memory entry when that workspace shipped no hook definition.
-  if openclaw_frozen_target_source_has_path "$source_root" src/commands/onboard-hooks.ts &&
-    openclaw_frozen_target_source_contains "$source_root" src/commands/onboard-hooks.ts 'setupInternalHooks' &&
-    ! openclaw_frozen_target_source_contains "$source_root" src/commands/onboard-hooks.ts 'enableDefaultOnboardingInternalHooks'; then
-    export OPENCLAW_FROZEN_TARGET_ONBOARD_SESSION_MEMORY_HOOK_MODE="interactive"
+  has_hooks="$(openclaw_frozen_target_source_flag has "$source_root" src/commands/onboard-hooks.ts)" || return 2
+  if [ "$has_hooks" = 1 ]; then
+    has_setup="$(openclaw_frozen_target_source_flag contains "$source_root" src/commands/onboard-hooks.ts 'setupInternalHooks')" || return 2
+    if [ "$has_setup" = 1 ]; then
+      has_default_hooks="$(openclaw_frozen_target_source_flag contains "$source_root" src/commands/onboard-hooks.ts 'enableDefaultOnboardingInternalHooks')" || return 2
+      if [ "$has_default_hooks" = 0 ]; then
+        export OPENCLAW_FROZEN_TARGET_ONBOARD_SESSION_MEMORY_HOOK_MODE="interactive"
+      fi
+    fi
   fi
 
-  if openclaw_frozen_target_source_contains "$source_root" src/agents/memory-search.ts 'cfg.agents?.defaults?.memorySearch'; then
+  has_memory="$(openclaw_frozen_target_source_flag contains "$source_root" src/agents/memory-search.ts 'cfg.agents?.defaults?.memorySearch')" || return 2
+  if [ "$has_memory" = 1 ]; then
     export OPENCLAW_FROZEN_TARGET_MCP_MEMORY_CONFIG_MODE="agent"
   fi
 
-  if ! openclaw_frozen_target_source_has_path "$source_root" src/state/openclaw-agent-db-session-migrations.ts &&
-    openclaw_frozen_target_source_contains "$source_root" src/commands/doctor-session-transcripts.ts '.pre-doctor-branch-repair-'; then
-    export OPENCLAW_FROZEN_TARGET_SESSION_REPAIR_MODE="jsonl"
+  has_migrations="$(openclaw_frozen_target_source_flag has "$source_root" src/state/openclaw-agent-db-session-migrations.ts)" || return 2
+  if [ "$has_migrations" = 0 ]; then
+    has_repair="$(openclaw_frozen_target_source_flag contains "$source_root" src/commands/doctor-session-transcripts.ts '.pre-doctor-branch-repair-')" || return 2
+    if [ "$has_repair" = 1 ]; then
+      export OPENCLAW_FROZEN_TARGET_SESSION_REPAIR_MODE="jsonl"
+    fi
   fi
 
   local runtime_context_path="src/agents/embedded-agent-runner/run/runtime-context-prompt.ts"
   local has_legacy_runtime_context=0 has_producer_runtime_context=0
-  if openclaw_frozen_target_source_contains "$source_root" "$runtime_context_path" 'extractInternalRuntimeContext' &&
-    openclaw_frozen_target_source_contains "$source_root" "$runtime_context_path" 'modelPrompt?: string;'; then
-    has_legacy_runtime_context=1
+  has_extract="$(openclaw_frozen_target_source_flag contains "$source_root" "$runtime_context_path" 'extractInternalRuntimeContext')" || return 2
+  if [ "$has_extract" = 1 ]; then
+    has_model_prompt="$(openclaw_frozen_target_source_flag contains "$source_root" "$runtime_context_path" 'modelPrompt?: string;')" || return 2
+    has_legacy_runtime_context="$has_model_prompt"
   fi
-  if openclaw_frozen_target_source_contains "$source_root" "$runtime_context_path" 'fragments?: RuntimeContextFragment[];' &&
-    openclaw_frozen_target_source_contains "$source_root" "$runtime_context_path" 'const fragments = params.fragments?.filter'; then
-    has_producer_runtime_context=1
+  has_fragments="$(openclaw_frozen_target_source_flag contains "$source_root" "$runtime_context_path" 'fragments?: RuntimeContextFragment[];')" || return 2
+  if [ "$has_fragments" = 1 ]; then
+    has_filter="$(openclaw_frozen_target_source_flag contains "$source_root" "$runtime_context_path" 'const fragments = params.fragments?.filter')" || return 2
+    has_producer_runtime_context="$has_filter"
   fi
   case "$has_producer_runtime_context:$has_legacy_runtime_context" in
     1:0) ;;
@@ -379,8 +389,11 @@ openclaw_resolve_frozen_core_harness_capabilities() {
 
   # The selected release exposes ALL_TOOLS to code mode but predates the
   # catalog global. Its fixture must use the global the package actually ships.
-  if openclaw_frozen_target_source_contains "$source_root" src/agents/code-mode-namespaces.ts '"ALL_TOOLS"' &&
-    ! openclaw_frozen_target_source_contains "$source_root" src/agents/code-mode-namespaces.ts '"catalog"'; then
-    export OPENCLAW_FROZEN_TARGET_MCP_CODE_MODE_CATALOG_MODE="legacy"
+  has_all_tools="$(openclaw_frozen_target_source_flag contains "$source_root" src/agents/code-mode-namespaces.ts '"ALL_TOOLS"')" || return 2
+  if [ "$has_all_tools" = 1 ]; then
+    has_catalog="$(openclaw_frozen_target_source_flag contains "$source_root" src/agents/code-mode-namespaces.ts '"catalog"')" || return 2
+    if [ "$has_catalog" = 0 ]; then
+      export OPENCLAW_FROZEN_TARGET_MCP_CODE_MODE_CATALOG_MODE="legacy"
+    fi
   fi
 }
