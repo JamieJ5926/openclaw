@@ -8,6 +8,7 @@ import type {
   WorkerTranscriptMessage,
 } from "../../../packages/gateway-protocol/src/schema/worker-admission.js";
 import { createNoisyPngBuffer } from "../../../test/helpers/image-fixtures.js";
+import { findSourceImportBackedges } from "../../../test/helpers/source-import-closure.js";
 import { makeTextToolResult } from "../../../test/helpers/text-tool-result.js";
 import { SessionManager } from "../../agents/sessions/session-manager.js";
 import { clearRuntimeConfigSnapshot, setRuntimeConfigSnapshot } from "../../config/io.js";
@@ -160,6 +161,14 @@ function requireAppendableWorkerMessage(
   }
   return message as Parameters<SessionManager["appendMessage"]>[0];
 }
+
+it("keeps worker transcript admission independent of session execution", () => {
+  expect(
+    findSourceImportBackedges("src/gateway/worker-environments/transcript-commit.ts", [
+      "src/agents/sessions/session-manager.ts",
+    ]),
+  ).toEqual([]);
+});
 
 describe("worker transcript commit application", () => {
   let root: string;
