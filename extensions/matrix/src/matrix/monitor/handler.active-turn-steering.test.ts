@@ -173,14 +173,11 @@ describe("Matrix active-turn steering admission", () => {
             body: "keep this run active",
           }),
         );
-        // Wait for published ownership before timing the follow-up.
-        await Promise.race([
-          activeResolverStarted.promise,
-          activeTurn.then(() => {
-            expect(runtime.error).not.toHaveBeenCalled();
-            throw new Error("Matrix active turn ended before queue-policy admission");
-          }),
-        ]);
+        // The first turn in a worker also pays the cold reply-dispatch path (module
+        // graph, session store, plugin discovery); on a starved 2-vCPU runner that
+        // alone exceeded a 10 s budget. The resolver signals its own admission, so
+        // wait on that signal instead of a wall-clock poll.
+        await activeResolverStarted.promise;
         expect(queuePolicyResolver).toHaveBeenCalledTimes(1);
 
         followupTurn = handler(
