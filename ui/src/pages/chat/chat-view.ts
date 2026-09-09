@@ -11,7 +11,6 @@ import type {
   ControlUiSessionBranch,
   ControlUiSessionPullRequest,
 } from "../../../../src/gateway/control-ui-contract.js";
-import type { GatewaySessionRow } from "../../api/types.ts";
 import type { ExecApprovalDecision, ExecApprovalRequest } from "../../app/exec-approval.ts";
 import { renderExecApprovalCard } from "../../components/exec-approval-card.ts";
 import { icons } from "../../components/icons.ts";
@@ -66,6 +65,7 @@ export type ChatProps = Omit<
   | "onRetryQueuedMessage"
   | "onDiscardQueuedMessage"
   | "onFocusComposer"
+  | "onAddToChat"
   | "onOpenSession"
   | "onSend"
 > &
@@ -90,7 +90,7 @@ export type ChatProps = Omit<
     ) => void | Promise<void>;
     workspaceConflict?: WorkspaceResultConflict;
     onDismissWorkspaceConflict?: () => void;
-    swarmSessions?: readonly GatewaySessionRow[];
+    swarm?: Parameters<typeof renderChatSwarmProgress>[0];
     focusMode?: boolean;
     chatMessageMaxWidth?: string | null;
     showNewMessages?: boolean;
@@ -205,6 +205,14 @@ export function renderChat(props: ChatProps) {
         onDiscardQueuedMessage: props.onQueueRemove,
         onCompanionPrefill:
           props.canSend && !props.suggestionComposer ? props.onCompanionPrefill : undefined,
+        onAddToChat:
+          props.canSend && !props.suggestionComposer
+            ? (question) => {
+                const draft = props.getDraft?.() ?? props.draft;
+                props.onDraftChange(draft ? `${draft}\n\n${question}` : question);
+                requestUpdate();
+              }
+            : undefined,
         onOpenSession: props.onSessionSelect,
         onFocusComposer: () =>
           chatSection
@@ -430,10 +438,7 @@ export function renderChat(props: ChatProps) {
                     onResolve: (suggestion, resolution) =>
                       props.onResolveSessionSuggestion?.(suggestion, resolution),
                   })}
-                  ${renderChatSwarmProgress({
-                    sessions: props.swarmSessions ?? [],
-                    sessionKey: props.sessionKey,
-                  })}
+                  ${props.swarm ? renderChatSwarmProgress(props.swarm) : nothing}
                   <openclaw-plugin-contributions
                     .kind=${"composer"}
                     .sessionKey=${props.sessionKey}
