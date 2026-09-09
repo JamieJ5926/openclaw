@@ -61,7 +61,12 @@ describe("PluginsPage lifecycle confirmation", () => {
     return {
       plugin: {
         id: "ch_Y29tbXVuaXR5LXRoaW5n",
-        catalog: { name: "Community Thing", family: "code-plugin", official: false },
+        catalog: {
+          name: "Community Thing",
+          family: "code-plugin",
+          official: false,
+          categories: ["tools"],
+        },
         local: {
           present: false,
           installed: false,
