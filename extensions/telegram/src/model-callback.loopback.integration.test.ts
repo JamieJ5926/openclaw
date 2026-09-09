@@ -1,6 +1,6 @@
 // A real grammY bot and HTTP Bot API prove model callbacks across the active router.
 import { mkdtemp, rm } from "node:fs/promises";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { Agent, createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -99,6 +99,8 @@ describe("Telegram model callback loopback", () => {
     await new Promise<void>((resolve) => {
       server.listen(0, "127.0.0.1", resolve);
     });
+    // Cold model persistence can outlast the loopback server's idle timeout.
+    const callbackAgent = new Agent({ keepAlive: false });
 
     try {
       const apiRoot = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -139,7 +141,10 @@ describe("Telegram model callback loopback", () => {
       expect(Buffer.byteLength(callbackData ?? "", "utf8")).toBeLessThanOrEqual(64);
 
       const callbackSteps: string[] = [];
-      const bot = new Bot(TOKEN, { botInfo: telegramBotInfoForTest, client: { apiRoot } });
+      const bot = new Bot(TOKEN, {
+        botInfo: telegramBotInfoForTest,
+        client: { apiRoot, baseFetchConfig: { agent: callbackAgent } },
+      });
       const telegramDeps = {
         ...defaultTelegramBotDeps,
         buildModelsProviderData: async (): ReturnType<
@@ -246,6 +251,7 @@ describe("Telegram model callback loopback", () => {
         `Model changed to <b>${PROVIDER}/${MODEL}</b>`,
       );
     } finally {
+      callbackAgent.destroy();
       server.close();
       server.closeAllConnections();
       server.unref();
