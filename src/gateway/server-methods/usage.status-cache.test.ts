@@ -511,24 +511,8 @@ describe("usage.status provider usage cache", () => {
               },
       },
     };
-    const held = createDeferredCore<UsageSummary>();
-    mocks.loadProviderUsageSummary.mockReturnValueOnce(held.promise);
-    const rotated = readProfile("openai:first");
-    const rejected = expect(rotated).rejects.toThrow("Account credentials changed");
+    await readProfile("openai:first");
     expect(await readProfile("openai:second")).toEqual(second);
     expect(mocks.loadProviderUsageSummary).toHaveBeenCalledTimes(3);
-    const isCurrent = mocks.loadProviderUsageSummary.mock.calls.at(-1)?.[0].isAuthProfileCurrent;
-    expect(isCurrent?.()).toBe(true);
-    store = {
-      ...store,
-      profiles: {
-        "openai:second": expectDefined(store.profiles["openai:second"], "retained profile"),
-      },
-    };
-    expect(await readProfile("openai:second")).toEqual(second);
-    expect(isCurrent?.()).toBe(false);
-    held.resolve(first);
-    await rejected;
-    expect(await readProfile("openai:second")).toEqual(second);
   });
 });

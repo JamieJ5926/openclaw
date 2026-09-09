@@ -9,6 +9,7 @@ import {
   resolveAuthProfileEligibility,
   resolveAuthProfileOrder,
   type AuthProfileStore,
+  type AuthProfileCredential,
 } from "../agents/auth-profiles.js";
 import { resolveEnvApiKey } from "../agents/model-auth-env.js";
 import { isNonSecretApiKeyMarker } from "../agents/model-auth-markers.js";
@@ -68,6 +69,7 @@ type UsageAuthState = {
   allowAuthProfileStore: boolean;
   getStore?: () => AuthStore;
   store?: AuthStore;
+  onResolvedCredential?: (credential: AuthProfileCredential) => Promise<void>;
 };
 
 function resolveUsageAuthStore(state: UsageAuthState): AuthStore {
@@ -373,6 +375,9 @@ async function resolveOAuthToken(params: {
       if (!resolved) {
         continue;
       }
+      if (resolved.credential && params.allowProfileFallback === false) {
+        await params.state.onResolvedCredential?.(resolved.credential);
+      }
       return {
         provider: params.provider as UsageProviderId,
         token: resolved.apiKey,
@@ -412,6 +417,7 @@ export async function resolveProviderProfileUsageAuth(params: {
   agentDir?: string;
   config: OpenClawConfig;
   env?: NodeJS.ProcessEnv;
+  onResolvedCredential?: UsageAuthState["onResolvedCredential"];
 }): Promise<ProviderAuth | null> {
   const state: UsageAuthState = {
     cfg: params.config,
@@ -419,6 +425,7 @@ export async function resolveProviderProfileUsageAuth(params: {
     agentDir: params.agentDir,
     allowAuthProfileStore: true,
     store: params.store,
+    onResolvedCredential: params.onResolvedCredential,
   };
   const pluginAuth = await resolveProviderUsageAuthViaPlugin({
     state,

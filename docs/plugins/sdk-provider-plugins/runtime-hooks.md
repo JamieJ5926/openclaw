@@ -115,8 +115,9 @@ families](/plugins/sdk-provider-plugins/hook-families) for the shared builders.
     in. Declare it only after both hooks honor the following contract.
 
     When `ctx.authProfileId` is present, the request is for one saved
-    account. The auth resolver helpers are pinned to that exact profile and
-    do not rotate to another credential. Use those helpers instead of a
+    account. The auth resolver helpers are pinned to that exact profile;
+    OAuth refresh stays with its current account and prepared configuration.
+    Use those helpers instead of a
     provider-wide environment or administrator key, and never substitute a
     different account when the selected profile cannot supply usage auth.
     OpenClaw passes the same `authProfileId` to `fetchUsageSnapshot`.

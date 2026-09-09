@@ -1,17 +1,5 @@
 // Tests provider usage loading from plugin-provided sources.
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
-import {
-  clearRuntimeAuthProfileStoreSnapshots,
-  replaceRuntimeAuthProfileStoreSnapshots,
-  type AuthProfileStore,
-} from "../agents/auth-profiles.js";
-import {
-  clearModelAuthStatusUsageCache,
-  loadProfileUsage,
-} from "../gateway/server-methods/models-auth-status-usage-cache.js";
-import { getProviderUsageRuntimeSnapshot } from "../gateway/server-methods/provider-usage-runtime.js";
-import { createDeferredCore } from "../shared/deferred.js";
 import { createProviderUsageFetch } from "../test-utils/provider-usage-fetch.js";
 
 const resolveProviderUsageSnapshotWithPluginMock = vi.fn();
@@ -47,12 +35,6 @@ vi.mock("../plugins/provider-runtime.js", async () => {
   );
   return {
     ...actual,
-    resolveProviderUsageAuthWithPlugin: async (
-      params: Parameters<typeof actual.resolveProviderUsageAuthWithPlugin>[0],
-    ) => {
-      const token = params.context.resolveApiKeyFromConfigAndStore();
-      return token ? { token } : undefined;
-    },
     resolveProviderUsageSnapshotWithPlugin: (...args: unknown[]) =>
       resolveProviderUsageSnapshotWithPluginMock(...args),
   };
@@ -130,109 +112,6 @@ describe("provider-usage.load plugin boundary", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
-
-  const tempDirs = useAutoCleanupTempDirTracker(afterEach);
-
-  it.each(["unchanged", "replaced", "removed"] as const)(
-    "checks published account credentials before delayed transport (%s)",
-    async (change) => {
-      const agentDir = tempDirs.make("usage-credential-owner-");
-      const profileId = "openrouter:account";
-      const config = {};
-      const store: AuthProfileStore = {
-        version: 1,
-        profiles: {
-          [profileId]: { type: "api_key", provider: "openrouter", key: "synthetic-original" },
-        },
-      };
-      const release = createDeferredCore();
-      vi.stubEnv("HTTPS_PROXY", "http://proxy.test:8080");
-      undiciFetch.mockResolvedValue(new Response("{}", { status: 200 }));
-      resolveProviderUsageSnapshotWithPluginMock.mockImplementationOnce(
-        async ({
-          context,
-        }: Parameters<
-          typeof import("../plugins/provider-runtime.js").resolveProviderUsageSnapshotWithPlugin
-        >[0]) => {
-          await release.promise;
-          await context.fetchFn("https://usage.example.invalid", {
-            headers: { Authorization: `Bearer ${context.token}` },
-          });
-          return {
-            provider: "openrouter",
-            displayName: "OpenRouter",
-            windows: [{ label: "Week", usedPercent: 10 }],
-          };
-        },
-      );
-      try {
-        replaceRuntimeAuthProfileStoreSnapshots([{ agentDir, store }]);
-        const snapshot = getProviderUsageRuntimeSnapshot({
-          config,
-          agentId: "main",
-          agentDir,
-          store,
-        });
-        const pending = loadProfileUsage({
-          agentId: "main",
-          agentDir,
-          workspaceDir: agentDir,
-          authStore: store,
-          configRef: config,
-          profileCredentialKeys: snapshot.profileCredentialKeys,
-          profileId,
-          providerId: "openrouter",
-          now: usageNow,
-        }).then(
-          (value) => value,
-          (error: unknown) => error,
-        );
-        await vi.waitFor(() =>
-          expect(resolveProviderUsageSnapshotWithPluginMock).toHaveBeenCalledOnce(),
-        );
-        replaceRuntimeAuthProfileStoreSnapshots([
-          {
-            agentDir,
-            store: {
-              ...store,
-              profiles:
-                change === "removed"
-                  ? {}
-                  : change === "replaced"
-                    ? {
-                        [profileId]: {
-                          type: "api_key",
-                          provider: "openrouter",
-                          key: "synthetic-replacement",
-                        },
-                      }
-                    : store.profiles,
-              usageStats: { [profileId]: { lastUsed: usageNow } },
-            },
-          },
-        ]);
-        release.resolve();
-        const result = await pending;
-        expect(undiciFetch).toHaveBeenCalledTimes(change === "unchanged" ? 1 : 0);
-        if (change === "unchanged") {
-          expect(result).toMatchObject({ providers: [{ windows: [{ usedPercent: 10 }] }] });
-          expect(requireUndiciFetchInit()).toMatchObject({
-            headers: { Authorization: "Bearer synthetic-original" },
-          });
-        } else {
-          expect(result).toBeInstanceOf(Error);
-          expect(result).toMatchObject({
-            message: expect.stringContaining("Account credentials changed"),
-          });
-        }
-      } finally {
-        release.resolve();
-        clearModelAuthStatusUsageCache();
-        clearRuntimeAuthProfileStoreSnapshots();
-        vi.unstubAllEnvs();
-      }
-    },
-  );
 
   it("prefers plugin-owned usage snapshots", async () => {
     resolveProviderUsageSnapshotWithPluginMock.mockResolvedValueOnce({

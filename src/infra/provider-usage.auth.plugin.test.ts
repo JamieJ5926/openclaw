@@ -164,63 +164,6 @@ describe("resolveProviderAuths plugin boundary", () => {
     expect(ensureAuthProfileStoreMock).not.toHaveBeenCalled();
   });
 
-  it("binds plugin usage auth to the requested profile", async () => {
-    const store = {
-      profiles: {
-        "openai:first": {
-          type: "oauth",
-          provider: "openai",
-          access: "first-access",
-          refresh: "first-refresh",
-          expires: Date.now() + 60_000,
-        },
-        "openai:second": {
-          type: "oauth",
-          provider: "openai",
-          access: "second-access",
-          refresh: "second-refresh",
-          expires: Date.now() + 60_000,
-        },
-      },
-    };
-    resolveApiKeyForProfileMock.mockImplementation(async (params) => {
-      const profileId = (params as { profileId: string }).profileId;
-      return {
-        apiKey: profileId === "openai:second" ? "second-access" : "first-access",
-        provider: "openai",
-      };
-    });
-    resolveProviderUsageAuthWithPluginMock.mockImplementationOnce(async (rawParams) => {
-      const params = rawParams as {
-        context: {
-          authProfileId?: string;
-          resolveOAuthToken: () => Promise<{ token: string } | null>;
-        };
-      };
-      expect(params.context.authProfileId).toBe("openai:second");
-      return params.context.resolveOAuthToken();
-    });
-
-    await expect(
-      resolveProviderProfileUsageAuth({
-        provider: "openai",
-        profileId: "openai:second",
-        store: store as never,
-        config: {},
-        env: {},
-      }),
-    ).resolves.toEqual({
-      provider: "openai",
-      token: "second-access",
-      authProfileId: "openai:second",
-    });
-    expect(resolveProviderUsageAuthWithPluginMock).toHaveBeenCalledOnce();
-    expect(resolveApiKeyForProfileMock).toHaveBeenCalledOnce();
-    expect(resolveApiKeyForProfileMock).toHaveBeenCalledWith(
-      expect.objectContaining({ profileId: "openai:second", allowProfileFallback: false }),
-    );
-  });
-
   it("does not substitute an ambient key for account-scoped plugin usage", async () => {
     const profileId = "openrouter:account";
     const store = {

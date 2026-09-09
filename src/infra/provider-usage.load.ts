@@ -56,6 +56,9 @@ type UsageSummaryOptions = {
   authProfile?: { provider: UsageProviderId; profileId: string };
   /** Closure-bound cache ownership check, evaluated immediately before provider I/O. */
   isAuthProfileCurrent?: () => boolean;
+  onAuthProfileResolved?: Parameters<
+    typeof resolveProviderProfileUsageAuth
+  >[0]["onResolvedCredential"];
   authStore?: AuthProfileStore;
   agentDir?: string;
   workspaceDir?: string;
@@ -183,6 +186,7 @@ export async function loadProviderUsageSummary(
         ? await resolveProviderProfileUsageAuth({
             provider,
             profileId: opts.authProfile.profileId,
+            onResolvedCredential: opts.onAuthProfileResolved,
             store: getAuthStore(),
             agentDir: opts.agentDir,
             config,
