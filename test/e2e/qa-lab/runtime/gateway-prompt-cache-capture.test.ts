@@ -2,11 +2,15 @@ import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import type { Context, Model } from "@openclaw/llm-core";
 import { describe, expect, it } from "vitest";
+import { convertAnthropicMessages } from "../../../../packages/ai/src/transports/anthropic-messages.js";
+import { applyAnthropicRequestCacheControl } from "../../../../packages/ai/src/transports/anthropic-payload-policy.js";
 import {
   INTERNAL_RUNTIME_CONTEXT_BEGIN,
   INTERNAL_RUNTIME_CONTEXT_END,
 } from "../../../../src/agents/internal-runtime-context.js";
+import { buildRuntimeFactsContext } from "../../../../src/agents/runtime-facts-prompt.js";
 import {
   createDebugProxyCaptureReader,
   type DebugProxyCaptureReader,
@@ -21,6 +25,7 @@ import {
   cacheRequestsComplete,
   CacheProofStopError,
   collectCacheFailureEvidence,
+  checkCacheReadFailures,
   decodeCacheExchanges,
   decodeCacheResponse,
   readCacheCaptureRows,
@@ -39,6 +44,7 @@ import {
 } from "./gateway-prompt-cache-contract.js";
 import {
   assertGatewayPromptCacheStopped,
+  gatewayPromptCacheOptions,
   stopGatewayPromptCacheFixture,
 } from "./gateway-prompt-cache-fixture.js";
 
@@ -74,9 +80,23 @@ function openaiStream(usage: unknown, status = "completed") {
 const openaiUsage = {
   input_tokens: 500,
   output_tokens: 9,
+  total_tokens: 509,
+  output_tokens_details: { reasoning_tokens: 0 },
   input_tokens_details: { cached_tokens: 300, cache_write_tokens: 100 },
 };
 const reader = { getSessionEvents: () => [], readBlob: () => null };
+
+function persistedOpenaiAssistant(): Record<string, unknown> {
+  return {
+    role: "assistant",
+    provider: "openai",
+    model: openai.id,
+    api: "openai-responses",
+    responseId: "resp_test",
+    stopReason: "stop",
+    usage: { input: 100, output: 9, cacheRead: 300, cacheWrite: 100, totalTokens: 509 },
+  };
+}
 
 function carrier(text: string, cached = false) {
   return {
@@ -260,7 +280,7 @@ describe("raw cache stream evidence", () => {
                 throw new Error("private storage detail");
               }
               return kind === "overflow"
-                ? Array(512).fill({})
+                ? Array.from({ length: 512 }, () => ({}))
                 : [{ kind, path: "/v1/messages", errorText: "private transport detail" }];
             },
           },
@@ -306,9 +326,9 @@ describe("raw cache stream evidence", () => {
     );
     expect(result).toHaveLength(2);
     expect(reads).toBe(4);
-    await expect(waitForCacheExchanges(() => first, reader, openai, 2, 1)).rejects.toThrow(
-      "full terminal capture",
-    );
+    await expect(
+      waitForCacheExchanges(() => first, reader, openai, 2, { timeoutMs: 1 }),
+    ).rejects.toThrow("full terminal capture");
     await expect(
       waitForCacheExchanges(() => [...first, ...second], reader, openai, 1),
     ).rejects.toThrow("Unexpected");
@@ -355,11 +375,355 @@ describe("cache first-stop evidence", () => {
   });
 });
 
+describe("verified Responses terminal with a capture read failure", () => {
+  function fixture() {
+    const request: Record<string, unknown> = {
+      id: 1,
+      kind: "request",
+      flowId: "private-flow",
+      host: "api.openai.com",
+      path: "/v1/responses",
+      method: "POST",
+      dataText: JSON.stringify({ model: openai.id, stream: true }),
+    };
+    const terminal: Record<string, unknown> = {
+      id: 2,
+      kind: "error",
+      direction: "local",
+      flowId: "private-flow",
+      host: "api.openai.com",
+      path: "/v1/responses",
+      status: 200,
+      contentType: "text/event-stream",
+      metaJson: JSON.stringify({ bodyCapture: "failed", stage: "response-body" }),
+      dataBlobId: "terminal-blob",
+      dataText: openaiStream(openaiUsage),
+      errorText: "private response body failure",
+    };
+    const assistant = persistedOpenaiAssistant();
+    const rows = [request, terminal];
+    const capture = {
+      getSessionEvents: () => rows,
+      readBlob: () => openaiStream(openaiUsage),
+    };
+    return { rows, request, terminal, assistant, capture };
+  }
+
+  it("defers the candidate until raw terminal and persisted assistant proof agree", async () => {
+    const { rows, capture, assistant } = fixture();
+    expect(readCacheCaptureRows(capture, "private-session", openai)).toEqual(rows);
+    expect(cacheRequestsComplete(rows, capture, openai)).toBe(true);
+    const decoded = await decodeCacheExchanges(rows, capture, openai, [assistant]);
+    expect(decoded[0]).toMatchObject({
+      captureDisposition: "verified-terminal-with-response-body-read-failure",
+      usage: { cacheRead: 300, cacheWrite: 100 },
+    });
+    expect(
+      await waitForCacheExchanges(() => rows, capture, openai, 1, { messages: [assistant] }),
+    ).toHaveLength(1);
+    const evidence = await collectCacheFailureEvidence(
+      capture,
+      "private-session",
+      openai,
+      [assistant],
+      "text-followup",
+    );
+    expect(evidence).toMatchObject({
+      captureComplete: true,
+      transportErrorCount: 1,
+      verifiedTerminalReadFailureCount: 1,
+      requests: [{ terminalComplete: true, accountingValid: true }],
+      captureErrors: [
+        { disposition: "verified-terminal-with-response-body-read-failure", cause: "unavailable" },
+      ],
+    });
+    expect(JSON.stringify(evidence)).not.toContain("private");
+  });
+
+  it("does not accept capture arriving before assistant persistence or convert it to a budget wait", async () => {
+    const { rows, capture } = fixture();
+    expect(readCacheCaptureRows(capture, "session", openai)).toHaveLength(2);
+    await expect(
+      waitForCacheExchanges(() => rows, capture, openai, 1, { messages: [], timeoutMs: 1 }),
+    ).rejects.toMatchObject({ phase: "accounting" });
+  });
+
+  it("waits for independently persisted assistant proof after capture arrives", async () => {
+    const { rows, capture, assistant } = fixture();
+    let reads = 0;
+    const exchanges = await waitForCacheExchanges(() => rows, capture, openai, 1, {
+      messages: () => (++reads === 1 ? [] : [assistant]),
+    });
+    expect(reads).toBe(2);
+    expect(exchanges[0]?.captureDisposition).toBe(
+      "verified-terminal-with-response-body-read-failure",
+    );
+  });
+
+  it("bounds monitor deferral and preserves its first accounting cause", async () => {
+    const { rows, capture, assistant } = fixture();
+    const pending = new Map<string, number>();
+    await checkCacheReadFailures(
+      () => rows,
+      capture,
+      openai,
+      () => [],
+      pending,
+    );
+    expect(pending.size).toBe(1);
+    pending.set(String(rows[0]!.flowId), Date.now() - 15_001);
+    const state: { first?: CacheProofStopError } = {};
+    await expect(
+      runWithCacheProofStop(state, () =>
+        checkCacheReadFailures(
+          () => rows,
+          capture,
+          openai,
+          () => [],
+          pending,
+        ),
+      ),
+    ).rejects.toMatchObject({ phase: "accounting" });
+    expect(state.first?.phase).toBe("accounting");
+    await checkCacheReadFailures(
+      () => rows,
+      capture,
+      openai,
+      () => [assistant],
+      pending,
+    );
+    expect(pending.size).toBe(0);
+  });
+
+  it("refreshes capture after history advances during the monitor read", async () => {
+    const { rows, request, capture, assistant } = fixture();
+    let currentRows = rows;
+    await expect(
+      checkCacheReadFailures(
+        () => currentRows,
+        capture,
+        openai,
+        async () => {
+          await Promise.resolve();
+          currentRows = [...rows, { ...request, flowId: "next-request" }];
+          return [assistant, { ...assistant, responseId: "next-response" }];
+        },
+        new Map(),
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it.each([
+    "responseId",
+    "model",
+    "api",
+    "provider",
+    "stopReason",
+    "errorMessage",
+    "input",
+    "output",
+    "cacheRead",
+    "cacheWrite",
+    "totalTokens",
+  ] as const)(
+    "rejects invalid persisted %s while retaining raw diagnostic usage",
+    async (field) => {
+      const { rows, capture, assistant } = fixture();
+      if (["input", "output", "cacheRead", "cacheWrite", "totalTokens"].includes(field)) {
+        Object.assign(assistant.usage as object, { [field]: 0 });
+      } else {
+        assistant[field] = field === "stopReason" ? "aborted" : "wrong";
+      }
+      await expect(decodeCacheExchanges(rows, capture, openai, [assistant])).rejects.toMatchObject({
+        phase: "accounting",
+      });
+      const evidence = await collectCacheFailureEvidence(
+        capture,
+        "session",
+        openai,
+        [assistant],
+        "text-followup",
+      );
+      expect(evidence).toMatchObject({
+        captureComplete: false,
+        verifiedTerminalReadFailureCount: 0,
+        requests: [
+          {
+            terminalComplete: true,
+            accountingValid: false,
+            rawUsage: { input: 500, cacheRead: 300, cacheWrite: 100 },
+          },
+        ],
+      });
+    },
+  );
+
+  it("rejects an extra persisted assistant instead of matching only the first one", async () => {
+    const { rows, capture, assistant } = fixture();
+    await expect(
+      decodeCacheExchanges(rows, capture, openai, [assistant, assistant]),
+    ).rejects.toMatchObject({ phase: "accounting" });
+    const evidence = await collectCacheFailureEvidence(
+      capture,
+      "session",
+      openai,
+      [assistant, assistant],
+      "text-followup",
+    );
+    expect(evidence.captureComplete).toBe(false);
+    expect(evidence.verifiedTerminalReadFailureCount).toBe(0);
+  });
+
+  it.each([
+    "preterminal",
+    "malformed",
+    "truncated",
+    "incomplete",
+    "duplicate",
+    "contradictory",
+    "missing-usage",
+    "missing-write",
+    "missing-total",
+    "invalid-total",
+    "missing-output-details",
+    "invalid-reasoning",
+    "trailing-truncation",
+    "contradictory-type",
+  ] as const)("rejects %s raw terminal evidence", async (kind) => {
+    const { rows, capture, assistant } = fixture();
+    const good = openaiStream(openaiUsage);
+    const bodies = {
+      preterminal: sse("response.created", { response: { id: "resp_test" } }),
+      malformed: "event: response.completed\ndata: {broken\n\n",
+      truncated: good.slice(0, -12),
+      incomplete: openaiStream(openaiUsage, "incomplete"),
+      duplicate: good + good,
+      contradictory: good + openaiStream(openaiUsage, "failed"),
+      "missing-usage": openaiStream(undefined),
+      "missing-write": openaiStream({
+        ...openaiUsage,
+        input_tokens_details: { cached_tokens: 300 },
+      }),
+      "missing-total": openaiStream({ ...openaiUsage, total_tokens: undefined }),
+      "invalid-total": openaiStream({ ...openaiUsage, total_tokens: 508 }),
+      "missing-output-details": openaiStream({ ...openaiUsage, output_tokens_details: undefined }),
+      "invalid-reasoning": openaiStream({
+        ...openaiUsage,
+        output_tokens_details: { reasoning_tokens: 10 },
+      }),
+      "trailing-truncation": good + "event: response.failed\ndata: {",
+      "contradictory-type": `event: response.completed\n${good.replace(
+        '"type":"response.completed"',
+        '"type":"response.failed"',
+      )}`,
+    };
+    capture.readBlob = () => bodies[kind];
+    await expect(decodeCacheExchanges(rows, capture, openai, [assistant])).rejects.toThrow();
+    await expect(
+      checkCacheReadFailures(
+        () => rows,
+        capture,
+        openai,
+        () => [],
+        new Map(),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it.each(["missing", "unreadable", "unreferenced"] as const)(
+    "rejects a %s full blob even with a complete inline preview",
+    async (kind) => {
+      const { rows, capture, terminal, assistant } = fixture();
+      const missingReader: DebugProxyCaptureReader = {
+        ...capture,
+        readBlob: () => {
+          if (kind === "unreadable") {
+            throw new Error("private storage failure");
+          }
+          return null;
+        },
+      };
+      if (kind === "unreferenced") {
+        delete terminal.dataBlobId;
+      }
+      await expect(decodeCacheExchanges(rows, missingReader, openai, [assistant])).rejects.toThrow(
+        /blob/,
+      );
+      expect(() => readCacheCaptureRows(missingReader, "session", openai)).toThrow();
+    },
+  );
+
+  it.each([
+    "status",
+    "endpoint",
+    "model",
+    "sse",
+    "stage",
+    "stalled",
+    "finalized",
+    "oversized",
+  ] as const)("rejects an invalid %s capture candidate", async (kind) => {
+    const { rows, request, terminal, capture, assistant } = fixture();
+    if (kind === "status") {
+      terminal.status = 500;
+    } else if (kind === "endpoint") {
+      terminal.path = "/v1/messages";
+    } else if (kind === "model") {
+      request.dataText = JSON.stringify({ model: "wrong", stream: true });
+    } else if (kind === "sse") {
+      terminal.contentType = "application/json";
+    } else {
+      terminal.metaJson = JSON.stringify({
+        stage: kind === "stage" ? "before-headers" : "response-body",
+        bodyCapture: kind === "stage" ? "failed" : kind === "oversized" ? "too-large" : kind,
+      });
+    }
+    await expect(decodeCacheExchanges(rows, capture, openai, [assistant])).rejects.toThrow();
+    expect(() => readCacheCaptureRows(capture, "session", openai)).toThrow();
+  });
+
+  it.each([
+    "retry",
+    "duplicate-request",
+    "duplicate-terminal",
+    "unmatched-error",
+    "extra-error",
+  ] as const)("rejects %s rather than waiting or ignoring the extra row", async (kind) => {
+    const { rows, request, terminal, capture, assistant } = fixture();
+    rows.push(
+      kind === "retry"
+        ? { ...terminal, kind: "retry-link" }
+        : kind === "duplicate-request"
+          ? { ...request }
+          : kind === "duplicate-terminal"
+            ? { ...terminal, kind: "response", metaJson: undefined }
+            : kind === "unmatched-error"
+              ? { ...terminal, flowId: "unmatched" }
+              : { kind: "error", path: "/unknown", flowId: "other" },
+    );
+    await expect(
+      waitForCacheExchanges(() => rows, capture, openai, 1, {
+        messages: [assistant],
+        timeoutMs: 1,
+      }),
+    ).rejects.toThrow(/Provider|Duplicate|Unmatched|Unexpected/);
+    const evidence = await collectCacheFailureEvidence(
+      capture,
+      "session",
+      openai,
+      [assistant],
+      "text-followup",
+    );
+    expect(evidence.captureComplete).toBe(false);
+    expect(evidence.verifiedTerminalReadFailureCount).toBe(0);
+  });
+});
+
 describe("persisted cache body boundary", () => {
   const request = JSON.stringify({ model: sonnet.id, stream: true });
   const response = anthropicStream();
   async function withStoredExchange(
-    options: { request?: string; response?: string; inline?: boolean },
+    options: { request?: string; response?: string; inline?: boolean; readFailure?: boolean },
     check: (capture: {
       rows: Array<Record<string, unknown>>;
       reader: DebugProxyCaptureReader;
@@ -369,10 +733,13 @@ describe("persisted cache body boundary", () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "cache-body-test-"));
     const env = { OPENCLAW_STATE_DIR: root };
     const store = new DebugProxyCaptureStore({ env });
+    const model = options.readFailure ? openai : sonnet;
     try {
       for (const [index, kind] of (["request", "response"] as const).entries()) {
         const data =
-          kind === "request" ? (options.request ?? request) : (options.response ?? response);
+          kind === "request"
+            ? (options.request ?? JSON.stringify({ model: model.id, stream: true }))
+            : (options.response ?? response);
         const contentType = kind === "request" ? "application/json" : "text/event-stream";
         store.recordEvent({
           sessionId: "body-boundary",
@@ -380,27 +747,62 @@ describe("persisted cache body boundary", () => {
           sourceScope: "openclaw",
           sourceProcess: "test",
           protocol: "http",
-          direction: kind === "request" ? "outbound" : "inbound",
-          kind,
+          direction: kind === "request" ? "outbound" : options.readFailure ? "local" : "inbound",
+          kind: kind === "response" && options.readFailure ? "error" : kind,
           flowId: "body-flow",
           method: "POST",
-          host: "api.anthropic.com",
-          path: "/v1/messages",
+          host: options.readFailure ? "api.openai.com" : "api.anthropic.com",
+          path: options.readFailure ? "/v1/responses" : "/v1/messages",
           ...(kind === "response" ? { status: 200 } : {}),
           contentType,
+          ...(kind === "response" && options.readFailure
+            ? { metaJson: JSON.stringify({ bodyCapture: "failed", stage: "response-body" }) }
+            : {}),
           ...(options.inline
             ? { dataText: data }
             : persistEventPayload(store, { data, contentType })),
         });
       }
-      const reader = createDebugProxyCaptureReader({ env });
-      await check({ rows: readCacheCaptureRows(reader, "body-boundary"), reader, store });
+      const storedReader = createDebugProxyCaptureReader({ env });
+      await check({
+        rows: readCacheCaptureRows(storedReader, "body-boundary", model),
+        reader: storedReader,
+        store,
+      });
     } finally {
       store.close();
       closeOpenClawStateDatabaseByPath(store.dbPath);
       await fs.rm(root, { recursive: true, force: true });
     }
   }
+
+  it("verifies an error-row terminal beyond the preview from its real persisted blob", async () => {
+    const body =
+      sse("response.output_text.delta", { delta: "x".repeat(9000) }) + openaiStream(openaiUsage);
+    await withStoredExchange(
+      { readFailure: true, response: body },
+      async ({ rows, reader: storedReader }) => {
+        expect(rows[1]?.kind).toBe("error");
+        expect(Buffer.byteLength(String(rows[1]?.dataText))).toBe(8192);
+        const messages = [persistedOpenaiAssistant()];
+        const [decoded] = await decodeCacheExchanges(rows, storedReader, openai, messages);
+        expect(decoded?.responseHash).toBe(createHash("sha256").update(body).digest("hex"));
+        const evidence = await collectCacheFailureEvidence(
+          storedReader,
+          "body-boundary",
+          openai,
+          messages,
+          "text-followup",
+        );
+        expect(evidence).toMatchObject({
+          captureComplete: true,
+          responseCount: 0,
+          transportErrorCount: 1,
+          verifiedTerminalReadFailureCount: 1,
+        });
+      },
+    );
+  });
 
   it.each(["request", "response"] as const)(
     "decodes the complete persisted %s beyond the 8 KiB preview",
@@ -414,11 +816,11 @@ describe("persisted cache body boundary", () => {
             })
           : sse("content_block_delta", { delta: { type: "text_delta", text: "x".repeat(9000) } }) +
             response;
-      await withStoredExchange({ [kind]: body }, async ({ rows, reader }) => {
-        const row = rows.find((row) => row.kind === kind)!;
+      await withStoredExchange({ [kind]: body }, async ({ rows, reader: storedReader }) => {
+        const row = rows.find((entry) => entry.kind === kind)!;
         expect(Buffer.byteLength(String(row.dataText))).toBe(8192);
         expect(typeof row.dataBlobId).toBe("string");
-        const [decoded] = await decodeCacheExchanges(rows, reader, sonnet);
+        const [decoded] = await decodeCacheExchanges(rows, storedReader, sonnet);
         expect(decoded?.[kind === "request" ? "requestHash" : "responseHash"]).toBe(
           createHash("sha256").update(body).digest("hex"),
         );
@@ -434,23 +836,24 @@ describe("persisted cache body boundary", () => {
   );
 
   it("accepts complete inline bodies only when no blob is referenced", async () => {
-    await withStoredExchange({ inline: true }, async ({ rows, reader }) => {
+    await withStoredExchange({ inline: true }, async ({ rows, reader: storedReader }) => {
       expect(rows.every((row) => row.dataBlobId === null)).toBe(true);
-      expect(await decodeCacheExchanges(rows, reader, sonnet)).toHaveLength(1);
+      expect(await decodeCacheExchanges(rows, storedReader, sonnet)).toHaveLength(1);
     });
   });
 
   it.each(["missing", "unreadable", "empty", "oversized"] as const)(
     "rejects a %s full blob despite a valid inline preview",
     async (kind) => {
-      await withStoredExchange({}, async ({ rows, reader, store }) => {
+      await withStoredExchange({}, async ({ rows, reader: storedReader, store }) => {
+        let captureReader = storedReader;
         const requestRow = rows.find((row) => row.kind === "request")!;
         expect(requestRow.dataText).toBe(request);
         if (kind === "missing") {
           store.purgeAll();
         } else if (kind === "unreadable") {
-          reader = {
-            ...reader,
+          captureReader = {
+            ...storedReader,
             readBlob() {
               throw new Error("private storage detail");
             },
@@ -460,7 +863,7 @@ describe("persisted cache body boundary", () => {
             data: kind === "empty" ? "" : "x".repeat(2 * 1024 * 1024 + 1),
           }).dataBlobId;
         }
-        await expect(decodeCacheExchanges(rows, reader, sonnet)).rejects.toThrow(
+        await expect(decodeCacheExchanges(rows, captureReader, sonnet)).rejects.toThrow(
           kind === "unreadable"
             ? "Provider capture blob could not be read."
             : "Provider capture body is missing or exceeds the proof bound.",
@@ -471,6 +874,94 @@ describe("persisted cache body boundary", () => {
 });
 
 describe("cache history and lifecycle proof", () => {
+  it.each(["provider", "transport"] as const)(
+    "compares real %s converter and allocator string/text-block equivalents",
+    async (profile) => {
+      const model: Model<"anthropic-messages"> = {
+        ...fable,
+        name: "Cache fixture",
+        api: "anthropic-messages",
+        baseUrl: "https://api.anthropic.com",
+        input: ["text"],
+        reasoning: true,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 200_000,
+        maxTokens: 4096,
+      };
+      const history: Context["messages"] = [
+        { role: "user", content: "exact seed\n  preserve spacing", timestamp: 0 },
+        { role: "user", content: carrier("same facts").text, timestamp: 0 },
+      ];
+      const next: Context["messages"] = [
+        ...history,
+        { role: "user", content: "followup", timestamp: 1 },
+        { role: "user", content: carrier("same facts").text, timestamp: 1 },
+      ];
+      const requests = await Promise.all(
+        [history, next].map(async (messages) => {
+          const payload = {
+            messages: await convertAnthropicMessages(messages, model, false, { profile }),
+          };
+          applyAnthropicRequestCacheControl(payload, { type: "ephemeral" }, true);
+          return payload;
+        }),
+      );
+      expect(Array.isArray(requests[0]!.messages[1]!.content)).toBe(true);
+      expect(typeof requests[1]!.messages[1]!.content).toBe("string");
+      const exchanges = requests.map((request, index) =>
+        Object.assign(exchange([], index ? 7950 : 0), { request }),
+      );
+      expect(() => verifyCacheConversation(exchanges, fable, "text-followup", 1)).not.toThrow();
+    },
+  );
+  it("allows identical current runtime facts without mistaking them for historical retention", () => {
+    const turns = conversation();
+    const messages = turns[1]!.request.messages as ReturnType<typeof message>[];
+    messages.at(-1)!.content = [carrier("turn one")];
+    expect(() => verifyCacheConversation(turns, sonnet, "text-followup", 1)).not.toThrow();
+  });
+  it.each(["missing", "extra", "misplaced", "assistant"] as const)(
+    "rejects a %s current carrier",
+    (kind) => {
+      const turns = conversation();
+      const messages = turns[1]!.request.messages as ReturnType<typeof message>[];
+      const current = messages.at(-1)!;
+      if (kind === "missing") {
+        messages.pop();
+      } else if (kind === "extra") {
+        current.content.push(carrier("extra"));
+      } else if (kind === "assistant") {
+        current.role = "assistant";
+      } else {
+        messages.push(message("user", [{ type: "text", text: "after carrier" }]));
+      }
+      expect(() => verifyCacheConversation(turns, sonnet, "text-followup", 1)).toThrow(/carrier/);
+    },
+  );
+  it("rejects relocation of a retained original even if its text is unchanged", () => {
+    const turns = conversation(true);
+    const messages = turns[1]!.request.messages as ReturnType<typeof message>[];
+    [messages[1], messages[2]] = [messages[2]!, messages[1]!];
+    expect(() => verifyCacheConversation(turns, fable, "text-followup", 1)).toThrow(
+      "Retained runtime carrier moved",
+    );
+  });
+  it("enables the real runtime-facts producer in both fixture allowlists", () => {
+    const options = gatewayPromptCacheOptions(sonnet, "fixture-root", "fixture-session");
+    const cfg = options!.mutateConfig!({});
+    const effective = cfg.tools!.allow!.filter((tool) =>
+      cfg.agents!.entries!.qa!.tools!.allow!.includes(tool),
+    );
+    expect(effective).toEqual(["read", "process"]);
+    expect(
+      buildRuntimeFactsContext({
+        cfg,
+        agentId: "qa",
+        sessionKey: "agent:qa:cache-fixture-isolated",
+        capabilityToolNames: new Set(effective),
+      }),
+    ).toEqual([{ kind: "conversation-data", text: "Active exec sessions:\nnone" }]);
+  });
   it("uses actual model contracts for transient and retained carriers", () => {
     expect(verifyCacheConversation(conversation(), sonnet, "text-followup", 1).lifecycle).toBe(
       "transient",
@@ -504,61 +995,80 @@ describe("cache history and lifecycle proof", () => {
       verifyCacheConversation([...conversation(), conversation()[1]!], sonnet, "text-followup", 1),
     ).toThrow("count");
   });
-  it("requires both tool continuations and marginal reuse of the first large read result", () => {
-    const seed = message("user", [{ type: "text", text: "unique seed" }]);
-    const a = message("assistant", [
-      { type: "tool_use", id: "a", name: "read", input: { path: "a.txt" } },
-    ]);
-    const resultA = message("user", [
-      { type: "tool_result", tool_use_id: "a", content: "large first tool result" },
-    ]);
-    const b = message("assistant", [
-      { type: "tool_use", id: "b", name: "read", input: { path: "b.txt" } },
-    ]);
-    const resultB = message("user", [
-      { type: "tool_result", tool_use_id: "b", content: "opaque answer" },
-    ]);
-    const history = [
-      [seed],
-      [seed, a, resultA],
-      [seed, a, resultA, b, resultB],
-      [
-        seed,
-        a,
-        resultA,
-        b,
-        resultB,
-        message("assistant", [{ type: "text", text: "opaque answer" }]),
-        message("user", [{ type: "text", text: "repeat" }]),
-      ],
-    ];
-    const valid = history.map((messages, index) => ({
-      ...exchange([
-        ...structuredClone(messages),
-        message("user", [carrier(index === 3 ? "new turn" : "first turn")]),
-      ]),
-      usage: {
-        input: 50,
-        output: 8,
-        cacheRead: [0, 7950, 15950, 16000][index]!,
-        cacheWrite: [7950, 8000, 100, 150][index]!,
-        totalInput: [8000, 16000, 16100, 16200][index]!,
-      },
-    }));
-    expect(() => verifyCacheConversation(valid, sonnet, "dependent-reads", 3)).not.toThrow();
-    const continuationsMiss = structuredClone(valid);
-    continuationsMiss[1]!.usage.cacheRead = 0;
-    continuationsMiss[2]!.usage.cacheRead = 0;
-    continuationsMiss[3]!.usage.cacheRead = 7950;
-    expect(() => verifyCacheConversation(continuationsMiss, sonnet, "dependent-reads", 3)).toThrow(
-      "Request 2",
-    );
-    const missingToolCache = structuredClone(valid);
-    missingToolCache[2]!.usage.cacheRead = 7950;
-    expect(() => verifyCacheConversation(missingToolCache, sonnet, "dependent-reads", 3)).toThrow(
-      "Request 3",
-    );
-  });
+  it.each([false, true])(
+    "requires both tool continuations and marginal reuse with retained=%s",
+    (retained) => {
+      const seed = message("user", [{ type: "text", text: "unique seed" }]);
+      const a = message("assistant", [
+        { type: "tool_use", id: "a", name: "read", input: { path: "a.txt" } },
+      ]);
+      const resultA = message("user", [
+        { type: "tool_result", tool_use_id: "a", content: "large first tool result" },
+      ]);
+      const b = message("assistant", [
+        { type: "tool_use", id: "b", name: "read", input: { path: "b.txt" } },
+      ]);
+      const resultB = message("user", [
+        { type: "tool_result", tool_use_id: "b", content: "opaque answer" },
+      ]);
+      const history = [
+        [seed],
+        [seed, a, resultA],
+        [seed, a, resultA, b, resultB],
+        [
+          seed,
+          a,
+          resultA,
+          b,
+          resultB,
+          message("assistant", [{ type: "text", text: "opaque answer" }]),
+          message("user", [{ type: "text", text: "repeat" }]),
+        ],
+      ];
+      const valid = history.map((messages, index) =>
+        Object.assign(
+          exchange([
+            ...(retained ? [message("user", [carrier("first turn", true)])] : []),
+            ...structuredClone(messages),
+            ...(!retained || index === 3
+              ? [message("user", [carrier(index === 3 ? "new turn" : "first turn")])]
+              : []),
+          ]),
+          {
+            usage: {
+              input: 50,
+              output: 8,
+              cacheRead: [0, 7950, 15950, 16000][index]!,
+              cacheWrite: [7950, 8000, 100, 150][index]!,
+              totalInput: [8000, 16000, 16100, 16200][index]!,
+            },
+          },
+        ),
+      );
+      if (retained) {
+        // Retained context starts at the first request's tail, then stays at that
+        // exact historical position through both tool continuations.
+        for (const turn of valid) {
+          const messages = turn.request.messages as ReturnType<typeof message>[];
+          [messages[0], messages[1]] = [messages[1]!, messages[0]!];
+        }
+      }
+      const model = retained ? fable : sonnet;
+      expect(() => verifyCacheConversation(valid, model, "dependent-reads", 3)).not.toThrow();
+      const continuationsMiss = structuredClone(valid);
+      continuationsMiss[1]!.usage.cacheRead = 0;
+      continuationsMiss[2]!.usage.cacheRead = 0;
+      continuationsMiss[3]!.usage.cacheRead = 7950;
+      expect(() => verifyCacheConversation(continuationsMiss, model, "dependent-reads", 3)).toThrow(
+        "Request 2",
+      );
+      const missingToolCache = structuredClone(valid);
+      missingToolCache[2]!.usage.cacheRead = 7950;
+      expect(() => verifyCacheConversation(missingToolCache, model, "dependent-reads", 3)).toThrow(
+        "Request 3",
+      );
+    },
+  );
   it("requires real read A result before read B and both successful results", () => {
     expect(() =>
       verifyDependentReadHistory(readHistory(), "a.txt", "b-random.txt", "opaque-answer"),
@@ -581,6 +1091,11 @@ describe("cache history and lifecycle proof", () => {
         "opaque-answer",
       ),
     ).toThrow("order");
+    const otherTool = readHistory();
+    Object.assign(otherTool[0]!.content[0]!, { name: "process" });
+    expect(() =>
+      verifyDependentReadHistory(otherTool, "a.txt", "b-random.txt", "opaque-answer"),
+    ).toThrow("read");
   });
 });
 
@@ -591,16 +1106,16 @@ describe("persisted cache usage reconciliation", () => {
     model: openai.id,
     usage: { input: 500, output: 9, cacheRead: 300, cacheWrite: 100, totalInput: 500 },
   };
-  function persisted(exchange: CacheExchange) {
-    const usage = exchange.usage;
+  function persisted(capturedExchange: CacheExchange) {
+    const usage = capturedExchange.usage;
     return {
       role: "assistant",
-      model: exchange.model,
-      api: exchange.api,
-      responseId: exchange.responseId,
+      model: capturedExchange.model,
+      api: capturedExchange.api,
+      responseId: capturedExchange.responseId,
       usage: {
         input:
-          exchange.api === "openai-responses"
+          capturedExchange.api === "openai-responses"
             ? usage.input - usage.cacheRead - (usage.cacheWrite ?? 0)
             : usage.input,
         output: usage.output,
@@ -626,9 +1141,9 @@ describe("persisted cache usage reconciliation", () => {
   it.each(["cacheRead", "cacheWrite"])(
     "rejects zeroed persisted %s despite positive raw usage",
     (field) => {
-      const message = persisted(raw);
-      Object.assign(message.usage, { [field]: 0 });
-      expect(() => reconcileCacheUsage([raw], [message])).toThrow(field);
+      const assistant = persisted(raw);
+      Object.assign(assistant.usage, { [field]: 0 });
+      expect(() => reconcileCacheUsage([raw], [assistant])).toThrow(field);
     },
   );
   it("keeps absent raw writes distinct from the runtime's numeric zero default", () => {
@@ -655,10 +1170,9 @@ describe("runtime cache matrix contract", () => {
     for (const invalid of [
       assertions.slice(1),
       [...assertions, assertions[0]!],
-      ...["skipped", "failed", "pending", "unavailable"].map((status) => [
-        { ...assertions[0], status },
-        ...assertions.slice(1),
-      ]),
+      ...["skipped", "failed", "pending", "unavailable"].map((status) =>
+        [Object.assign({}, assertions[0], { status })].concat(assertions.slice(1)),
+      ),
       [{ ...assertions[0], title: "wrong model/runtime" }, ...assertions.slice(1)],
     ]) {
       expect(validateGatewayPromptCacheAssertions(invalid, profile).ok).toBe(false);
@@ -678,7 +1192,7 @@ describe("runtime cache matrix contract", () => {
 
 describe("cache failure evidence and cleanup", () => {
   function captured(exchanges: CacheExchange[]) {
-    return exchanges.flatMap((exchange, index) => [
+    return exchanges.flatMap((capturedExchange, index) => [
       {
         id: index * 2,
         kind: "request",
@@ -686,7 +1200,7 @@ describe("cache failure evidence and cleanup", () => {
         path: "/v1/messages",
         host: "api.anthropic.com",
         method: "POST",
-        dataText: JSON.stringify({ model: sonnet.id, stream: true, ...exchange.request }),
+        dataText: JSON.stringify({ model: sonnet.id, stream: true, ...capturedExchange.request }),
       },
       {
         id: index * 2 + 1,
@@ -701,16 +1215,16 @@ describe("cache failure evidence and cleanup", () => {
               id: `private-response-${index}`,
               model: sonnet.id,
               usage: {
-                input_tokens: exchange.usage.input,
+                input_tokens: capturedExchange.usage.input,
                 output_tokens: 0,
-                cache_read_input_tokens: exchange.usage.cacheRead,
-                cache_creation_input_tokens: exchange.usage.cacheWrite,
+                cache_read_input_tokens: capturedExchange.usage.cacheRead,
+                cache_creation_input_tokens: capturedExchange.usage.cacheWrite,
               },
             },
           }) +
           sse("message_delta", {
             delta: { stop_reason: "end_turn" },
-            usage: { output_tokens: exchange.usage.output },
+            usage: { output_tokens: capturedExchange.usage.output },
           }) +
           sse("message_stop", {}),
       },
@@ -783,6 +1297,72 @@ describe("cache failure evidence and cleanup", () => {
     expect(evidence.firstReadReuse).toEqual({ minimum: 1024, actual: 0 });
   });
 
+  it("reports the first differing semantic atom without publishing its contents", async () => {
+    const exchanges = conversation();
+    const messages = exchanges[1]!.request.messages as ReturnType<typeof message>[];
+    messages[0]!.content = [{ type: "text", text: "private changed text" }];
+    const evidence = await collectCacheFailureEvidence(
+      { ...reader, getSessionEvents: () => captured(exchanges) },
+      "session",
+      sonnet,
+      [],
+      "text-followup",
+    );
+    expect(evidence.history).toMatchObject({
+      projectionValid: true,
+      mismatch: {
+        request: 2,
+        atomOrdinal: 0,
+        previousCount: 1,
+        currentCount: 3,
+        previous: { type: "text", bytes: expect.any(Number), hash: expect.any(String) },
+        current: { type: "text", bytes: expect.any(Number), hash: expect.any(String) },
+      },
+    });
+    expect(JSON.stringify(evidence)).not.toContain("private changed text");
+    expect(() => verifyCacheConversation(exchanges, sonnet, "text-followup", 1)).toThrow(
+      '"atomOrdinal":0',
+    );
+  });
+
+  it("distinguishes a post-header capture failure without inferring a provider failure cause", async () => {
+    const rows = captured(conversation()).slice(0, 1);
+    const failed = {
+      kind: "error",
+      direction: "local",
+      flowId: "private-flow-0",
+      path: "/v1/messages",
+      errorText: "private clone read detail",
+    };
+    const capture = { ...reader, getSessionEvents: () => [...rows, failed] };
+    const evidence = await collectCacheFailureEvidence(
+      capture,
+      "session",
+      sonnet,
+      [],
+      "text-followup",
+    );
+    expect(evidence.captureErrors).toEqual([
+      {
+        request: 1,
+        classification: "response-body-capture",
+        stage: "after-response-headers",
+        cause: "unavailable",
+        disposition: "failed",
+        errorTextBytes: Buffer.byteLength(failed.errorText),
+        errorTextHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      },
+    ]);
+    try {
+      readCacheCaptureRows(capture, "session");
+      expect.unreachable("capture errors must stop the scenario");
+    } catch (error) {
+      expect(error).toMatchObject({ observation: evidence.captureErrors[0] });
+      expect(JSON.stringify(error)).not.toContain("private");
+    }
+    expect(JSON.stringify(evidence)).not.toContain("private");
+  });
+
   it("reports incomplete and unreadable capture as unavailable, never complete zero-usage proof", async () => {
     const rows = captured(conversation()).slice(0, 3);
     const partial = await collectCacheFailureEvidence(
@@ -830,7 +1410,10 @@ describe("cache failure evidence and cleanup", () => {
       captureComplete: false,
     });
     const overflow = await collectCacheFailureEvidence(
-      { ...reader, getSessionEvents: () => Array(512).fill({ kind: "unknown" }) },
+      {
+        ...reader,
+        getSessionEvents: () => Array.from({ length: 512 }, () => ({ kind: "unknown" })),
+      },
       "session",
       sonnet,
       [],

@@ -12,6 +12,7 @@ const CACHE_CAPTURE_EVENT_LIMIT = 512;
 const CACHE_CAPTURE_BODY_LIMIT = 2 * 1024 * 1024;
 export const CACHE_SCENARIO_REQUEST_LIMIT = 8;
 const CACHE_SCENARIO_INPUT_TOKEN_LIMIT = 240_000;
+const CACHE_CAPTURE_WAIT_MS = 15_000;
 
 type JsonRecord = Record<string, unknown>;
 type CacheUsage = {
@@ -30,15 +31,28 @@ export type CacheExchange = {
   model: string;
   api: "anthropic-messages" | "openai-responses";
   usage: CacheUsage;
+  captureDisposition?: "verified-terminal-with-response-body-read-failure";
 };
 
 export class CacheProofStopError extends Error {
   constructor(
-    readonly phase: "deadline" | "request-ceiling" | "capture-read" | "transport-observation",
+    readonly phase:
+      | "deadline"
+      | "request-ceiling"
+      | "capture-read"
+      | "transport-observation"
+      | "accounting",
     message: string,
+    readonly observation?: ReturnType<typeof captureErrorEvidence>,
   ) {
     super(message);
     this.name = "CacheProofStopError";
+  }
+}
+
+class CacheAssistantPendingError extends CacheProofStopError {
+  constructor() {
+    super("accounting", "Failed capture read lacks a successful persisted assistant.");
   }
 }
 
@@ -99,6 +113,11 @@ export async function decodeCacheResponse(
   api: CacheExchange["api"],
   body: string,
 ): Promise<Pick<CacheExchange, "model" | "responseId" | "usage">> {
+  // The SDK correctly ignores an unfinished final frame. Proof cannot: a
+  // truncated failure after a complete terminal must not silently disappear.
+  if (!/(?:\r\n\r\n|\n\n|\r\r)$/.test(body)) {
+    throw new Error("Captured SSE ends with an incomplete frame.");
+  }
   let started = false;
   let stopped = false;
   let responseId = "";
@@ -119,6 +138,9 @@ export async function decodeCacheResponse(
       continue;
     }
     const data = parseRecord(frame.data, "Provider SSE event");
+    if (event && data.type !== undefined && data.type !== event) {
+      throw new Error("Provider SSE event contradicts its payload type.");
+    }
     const kind = event || data.type;
     if (kind === "error" || kind === "response.failed" || kind === "response.incomplete") {
       throw new Error("Provider stream failed or ended incomplete.");
@@ -176,6 +198,15 @@ export async function decodeCacheResponse(
   }
   const input = counter(usage.input_tokens, "input_tokens");
   const output = counter(usage.output_tokens, "output_tokens");
+  if (api === "openai-responses") {
+    const outputDetails = requireRecord(usage.output_tokens_details, "OpenAI output token details");
+    if (
+      counter(usage.total_tokens, "total_tokens") !== input + output ||
+      counter(outputDetails.reasoning_tokens, "reasoning_tokens") > output
+    ) {
+      throw new Error("OpenAI terminal usage counters are inconsistent.");
+    }
+  }
   const details =
     api === "openai-responses"
       ? requireRecord(usage.input_tokens_details, "OpenAI input token details")
@@ -212,11 +243,31 @@ function providerApi(event: JsonRecord): CacheExchange["api"] | undefined {
   return undefined;
 }
 
+function isResponseBodyReadFailure(event: JsonRecord): boolean {
+  if (
+    event.kind !== "error" ||
+    event.direction !== "local" ||
+    providerApi(event) !== "openai-responses"
+  ) {
+    return false;
+  }
+  try {
+    const meta = parseRecord(String(event.metaJson), "Capture metadata");
+    return meta.bodyCapture === "failed" && meta.stage === "response-body";
+  } catch {
+    return false;
+  }
+}
+
 function captureBody(event: JsonRecord, reader: DebugProxyCaptureReader): string {
   const meta =
     typeof event.metaJson === "string" ? parseRecord(event.metaJson, "Capture metadata") : {};
-  if (meta.bodyCapture !== undefined) {
+  const failedRead = isResponseBodyReadFailure(event);
+  if (meta.bodyCapture !== undefined && !failedRead) {
     throw new Error("Provider capture body was unavailable, oversized, or stalled.");
+  }
+  if (failedRead && (typeof event.dataBlobId !== "string" || !event.dataBlobId)) {
+    throw new Error("Response-body read failure requires an authoritative capture blob.");
   }
   let body: string | null;
   // The store keeps only an 8 KiB preview inline. A referenced full blob is
@@ -234,12 +285,67 @@ function captureBody(event: JsonRecord, reader: DebugProxyCaptureReader): string
     body = typeof event.dataText === "string" ? event.dataText : null;
   }
   if (!body || Buffer.byteLength(body) > CACHE_CAPTURE_BODY_LIMIT) {
-    throw new Error("Provider capture body is missing or exceeds the proof bound.");
+    throw new Error(
+      failedRead
+        ? "Provider capture blob is missing or exceeds the proof bound."
+        : "Provider capture body is missing or exceeds the proof bound.",
+    );
   }
   return body;
 }
 
-export function readCacheCaptureRows(reader: DebugProxyCaptureReader, sessionId: string) {
+function pairCacheCaptureRows(
+  rows: JsonRecord[],
+  reader?: DebugProxyCaptureReader,
+  expected?: PromptCacheModel,
+) {
+  const failure = rows.find(
+    (row) => row.kind === "retry-link" || (row.kind === "error" && !isResponseBodyReadFailure(row)),
+  );
+  if (failure) {
+    throw new CacheProofStopError(
+      "transport-observation",
+      "Provider transport error or retry was captured.",
+      captureErrorEvidence(failure, rows),
+    );
+  }
+  const requests = rows.filter((row) => row.kind === "request");
+  const flows = new Map<string, { request: JsonRecord; response?: JsonRecord }>();
+  for (const request of requests) {
+    const flowId = nonemptyString(request.flowId, "Capture flow identity");
+    if (flows.has(flowId)) {
+      throw new Error("Duplicate provider request flow.");
+    }
+    flows.set(flowId, { request });
+  }
+  for (const response of rows.filter(
+    (row) => row.kind === "response" || isResponseBodyReadFailure(row),
+  )) {
+    const pair = typeof response.flowId === "string" ? flows.get(response.flowId) : undefined;
+    if (!pair) {
+      throw new Error("Unmatched provider terminal capture.");
+    }
+    if (pair.response) {
+      throw new Error("Duplicate provider terminal capture.");
+    }
+    if (isResponseBodyReadFailure(response)) {
+      if (!reader || !expected) {
+        throw new Error("Failed capture read requires the expected provider and capture reader.");
+      }
+      // Deferral is structural, never acceptance. Validate the official request
+      // and authoritative blob before the monitor allows time for persistence.
+      prepareCachePair(pair.request, response, reader, expected);
+    }
+    pair.response = response;
+  }
+  return [...flows.values()];
+}
+
+export function readCacheCaptureRows(
+  reader: DebugProxyCaptureReader,
+  sessionId: string,
+  expected?: PromptCacheModel,
+) {
   let rows: JsonRecord[];
   try {
     rows = reader.getSessionEvents(sessionId, CACHE_CAPTURE_EVENT_LIMIT);
@@ -252,80 +358,219 @@ export function readCacheCaptureRows(reader: DebugProxyCaptureReader, sessionId:
       "Capture event limit reached; complete request accounting is unavailable.",
     );
   }
-  const providerRows = rows.filter((row) => providerApi(row) !== undefined);
-  if (providerRows.some((row) => row.kind === "error" || row.kind === "retry-link")) {
-    throw new CacheProofStopError(
-      "transport-observation",
-      "Provider transport error or retry was captured.",
+  const providerRows = rows
+    .filter(
+      (row) => providerApi(row) !== undefined || row.kind === "error" || row.kind === "retry-link",
+    )
+    .toSorted(
+      (left, right) => Number(left.ts) - Number(right.ts) || Number(left.id) - Number(right.id),
     );
-  }
-  return providerRows.toSorted(
-    (left, right) => Number(left.ts) - Number(right.ts) || Number(left.id) - Number(right.id),
-  );
+  // Only a specific failed response-body read is deferred, not accepted. The
+  // terminal decoder still requires the full blob and persisted assistant proof.
+  pairCacheCaptureRows(providerRows, reader, expected);
+  return providerRows;
 }
 
-export function cacheRequestsComplete(rows: JsonRecord[]): boolean {
-  const requests = rows.filter((row) => row.kind === "request");
-  return (
-    requests.length > 0 &&
-    requests.every(
-      (request) =>
-        rows.filter((row) => row.kind === "response" && row.flowId === request.flowId).length === 1,
-    )
+function captureErrorEvidence(row: JsonRecord, rows: JsonRecord[], verified = false) {
+  const requests = rows.filter((entry) => entry.kind === "request");
+  const requestIndex = requests.findIndex((entry) => entry.flowId === row.flowId);
+  // captureHttpExchange records the request after fetch returns headers. Its
+  // same-flow local error records a failed clone read, not an HTTP failure verdict.
+  const bodyCapture = row.kind === "error" && row.direction === "local" && requestIndex >= 0;
+  const retry = row.kind === "retry-link";
+  return {
+    request: requestIndex < 0 ? null : requestIndex + 1,
+    classification: retry ? "retry-link" : bodyCapture ? "response-body-capture" : "unknown-error",
+    stage: isResponseBodyReadFailure(row)
+      ? "response-body"
+      : retry
+        ? "retry"
+        : bodyCapture
+          ? "after-response-headers"
+          : "unknown",
+    cause: "unavailable",
+    disposition: verified
+      ? "verified-terminal-with-response-body-read-failure"
+      : isResponseBodyReadFailure(row)
+        ? "unverified-response-body-read-failure"
+        : "failed",
+    errorTextBytes: typeof row.errorText === "string" ? Buffer.byteLength(row.errorText) : null,
+    errorTextHash: typeof row.errorText === "string" ? captureHash(row.errorText) : null,
+  };
+}
+
+export function cacheRequestsComplete(
+  rows: JsonRecord[],
+  reader?: DebugProxyCaptureReader,
+  expected?: PromptCacheModel,
+): boolean {
+  const pairs = pairCacheCaptureRows(rows, reader, expected);
+  return pairs.length > 0 && pairs.every((pair) => pair.response !== undefined);
+}
+
+function prepareCachePair(
+  request: JsonRecord,
+  response: JsonRecord,
+  reader: DebugProxyCaptureReader,
+  expected: PromptCacheModel,
+) {
+  const expectedApi: CacheExchange["api"] =
+    expected.provider === "anthropic" ? "anthropic-messages" : "openai-responses";
+  const expectedHost = expected.provider === "anthropic" ? "api.anthropic.com" : "api.openai.com";
+  if (
+    providerApi(request) !== expectedApi ||
+    providerApi(response) !== expectedApi ||
+    request.host !== expectedHost ||
+    (isResponseBodyReadFailure(response) && response.host !== expectedHost) ||
+    request.method !== "POST" ||
+    response.status !== 200 ||
+    typeof response.contentType !== "string" ||
+    response.contentType.split(";")[0]!.trim().toLowerCase() !== "text/event-stream"
+  ) {
+    throw new Error("Unexpected provider endpoint, status, or streaming transport.");
+  }
+  const requestText = captureBody(request, reader);
+  const body = parseRecord(requestText, "Provider request");
+  if (body.model !== expected.id || body.stream !== true) {
+    throw new Error("Provider request used an unexpected model or non-streaming API.");
+  }
+  const responseText = captureBody(response, reader);
+  return { requestText, body, responseText, expectedApi };
+}
+
+async function decodeCachePair(
+  request: JsonRecord,
+  response: JsonRecord,
+  reader: DebugProxyCaptureReader,
+  expected: PromptCacheModel,
+): Promise<CacheExchange> {
+  const { requestText, body, responseText, expectedApi } = prepareCachePair(
+    request,
+    response,
+    reader,
+    expected,
   );
+  const terminal = await decodeCacheResponse(expectedApi, responseText);
+  if (terminal.model !== expected.id) {
+    throw new Error("Provider response used an unexpected model; fallback is not cache proof.");
+  }
+  return {
+    flowId: nonemptyString(request.flowId, "Capture flow identity"),
+    request: body,
+    requestHash: captureHash(requestText),
+    responseHash: captureHash(responseText),
+    api: expectedApi,
+    ...terminal,
+  };
+}
+
+function verifyCapturedTerminal(
+  exchange: CacheExchange,
+  response: JsonRecord,
+  assistant: JsonRecord | undefined,
+  expected: PromptCacheModel,
+) {
+  if (!isResponseBodyReadFailure(response)) {
+    return;
+  }
+  if (exchange.usage.cacheWrite === null) {
+    throw new Error("Failed capture read is missing raw cache write usage.");
+  }
+  if (!assistant) {
+    throw new CacheAssistantPendingError();
+  }
+  if (
+    assistant.provider !== expected.provider ||
+    !["stop", "toolUse"].includes(String(assistant.stopReason)) ||
+    assistant.errorMessage !== undefined
+  ) {
+    throw new CacheProofStopError(
+      "accounting",
+      "Failed capture read lacks a successful persisted assistant.",
+    );
+  }
+  try {
+    reconcileCacheUsage([exchange], [assistant]);
+  } catch {
+    throw new CacheProofStopError(
+      "accounting",
+      "Failed capture read differs from persisted assistant identity or usage.",
+    );
+  }
+  exchange.captureDisposition = "verified-terminal-with-response-body-read-failure";
+}
+
+/** Observe early capture failures even while agent.wait is still pending. */
+export async function checkCacheReadFailures(
+  readRows: () => JsonRecord[],
+  reader: DebugProxyCaptureReader,
+  expected: PromptCacheModel,
+  readMessages: () => JsonRecord[] | Promise<JsonRecord[]>,
+  pending: Map<string, number>,
+) {
+  const messages = await readMessages();
+  // History can advance while its RPC is in flight. Read capture afterwards so
+  // a newly persisted assistant is never compared with an older request snapshot.
+  const rows = readRows();
+  const pairs = pairCacheCaptureRows(rows, reader, expected);
+  if (pairs.length >= CACHE_SCENARIO_REQUEST_LIMIT) {
+    throw new CacheProofStopError(
+      "request-ceiling",
+      "Runtime cache scenario request budget reached.",
+    );
+  }
+  const assistants = messages.filter((message) => message.role === "assistant");
+  if (assistants.length > pairs.length) {
+    throw new CacheProofStopError("accounting", "Persisted assistant count differs from capture.");
+  }
+  for (const [index, pair] of pairs.entries()) {
+    if (!pair.response || !isResponseBodyReadFailure(pair.response)) {
+      continue;
+    }
+    const exchange = await decodeCachePair(pair.request, pair.response, reader, expected);
+    try {
+      verifyCapturedTerminal(exchange, pair.response, assistants[index], expected);
+      pending.delete(exchange.flowId);
+    } catch (error) {
+      if (!(error instanceof CacheAssistantPendingError)) {
+        throw error;
+      }
+      const since = pending.get(exchange.flowId) ?? Date.now();
+      pending.set(exchange.flowId, since);
+      if (Date.now() - since >= CACHE_CAPTURE_WAIT_MS) {
+        throw error;
+      }
+    }
+  }
 }
 
 export async function decodeCacheExchanges(
   rows: JsonRecord[],
   reader: DebugProxyCaptureReader,
   expected: PromptCacheModel,
+  messages: JsonRecord[] = [],
 ): Promise<CacheExchange[]> {
-  const requests = rows.filter((row) => row.kind === "request");
-  if (!cacheRequestsComplete(rows) || requests.length > CACHE_SCENARIO_REQUEST_LIMIT) {
+  const pairs = pairCacheCaptureRows(rows, reader, expected);
+  if (
+    !pairs.length ||
+    pairs.some((pair) => !pair.response) ||
+    pairs.length > CACHE_SCENARIO_REQUEST_LIMIT
+  ) {
     throw new Error("Missing provider exchanges or request budget exceeded.");
   }
-  if (rows.filter((row) => row.kind === "response").length !== requests.length) {
-    throw new Error("Unmatched provider response.");
+  const assistants = messages.filter((message) => message.role === "assistant");
+  const hasReadFailure = pairs.some((pair) => isResponseBodyReadFailure(pair.response!));
+  if (hasReadFailure && assistants.length > pairs.length) {
+    throw new CacheProofStopError("accounting", "Persisted assistant count differs from capture.");
   }
-  const expectedApi = expected.provider === "anthropic" ? "anthropic-messages" : "openai-responses";
   const result: CacheExchange[] = [];
-  const flows = new Set<string>();
-  for (const request of requests) {
-    const flowId = nonemptyString(request.flowId, "Capture flow identity");
-    if (flows.has(flowId)) {
-      throw new Error("Duplicate provider request flow.");
-    }
-    flows.add(flowId);
-    const response = rows.find((row) => row.kind === "response" && row.flowId === flowId)!;
-    if (
-      providerApi(request) !== expectedApi ||
-      request.host !==
-        (expected.provider === "anthropic" ? "api.anthropic.com" : "api.openai.com") ||
-      request.method !== "POST" ||
-      response.status !== 200 ||
-      typeof response.contentType !== "string" ||
-      !response.contentType.toLowerCase().startsWith("text/event-stream")
-    ) {
-      throw new Error("Unexpected provider endpoint, status, or streaming transport.");
-    }
-    const requestText = captureBody(request, reader);
-    const body = parseRecord(requestText, "Provider request");
-    if (body.model !== expected.id || body.stream !== true) {
-      throw new Error("Provider request used an unexpected model or non-streaming API.");
-    }
-    const responseText = captureBody(response, reader);
-    const terminal = await decodeCacheResponse(expectedApi, responseText);
-    if (terminal.model !== expected.id) {
-      throw new Error("Provider response used an unexpected model; fallback is not cache proof.");
-    }
-    result.push({
-      flowId,
-      request: body,
-      requestHash: captureHash(requestText),
-      responseHash: captureHash(responseText),
-      api: expectedApi,
-      ...terminal,
-    });
+  for (const [index, { request, response }] of pairs.entries()) {
+    const exchange = await decodeCachePair(request, response!, reader, expected);
+    verifyCapturedTerminal(exchange, response!, assistants[index], expected);
+    result.push(exchange);
+  }
+  if (hasReadFailure && assistants.length < pairs.length) {
+    throw new CacheAssistantPendingError();
   }
   if (
     result.reduce((total, exchange) => total + exchange.usage.totalInput, 0) >
@@ -342,22 +587,36 @@ export async function waitForCacheExchanges(
   reader: DebugProxyCaptureReader,
   model: PromptCacheModel,
   expectedCount: number,
-  timeoutMs = 15_000,
+  options: {
+    timeoutMs?: number;
+    messages?: JsonRecord[] | (() => JsonRecord[] | Promise<JsonRecord[]>);
+  } = {},
 ) {
-  const deadline = Date.now() + timeoutMs;
+  const deadline = Date.now() + (options.timeoutMs ?? CACHE_CAPTURE_WAIT_MS);
+  let pending: CacheAssistantPendingError | undefined;
   do {
     const rows = readRows();
-    const requests = rows.filter((row) => row.kind === "request").length;
-    const responses = rows.filter((row) => row.kind === "response").length;
+    const pairs = pairCacheCaptureRows(rows, reader, model);
+    const requests = pairs.length;
+    const responses = pairs.filter((pair) => pair.response).length;
     if (requests > expectedCount || responses > expectedCount) {
       throw new Error("Unexpected provider exchanges in the completed turn.");
     }
-    if (requests === expectedCount && responses === expectedCount && cacheRequestsComplete(rows)) {
-      return decodeCacheExchanges(rows, reader, model);
+    if (requests === expectedCount && responses === expectedCount) {
+      const messages =
+        typeof options.messages === "function" ? await options.messages() : options.messages;
+      try {
+        return await decodeCacheExchanges(rows, reader, model, messages);
+      } catch (error) {
+        if (!(error instanceof CacheAssistantPendingError)) {
+          throw error;
+        }
+        pending = error;
+      }
     }
     await delay(25);
   } while (Date.now() < deadline);
-  throw new Error("Completed turn is missing its full terminal capture.");
+  throw pending ?? new Error("Completed turn is missing its full terminal capture.");
 }
 
 function withoutCacheMetadata(value: unknown): unknown {
@@ -374,6 +633,18 @@ function withoutCacheMetadata(value: unknown): unknown {
   );
 }
 
+function messageBlocks(message: JsonRecord, api: CacheExchange["api"]): unknown[] | undefined {
+  if (Array.isArray(message.content)) {
+    return message.content;
+  }
+  // Anthropic's message-level string is exactly one text block. The production
+  // cache allocator switches between these wire forms as its breakpoint moves.
+  if (api === "anthropic-messages" && typeof message.content === "string") {
+    return [{ type: "text", text: message.content }];
+  }
+  return undefined;
+}
+
 function messageAtoms(exchange: CacheExchange, retained: boolean): unknown[] {
   const messages =
     exchange.api === "anthropic-messages" ? exchange.request.messages : exchange.request.input;
@@ -382,14 +653,12 @@ function messageAtoms(exchange: CacheExchange, retained: boolean): unknown[] {
   }
   return messages.flatMap((value) => {
     const message = requireRecord(value, "Provider message");
-    if (Array.isArray(message.content)) {
-      return message.content.flatMap((block) => {
+    const blocks = messageBlocks(message, exchange.api);
+    if (blocks) {
+      return blocks.flatMap((block) => {
         const content = requireRecord(block, "Provider content block");
         const carrier = typeof content.text === "string" && hasInternalRuntimeContext(content.text);
         if (carrier && !retained) {
-          if (content.cache_control !== undefined) {
-            throw new Error("Transient runtime context owns a cache breakpoint.");
-          }
           return [];
         }
         return [{ role: message.role, content: withoutCacheMetadata(content) }];
@@ -399,20 +668,107 @@ function messageAtoms(exchange: CacheExchange, retained: boolean): unknown[] {
   });
 }
 
-function runtimeCarriers(exchange: CacheExchange): JsonRecord[] {
+function runtimeCarriers(exchange: CacheExchange) {
   const messages = exchange.request.messages ?? exchange.request.input;
   return Array.isArray(messages)
-    ? messages.flatMap((message) =>
-        isRecord(message) && Array.isArray(message.content)
-          ? message.content.filter(
-              (block): block is JsonRecord =>
-                isRecord(block) &&
-                typeof block.text === "string" &&
-                hasInternalRuntimeContext(block.text),
-            )
-          : [],
-      )
+    ? messages.flatMap((message, messageIndex) => {
+        const blocks = isRecord(message) ? messageBlocks(message, exchange.api) : undefined;
+        return (blocks ?? []).flatMap((block, blockIndex) =>
+          isRecord(block) && typeof block.text === "string" && hasInternalRuntimeContext(block.text)
+            ? [
+                {
+                  content: block,
+                  role: isRecord(message) ? message.role : undefined,
+                  messageIndex,
+                  blockIndex,
+                  atTail: messageIndex === messages.length - 1 && blockIndex === blocks!.length - 1,
+                },
+              ]
+            : [],
+        );
+      })
     : [];
+}
+
+function verifyCarrierLifecycle(
+  exchanges: CacheExchange[],
+  retained: boolean,
+  turnBoundary: number,
+) {
+  const carriers = exchanges.map(runtimeCarriers);
+  const original = carriers[0]?.[0];
+  for (const [index, current] of carriers.entries()) {
+    if (!retained && current.some((entry) => entry.content.cache_control !== undefined)) {
+      throw new Error("Transient runtime context owns a cache breakpoint.");
+    }
+    const expected = retained && index === turnBoundary ? 2 : 1;
+    if (current.length !== expected) {
+      throw new Error(
+        `Runtime carrier count differs on request ${index + 1}: expected ${expected}, observed ${current.length}.`,
+      );
+    }
+    if ((!retained || index === 0 || index === turnBoundary) && !current.at(-1)!.atTail) {
+      throw new Error(`Current runtime carrier is not at the tail on request ${index + 1}.`);
+    }
+    if (current.some((entry) => entry.role !== "user")) {
+      throw new Error(`Runtime carrier has a non-user role on request ${index + 1}.`);
+    }
+    if (retained && original) {
+      const historical = current[0]!;
+      if (
+        historical.messageIndex !== original.messageIndex ||
+        historical.blockIndex !== original.blockIndex ||
+        captureHash(withoutCacheMetadata(historical.content)) !==
+          captureHash(withoutCacheMetadata(original.content))
+      ) {
+        throw new Error(`Retained runtime carrier moved or changed on request ${index + 1}.`);
+      }
+    }
+  }
+}
+
+function atomEvidence(atom: unknown) {
+  const content = isRecord(atom) ? atom.content : undefined;
+  const type = isRecord(content) ? content.type : undefined;
+  return {
+    type:
+      typeof type === "string" &&
+      [
+        "text",
+        "tool_use",
+        "tool_result",
+        "thinking",
+        "redacted_thinking",
+        "image",
+        "document",
+      ].includes(type)
+        ? type
+        : atom === undefined
+          ? "missing"
+          : typeof atom,
+    bytes: atom === undefined ? 0 : Buffer.byteLength(JSON.stringify(atom)),
+    hash: atom === undefined ? null : captureHash(atom),
+  };
+}
+
+function historyMismatch(projections: unknown[][]) {
+  for (let index = 1; index < projections.length; index += 1) {
+    const previous = projections[index - 1]!;
+    const current = projections[index]!;
+    for (let atom = 0; atom < previous.length; atom += 1) {
+      if (atom >= current.length || captureHash(previous[atom]) !== captureHash(current[atom])) {
+        return {
+          request: index + 1,
+          atomOrdinal: atom,
+          previousCount: previous.length,
+          currentCount: current.length,
+          previous: atomEvidence(previous[atom]),
+          current: atomEvidence(current[atom]),
+        };
+      }
+    }
+  }
+  return null;
 }
 
 function cacheReuseEvidence(exchanges: CacheExchange[], retained: boolean) {
@@ -421,7 +777,7 @@ function cacheReuseEvidence(exchanges: CacheExchange[], retained: boolean) {
     const transientBytes = retained
       ? 0
       : runtimeCarriers(previous).reduce(
-          (total, carrier) => total + Buffer.byteLength(String(carrier.text)),
+          (total, carrier) => total + Buffer.byteLength(String(carrier.content.text)),
           0,
         );
     // A removed carrier cannot be cached on the next request. Its UTF-8 byte
@@ -488,7 +844,9 @@ export async function collectCacheFailureEvidence(
     captureReadFailed = true;
   }
   const rows = events
-    .filter((row) => providerApi(row) !== undefined)
+    .filter(
+      (row) => providerApi(row) !== undefined || row.kind === "error" || row.kind === "retry-link",
+    )
     .toSorted(
       (left, right) => Number(left.ts) - Number(right.ts) || Number(left.id) - Number(right.id),
     );
@@ -496,13 +854,30 @@ export async function collectCacheFailureEvidence(
   const decoded: CacheExchange[] = [];
   const observations = [];
   const assistants = messages.filter((message) => message.role === "assistant");
+  let paired = false;
+  try {
+    paired = cacheRequestsComplete(rows, reader, model);
+  } catch {
+    // Keep valid per-flow diagnostics, but never ignore an extra or malformed row.
+  }
+  const verifiedReadFailures = new Set<JsonRecord>();
   for (const [index, request] of requests.slice(0, CACHE_SCENARIO_REQUEST_LIMIT).entries()) {
     const responses = rows.filter(
-      (row) => row.kind === "response" && row.flowId === request.flowId,
+      (row) => (row.kind === "response" || row.kind === "error") && row.flowId === request.flowId,
     );
     let exchange: CacheExchange | undefined;
+    let accountingValid = false;
     try {
-      [exchange] = await decodeCacheExchanges([request, ...responses], reader!, model);
+      const [pair] = pairCacheCaptureRows([request, ...responses], reader, model);
+      if (pair?.response) {
+        exchange = await decodeCachePair(request, pair.response, reader!, model);
+        verifyCapturedTerminal(exchange, pair.response, assistants[index], model);
+        reconcileCacheUsage([exchange], assistants[index] ? [assistants[index]!] : []);
+        accountingValid = true;
+        if (paired && assistants.length === requests.length && exchange.captureDisposition) {
+          verifiedReadFailures.add(pair.response);
+        }
+      }
     } catch {
       // Provider/parser errors may contain private data. Report validity, never their payload.
     }
@@ -515,6 +890,7 @@ export async function collectCacheFailureEvidence(
       model: exchange?.model ?? null,
       status: typeof responses[0]?.status === "number" ? responses[0].status : null,
       terminalComplete: exchange !== undefined,
+      accountingValid,
       requestHash: exchange?.requestHash ?? null,
       responseHash: exchange?.responseHash ?? null,
       rawUsage: exchange?.usage ?? null,
@@ -522,9 +898,14 @@ export async function collectCacheFailureEvidence(
       markers: exchange ? cacheMarkers(exchange.request) : [],
       carriers: exchange
         ? runtimeCarriers(exchange).map((carrier) => ({
-            contentHash: captureHash(withoutCacheMetadata(carrier)),
+            messageIndex: carrier.messageIndex,
+            blockIndex: carrier.blockIndex,
+            atTail: carrier.atTail,
+            contentHash: captureHash(withoutCacheMetadata(carrier.content)),
             markerHash:
-              carrier.cache_control === undefined ? null : captureHash(carrier.cache_control),
+              carrier.content.cache_control === undefined
+                ? null
+                : captureHash(carrier.content.cache_control),
           }))
         : [],
     });
@@ -534,8 +915,25 @@ export async function collectCacheFailureEvidence(
     events.length < CACHE_CAPTURE_EVENT_LIMIT &&
     requests.length > 0 &&
     decoded.length === requests.length &&
-    rows.filter((row) => row.kind === "response").length === requests.length &&
-    !rows.some((row) => row.kind === "error" || row.kind === "retry-link");
+    paired &&
+    rows.filter((row) => row.kind === "response").length + verifiedReadFailures.size ===
+      requests.length &&
+    decoded.reduce((total, exchange) => total + exchange.usage.totalInput, 0) <=
+      CACHE_SCENARIO_INPUT_TOKEN_LIMIT;
+  let history: { mismatch: ReturnType<typeof historyMismatch>; projectionValid: boolean } = {
+    mismatch: null,
+    projectionValid: false,
+  };
+  if (complete) {
+    try {
+      history = {
+        mismatch: historyMismatch(decoded.map((exchange) => messageAtoms(exchange, retained))),
+        projectionValid: true,
+      };
+    } catch {
+      // Invalid shapes remain non-passing; raw fields and parse errors stay private.
+    }
+  }
   return {
     lifecycle: retained ? "retained" : "transient",
     requestCount: captureReadFailed || !reader ? null : requests.length,
@@ -543,10 +941,16 @@ export async function collectCacheFailureEvidence(
       captureReadFailed || !reader ? null : rows.filter((row) => row.kind === "response").length,
     transportErrorCount: rows.filter((row) => row.kind === "error" || row.kind === "retry-link")
       .length,
+    verifiedTerminalReadFailureCount: verifiedReadFailures.size,
     omittedRequestCount: Math.max(0, requests.length - observations.length),
     captureReadFailed,
     captureLimitReached: events.length >= CACHE_CAPTURE_EVENT_LIMIT,
     captureComplete: complete,
+    history,
+    captureErrors: rows
+      .filter((row) => row.kind === "error" || row.kind === "retry-link")
+      .slice(0, CACHE_SCENARIO_REQUEST_LIMIT)
+      .map((row) => captureErrorEvidence(row, rows, verifiedReadFailures.has(row))),
     requests: observations,
     reuse: complete ? cacheReuseEvidence(decoded, retained) : [],
     firstReadReuse:
@@ -569,6 +973,9 @@ export function verifyCacheConversation(
   }
   const retained = model.provider === "anthropic" && bindsClaudeThinkingPrefix({ id: model.id });
   const first = exchanges[0]!;
+  if (model.provider === "anthropic") {
+    verifyCarrierLifecycle(exchanges, retained, turnBoundary);
+  }
   const staticPrefix = captureHash(
     withoutCacheMetadata({
       system: first.request.system,
@@ -590,28 +997,11 @@ export function verifyCacheConversation(
     }
     return messageAtoms(exchange, retained);
   });
-  for (let index = 1; index < projections.length; index += 1) {
-    const previous = projections[index - 1]!;
-    const current = projections[index]!;
-    if (
-      current.length < previous.length ||
-      captureHash(current.slice(0, previous.length)) !== captureHash(previous)
-    ) {
-      throw new Error("Eligible historical conversation content changed before the next request.");
-    }
-  }
-  if (model.provider === "anthropic") {
-    const carriers = exchanges.map(runtimeCarriers);
-    if (carriers[0]!.length === 0) {
-      throw new Error("Runtime carrier was not exercised.");
-    }
-    const original = captureHash(withoutCacheMetadata(carriers[0]![0]));
-    const next = carriers[turnBoundary]!.some(
-      (carrier) => captureHash(withoutCacheMetadata(carrier)) === original,
+  const mismatch = historyMismatch(projections);
+  if (mismatch) {
+    throw new Error(
+      `Eligible historical conversation content changed before the next request: ${JSON.stringify(mismatch)}.`,
     );
-    if (next !== retained) {
-      throw new Error("Runtime carrier did not follow the model's replay lifecycle.");
-    }
   }
   for (const reuse of cacheReuseEvidence(exchanges, retained)) {
     if (

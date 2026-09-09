@@ -11,6 +11,7 @@ import { runQaGatewayFixture } from "../../../helpers/qa-gateway-cleanup.js";
 import {
   CACHE_SCENARIO_REQUEST_LIMIT,
   CacheProofStopError,
+  checkCacheReadFailures,
   collectCacheFailureEvidence,
   readCacheCaptureRows,
   reconcileCacheUsage,
@@ -117,19 +118,23 @@ async function sendTurn(gateway: QaGatewayChild, sessionKey: string, message: st
   if (terminal.status !== "ok") {
     throw new Error("Gateway run failed or did not reach its successful terminal state.");
   }
-  const history = requireObject(
-    await gateway.call("chat.history", { sessionKey, limit: 100 }),
-    "chat.history",
-  );
-  if (!Array.isArray(history.messages) || !history.messages.every(isRecord)) {
-    throw new Error("Gateway omitted the persisted conversation.");
-  }
-  const messages = history.messages;
+  const messages = await readHistory(gateway, sessionKey);
   const final = messages.findLast((entry) => entry.role === "assistant");
   if (!final || !assistantText(final).trim()) {
     throw new Error("Gateway did not persist a visible assistant reply.");
   }
   return { messages, reply: assistantText(final).trim() };
+}
+
+async function readHistory(gateway: QaGatewayChild, sessionKey: string) {
+  const history = requireObject(
+    await gateway.call("chat.history", { sessionKey, limit: 100 }, { timeoutMs: 5_000 }),
+    "chat.history",
+  );
+  if (!Array.isArray(history.messages) || !history.messages.every(isRecord)) {
+    throw new Error("Gateway omitted the persisted conversation.");
+  }
+  return history.messages;
 }
 
 describe("Gateway HTTP prompt cache", () => {
@@ -167,6 +172,8 @@ describe("Gateway HTTP prompt cache", () => {
           }
           const owner = createQaGatewayChild();
           const captureSession = `prompt-cache-${randomUUID()}`;
+          const sessionKey = `agent:qa:cache-${randomUUID()}`;
+          const pendingCaptureAssistants = new Map<string, number>();
           let gateway: QaGatewayChild | undefined;
           let monitor: Promise<void> | undefined;
           const stopMonitor = new AbortController();
@@ -199,7 +206,7 @@ describe("Gateway HTTP prompt cache", () => {
                   }
                   const captureReader = createDebugProxyCaptureReader({ env: gateway.runtimeEnv });
                   reader = captureReader;
-                  const rows = () => readCacheCaptureRows(captureReader, captureSession);
+                  const rows = () => readCacheCaptureRows(captureReader, captureSession, model);
                   // Capture is asynchronous and observes requests after response headers.
                   // Stop at the observed ceiling; any overrun remains a failed, fully counted run.
                   const stopForFailure = (failure: CacheProofStopError) => {
@@ -220,8 +227,9 @@ describe("Gateway HTTP prompt cache", () => {
                   monitor = (async () => {
                     while (!stopMonitor.signal.aborted) {
                       try {
+                        const observedRows = rows();
                         if (
-                          rows().filter((row) => row.kind === "request").length >=
+                          observedRows.filter((row) => row.kind === "request").length >=
                           CACHE_SCENARIO_REQUEST_LIMIT
                         ) {
                           stopForFailure(
@@ -231,6 +239,17 @@ describe("Gateway HTTP prompt cache", () => {
                             ),
                           );
                           return;
+                        }
+                        if (observedRows.some((row) => row.kind === "error")) {
+                          // A deferred clone failure must prove its terminal and
+                          // persisted assistant promptly, even before agent.wait returns.
+                          await checkCacheReadFailures(
+                            rows,
+                            captureReader,
+                            model,
+                            () => readHistory(gateway!, sessionKey),
+                            pendingCaptureAssistants,
+                          );
                         }
                         await delay(50, undefined, { signal: stopMonitor.signal });
                       } catch (error) {
@@ -266,7 +285,6 @@ describe("Gateway HTTP prompt cache", () => {
                       "The exact runtime cache model is absent from the canonical catalog.",
                     );
                   }
-                  const sessionKey = `agent:qa:cache-${randomUUID()}`;
                   const firstPath = "manifest-a.txt";
                   const secondPath = `manifest-${randomUUID()}.txt`;
                   const answer = `CACHE_ANSWER_${randomUUID().replaceAll("-", "")}`;
@@ -296,6 +314,7 @@ describe("Gateway HTTP prompt cache", () => {
                     captureReader,
                     model,
                     scenario === "dependent-reads" ? 3 : 1,
+                    { messages: () => readHistory(gateway!, sessionKey) },
                   );
                   phase = "accounting";
                   reconcileCacheUsage(firstExchanges, first.messages);
@@ -326,6 +345,7 @@ describe("Gateway HTTP prompt cache", () => {
                     captureReader,
                     model,
                     beforeFollowup + 1,
+                    { messages: () => readHistory(gateway!, sessionKey) },
                   );
                   phase = "accounting";
                   reconcileCacheUsage(exchanges, second.messages);
@@ -405,6 +425,7 @@ describe("Gateway HTTP prompt cache", () => {
                     outcome: verifiedPrefix && evidence.captureComplete ? "passed" : "failed",
                     phase: stopState.first?.phase ?? phase,
                     stopReason: stopState.first?.message ?? null,
+                    stopObservation: stopState.first?.observation ?? null,
                     elapsedMs: Date.now() - startedAt,
                     model: `${model.provider}/${model.id}`,
                     runtime: runtimeVerified ? "openclaw" : null,

@@ -81,11 +81,13 @@ export function gatewayPromptCacheOptions(
           qa: {
             ...cfg.agents?.entries?.qa,
             model: { primary: modelRef, fallbacks: [] },
-            tools: { profile: "full", allow: ["read"] },
+            tools: { profile: "full", allow: ["read", "process"] },
           },
         },
       },
-      tools: { profile: "full", allow: ["read"], toolSearch: false, codeMode: false },
+      // The process capability produces real, bounded current-turn runtime facts
+      // even with no active processes. Scenario assertions still permit only reads.
+      tools: { profile: "full", allow: ["read", "process"], toolSearch: false, codeMode: false },
       memory: { search: { enabled: false } },
       plugins: {
         ...cfg.plugins,
