@@ -40,7 +40,13 @@ describe("new-session keyboard shortcut", () => {
         platform === "MacIntel" ? { metaKey: true, altKey: true } : { ctrlKey: true, altKey: true };
       for (const init of [
         { key: "n", code: "KeyN" },
-        ...(platform === "MacIntel" ? [{ key: "˜", code: "KeyN" }] : []),
+        ...(platform === "MacIntel"
+          ? [
+              { key: "˜", code: "KeyN" },
+              { key: "n", code: "KeyN", modifierAltGraph: true },
+              { key: "˜", code: "KeyN", modifierAltGraph: true },
+            ]
+          : []),
       ]) {
         const event = new KeyboardEvent("keydown", { ...init, ...modifiers, cancelable: true });
         editor.dispatchEvent(event);
@@ -55,7 +61,9 @@ describe("new-session keyboard shortcut", () => {
         { altKey: false },
         { metaKey: false, ctrlKey: false },
         { key: "Dead" },
-        { modifierAltGraph: true },
+        ...(platform === "MacIntel"
+          ? [{ modifierAltGraph: true, metaKey: false }]
+          : [{ modifierAltGraph: true }]),
         ...(platform === "MacIntel" ? [] : [{ key: "ñ" }]),
         { metaKey: true, ctrlKey: true },
         { metaKey: !modifiers.metaKey, ctrlKey: !modifiers.ctrlKey },

@@ -81,12 +81,13 @@ export function formatKeyboardShortcutCombo(
 // Most mod-chords accept either modifier. Platform-specific chords reserve
 // native editing keys (Mac Ctrl+B/F/K) for the focused text field.
 export function matchesShortcutCombo(combo: KeyboardShortcutCombo, event: KeyboardEvent): boolean {
-  // AltGr is text input even on layouts where it reports Control+Alt.
+  // Firefox reports Mac Option as AltGraph, including Command+Option shortcuts.
+  // Keep rejecting AltGr text input outside that explicit Command chord.
   if (
     event.isComposing ||
     event.key === "Dead" ||
     event.keyCode === 229 ||
-    event.getModifierState("AltGraph")
+    (event.getModifierState("AltGraph") && !(isApplePlatform() && event.metaKey && event.altKey))
   ) {
     return false;
   }
