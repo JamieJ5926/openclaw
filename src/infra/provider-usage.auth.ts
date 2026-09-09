@@ -44,7 +44,7 @@ export type ProviderAuth = {
 
 type AuthStore = ReturnType<typeof ensureAuthProfileStore>;
 
-export function getRequestAuth(cfg: OpenClawConfig, provider: string): SecretInput | undefined {
+function getRequestAuth(cfg: OpenClawConfig, provider: string): SecretInput | undefined {
   const request = cfg.models?.providers?.[provider]?.request;
   const auth = request?.auth;
   const defaults = cfg.secrets?.defaults;
