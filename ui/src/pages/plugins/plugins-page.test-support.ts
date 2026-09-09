@@ -209,6 +209,7 @@ export function createGateway(client: GatewayBrowserClient, connected = true): G
 type RuntimeConfigTestHarness = {
   runtimeConfig: {
     state: RuntimeConfigTestState;
+    canSet: boolean;
     refresh: ApplicationContext["runtimeConfig"]["refresh"];
     ensureLoaded: ReturnType<typeof vi.fn<() => Promise<undefined>>>;
     ensureSchemaLoaded: ReturnType<typeof vi.fn<() => Promise<undefined>>>;
@@ -217,6 +218,11 @@ type RuntimeConfigTestHarness = {
     patch: ReturnType<
       typeof vi.fn<(options: { raw: Record<string, unknown>; note: string }) => Promise<boolean>>
     >;
+    patchForm: ReturnType<typeof vi.fn<ApplicationContext["runtimeConfig"]["patchForm"]>>;
+    removeFormValue: ReturnType<
+      typeof vi.fn<ApplicationContext["runtimeConfig"]["removeFormValue"]>
+    >;
+    save: ReturnType<typeof vi.fn<ApplicationContext["runtimeConfig"]["save"]>>;
     patchFromSnapshot: ApplicationContext["runtimeConfig"]["patchFromSnapshot"];
     runExternalMutation: ApplicationContext["runtimeConfig"]["runExternalMutation"];
     subscribe: (listener: (state: RuntimeConfigTestState) => void) => () => void;
