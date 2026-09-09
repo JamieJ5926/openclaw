@@ -85,7 +85,7 @@ struct IOSNativeActionBinding: Sendable {
 
     func request(method: String, paramsJSON: String?, timeoutSeconds: Int) async throws -> Data {
         let params = try paramsJSON.map {
-            try JSONDecoder().decode([String: AnyCodable].self, from: Data($0.utf8))
+            try JSONDecoder().decode([String: OpenClawProtocol.AnyCodable].self, from: Data($0.utf8))
         } ?? [:]
         return try await self.request(.init(
             method: method, params: params, timeoutMs: Double(timeoutSeconds) * 1000))
