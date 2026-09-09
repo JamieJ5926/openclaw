@@ -4,7 +4,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Bot } from "grammy";
+import { performance } from "node:perf_hooks";
+import { Bot, HttpError } from "grammy";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { listSessionEntries } from "openclaw/plugin-sdk/session-store-runtime";
 import { afterEach, describe, expect, it } from "vitest";
@@ -23,6 +24,31 @@ const PROVIDER = "ollama";
 const MODEL = "xentriom/gemma-4-12B-agentic-fable5-composer2.5-v2:latest";
 
 type TelegramApiRequest = { method: string; payload: Record<string, unknown> };
+
+type TelegramLoopbackEvent = {
+  event: string;
+  elapsedMs: number;
+  requestId?: number;
+  method?: string;
+  writableFinished?: boolean;
+};
+
+function summarizeLoopbackError(error: unknown): Record<string, string | number> {
+  const summary: Record<string, string | number> = {};
+  if (typeof error !== "object" || error === null) {
+    return { type: typeof error };
+  }
+  for (const key of ["name", "code", "type"]) {
+    const value: unknown = Reflect.get(error, key);
+    if (
+      (typeof value === "string" && /^[A-Za-z0-9_.-]{1,64}$/.test(value)) ||
+      (typeof value === "number" && Number.isFinite(value))
+    ) {
+      summary[key] = value;
+    }
+  }
+  return summary;
+}
 
 async function readJsonBody(request: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
@@ -46,10 +72,28 @@ describe("Telegram model callback loopback", () => {
     const stateDir = await mkdtemp(join(tmpdir(), "openclaw-telegram-model-loopback-"));
     const requests: TelegramApiRequest[] = [];
     let sentMessage: Record<string, unknown> | undefined;
+    let firstApiError: { method: string; cause: Record<string, string | number> } | undefined;
+    let firstHandlerError: Record<string, string | number> | undefined;
+    const startedAt = performance.now();
+    const timeline: TelegramLoopbackEvent[] = [];
+    let nextRequestId = 0;
+    const recordEvent = (event: Omit<TelegramLoopbackEvent, "elapsedMs">) => {
+      if (timeline.length < 24) {
+        timeline.push({
+          ...event,
+          elapsedMs: Math.round((performance.now() - startedAt) * 1000) / 1000,
+        });
+      }
+    };
 
-    const handleApiRequest = async (request: IncomingMessage, response: ServerResponse) => {
+    const handleApiRequest = async (
+      request: IncomingMessage,
+      response: ServerResponse,
+      requestId: number,
+    ) => {
       const method = request.url?.split("/").at(-1) ?? "";
       const payload = await readJsonBody(request);
+      recordEvent({ event: "body-parsed", requestId });
       requests.push({ method, payload });
 
       if (method === "sendMessage") {
@@ -92,7 +136,19 @@ describe("Telegram model callback loopback", () => {
     };
 
     const server = createServer((request, response) => {
-      void handleApiRequest(request, response).catch((error: unknown) => {
+      const requestId = ++nextRequestId;
+      recordEvent({ event: "request-start", requestId });
+      response.once("finish", () => recordEvent({ event: "response-finished", requestId }));
+      response.once("close", () =>
+        recordEvent({
+          event: "response-closed",
+          requestId,
+          writableFinished: response.writableFinished,
+        }),
+      );
+      void handleApiRequest(request, response, requestId).catch((error: unknown) => {
+        firstHandlerError ??= summarizeLoopbackError(error);
+        recordEvent({ event: "handler-error", requestId });
         response.destroy(error instanceof Error ? error : new Error(String(error)));
       });
     });
@@ -140,6 +196,21 @@ describe("Telegram model callback loopback", () => {
 
       const callbackSteps: string[] = [];
       const bot = new Bot(TOKEN, { botInfo: telegramBotInfoForTest, client: { apiRoot } });
+      // The router renders HttpError without its cause; retain only safe fields before rethrowing.
+      bot.api.config.use(async (prev, method, payload, signal) => {
+        recordEvent({ event: "api-start", method });
+        try {
+          const result = await prev(method, payload, signal);
+          recordEvent({ event: "api-resolved", method });
+          return result;
+        } catch (error) {
+          recordEvent({ event: "api-rejected", method });
+          if (error instanceof HttpError) {
+            firstApiError ??= { method, cause: summarizeLoopbackError(error.error) };
+          }
+          throw error;
+        }
+      });
       const telegramDeps = {
         ...defaultTelegramBotDeps,
         buildModelsProviderData: async (): ReturnType<
@@ -230,6 +301,14 @@ describe("Telegram model callback loopback", () => {
         },
       });
 
+      console.info(
+        "Telegram loopback diagnostics",
+        JSON.stringify({
+          firstApiError: firstApiError ?? null,
+          firstHandlerError: firstHandlerError ?? null,
+          timeline,
+        }),
+      );
       expect(requests.map(({ method }) => method)).toEqual([
         "sendMessage",
         "answerCallbackQuery",
