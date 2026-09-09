@@ -14,10 +14,6 @@ export function normalizeManualAuthProvider(provider: string): string {
   return normalized === "openai" || normalized === "codex" ? "openai" : normalized;
 }
 
-export function isOpenAIProvider(provider: string): boolean {
-  return normalizeManualAuthProvider(provider) === "openai";
-}
-
 function stripBearerPrefix(value: string): string {
   return value
     .trim()

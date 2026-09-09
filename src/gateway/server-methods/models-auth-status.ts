@@ -523,7 +523,10 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
       const availableProfiles = listProfilesForProvider(store, provider);
       const removedProfiles =
         selection.profileIds ??
-        availableProfiles.filter((id) => !apiKeyOnly || store.profiles[id]?.type === "api_key");
+        availableProfiles.filter((id) => {
+          const credential = store.profiles[id];
+          return !apiKeyOnly || (credential?.type === "api_key" && !credential.keyRef);
+        });
       if (
         selection.profileIds &&
         selection.profileIds.some((profileId) => !availableProfiles.includes(profileId))

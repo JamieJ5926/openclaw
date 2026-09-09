@@ -182,7 +182,10 @@ const handler = expectDefined(
   modelsAuthStatusHandlers["models.authStatus"],
   'modelsAuthStatusHandlers["models.authStatus"] test invariant',
 );
-const setApiKeyHandler = expectDefined(modelsAuthStatusHandlers["models.authSetApiKey"]);
+const setApiKeyHandler = expectDefined(
+  modelsAuthStatusHandlers["models.authSetApiKey"],
+  "API-key setter is registered",
+);
 const logoutHandler = expectDefined(
   modelsAuthStatusHandlers["models.authLogout"],
   'modelsAuthStatusHandlers["models.authLogout"] test invariant',
@@ -2875,6 +2878,33 @@ describe("models.authLogout", () => {
       "main",
       expect.objectContaining({ refreshAuth: true, refreshFullCatalog: false }),
     );
+  });
+
+  it("keeps SecretRef-backed profiles during API-key-only removal", async () => {
+    mocks.ensureAuthProfileStoreWithoutExternalProfiles.mockReturnValue({
+      version: 1,
+      profiles: {
+        "openrouter:inline": { type: "api_key", provider: "openrouter", key: "removed" },
+        "openrouter:external": {
+          type: "api_key",
+          provider: "openrouter",
+          keyRef: { source: "env", provider: "default", id: "EXTERNAL_KEY" },
+        },
+      },
+    });
+    mocks.listProfilesForProvider.mockReturnValue(["openrouter:inline", "openrouter:external"]);
+    const opts = createLogoutOptions({ provider: "openrouter", credentialType: "api_key" });
+    await logoutHandler(opts);
+    expect(firstRespondCall(opts)?.[1]).toMatchObject({
+      removedProfiles: ["openrouter:inline"],
+      abortedRunIds: [],
+    });
+    expect(mocks.removeModelAuthCredentials).toHaveBeenCalledWith({
+      cfg: {},
+      agentDir: "/tmp/agent",
+      profileIds: ["openrouter:inline"],
+      apiKeyProvider: "openrouter",
+    });
   });
 
   it.each([

@@ -62,7 +62,6 @@ import { repairCodexRuntimePluginInstallForModelSelection } from "../codex-runti
 import { repairCopilotRuntimePluginInstallForModelSelection } from "../copilot-runtime-plugin-install.js";
 import { saveModelProviderApiKey } from "./auth-api-key.js";
 import {
-  isOpenAIProvider,
   looksLikeOpenAIApiKey,
   normalizeManualAuthProvider,
   resolveDefaultTokenProfileId,
@@ -626,7 +625,7 @@ export async function modelsAuthPasteTokenCommand(
     if (provider === "anthropic") {
       return validateAnthropicSetupToken(trimmed.replaceAll(/\s+/g, ""));
     }
-    if (isOpenAIProvider(provider) && looksLikeOpenAIApiKey(trimmed)) {
+    if (provider === "openai" && looksLikeOpenAIApiKey(trimmed)) {
       return `That looks like an OpenAI API key. Use ${formatCliCommand("openclaw models auth paste-api-key --provider openai")} for API-key auth.`;
     }
     return undefined;
@@ -695,7 +694,7 @@ export async function modelsAuthPasteApiKeyCommand(
       if (!trimmed) {
         return "Required";
       }
-      if (isOpenAIProvider(provider)) {
+      if (provider === "openai") {
         return validateOpenAICodexApiKeyInput(trimmed);
       }
       return undefined;

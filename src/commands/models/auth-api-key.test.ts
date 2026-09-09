@@ -13,11 +13,14 @@ const mocks = vi.hoisted(() => ({
   updateConfig: vi.fn(),
 }));
 
-vi.mock("../../agents/auth-profiles.js", () => ({
+vi.mock("../../agents/auth-profiles.js", async () => ({
+  resolveAuthProfileOrder: (await import("../../agents/auth-profiles/order.js"))
+    .resolveAuthProfileOrder,
+  resolvePersistedAuthProfileOwnerAgentDir: ({ agentDir }: { agentDir: string }) => agentDir,
   ensureAuthProfileStoreWithoutExternalProfiles:
     mocks.ensureAuthProfileStoreWithoutExternalProfiles,
 }));
-vi.mock("../../agents/auth-profiles/upsert-with-lock.js", () => ({
+vi.mock("../../agents/auth-profiles/profiles.js", () => ({
   upsertAuthProfileWithLockOrThrow: mocks.upsertAuthProfileWithLockOrThrow,
 }));
 vi.mock("./shared.js", () => ({
@@ -70,7 +73,7 @@ describe("saveModelProviderApiKey", () => {
       "sample:manual-api-key": { type: "api_key", provider: "sample", key: "synthetic-new-key" },
     });
     expect(mocks.upsertAuthProfileWithLockOrThrow).toHaveBeenCalledWith(
-      expect.objectContaining({ agentDir: "/tmp/agent-writer" }),
+      expect.objectContaining({ agentDir: undefined }),
     );
     expect(currentConfig.models?.providers?.sample).toEqual({
       ...connection,
@@ -112,6 +115,21 @@ describe("saveModelProviderApiKey", () => {
     },
   );
 
+  it("replaces the ordered API-key profile without changing its stored order or sibling", async () => {
+    store.profiles = {
+      "sample:work": { type: "api_key", provider: "sample", key: "old-work" },
+      "sample:backup": { type: "api_key", provider: "sample", key: "kept-backup" },
+    };
+    store.order = { sample: ["sample:work", "sample:backup"] };
+    await expect(
+      saveModelProviderApiKey({ ...request, config: currentConfig, bindProviderConfig: true }),
+    ).resolves.toBe("sample:work");
+    expect(store.profiles["sample:work"]).toMatchObject({ key: "synthetic-new-key" });
+    expect(store.profiles["sample:backup"]).toMatchObject({ key: "kept-backup" });
+    expect(store.order).toEqual({ sample: ["sample:work", "sample:backup"] });
+    expect(currentConfig.models).toBeUndefined();
+  });
+
   it("saves an unconfigured provider without inventing connection settings", async () => {
     await expect(
       saveModelProviderApiKey({ ...request, config: currentConfig, bindProviderConfig: true }),
@@ -150,6 +168,22 @@ describe("saveModelProviderApiKey", () => {
     ).rejects.toThrow("uses another sign-in method");
     expect(store.profiles).toEqual({});
     expect(mocks.updateConfig).not.toHaveBeenCalled();
+  });
+
+  it("does not bind a new global connection to a key saved in an agent-local store", async () => {
+    mocks.updateConfig.mockImplementationOnce(
+      async (mutator: (cfg: OpenClawConfig) => OpenClawConfig) => {
+        currentConfig = {
+          models: { providers: { sample: { ...connection, apiKey: "new-connection-key" } } },
+        };
+        currentConfig = mutator(currentConfig);
+      },
+    );
+    await expect(
+      saveModelProviderApiKey({ ...request, config: currentConfig, bindProviderConfig: true }),
+    ).rejects.toThrow("API key saved, but provider settings could not be applied");
+    expect(currentConfig.models?.providers?.sample?.apiKey).toBe("new-connection-key");
+    expect(store.profiles["sample:manual-api-key"]).toMatchObject({ key: "synthetic-new-key" });
   });
 
   it("reports a saved credential when its config write fails", async () => {
