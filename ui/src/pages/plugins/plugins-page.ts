@@ -23,7 +23,6 @@ import { formatUiError, formatUiExternalText } from "../../lib/format-error.ts";
 import { inspectPlugin } from "../../lib/plugins/capability-consent-error.ts";
 import {
   uninstallPlugin,
-  type PluginCatalogItem,
   type PluginDiscoveryResult,
   type PluginListResult,
   type PluginMutationResult,
@@ -45,6 +44,7 @@ import type { PluginRowMessage } from "./plugin-row-message.ts";
 import { PluginsConsentController } from "./plugins-consent-controller.ts";
 import { renderPluginsHubHeader } from "./plugins-hub-header.ts";
 import { PLUGINS_HUB_PANEL_ID, type PluginsHubTab } from "./plugins-hub.ts";
+import { mergePluginCatalogItem } from "./plugins-page-model.ts";
 import {
   pluginAdvancedSchema,
   pluginConfigSchema,
@@ -65,23 +65,6 @@ export type PluginsRouteData = {
   error: string | null;
   location: RouteLocation;
 };
-
-function withPlugin(
-  current: PluginListResult | null,
-  plugin: PluginCatalogItem,
-): PluginListResult | null {
-  if (!current) {
-    return current;
-  }
-  const existingIndex = current.plugins.findIndex((entry) => entry.id === plugin.id);
-  const plugins = [...current.plugins];
-  if (existingIndex >= 0) {
-    plugins[existingIndex] = plugin;
-  } else {
-    plugins.push(plugin);
-  }
-  return { ...current, plugins };
-}
 
 export class PluginsPage extends OpenClawLightDomElement {
   @consume({ context: applicationContext, subscribe: true })
@@ -487,7 +470,7 @@ export class PluginsPage extends OpenClawLightDomElement {
 
   private applyMutationResult(result: PluginMutationResult) {
     this.pluginIcons.invalidate(result.plugin.id);
-    this.replaceResult(withPlugin(this.result, result.plugin), true);
+    this.replaceResult(mergePluginCatalogItem(this.result, result.plugin), true);
   }
 
   /** Plugin changes can affect both catalog state and route visibility (for example Workboard). */
