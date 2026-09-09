@@ -11,10 +11,11 @@ sidebarTitle: "Sessions and sidebar"
 
 The sidebar organizes every session, and the New session page starts new ones.
 
-Open **New session** for the current agent with **⌘⌥N** (Command+Option+N) on Mac
+In the web UI, open **New session** for the current agent with **⌘⌥N** (Command+Option+N) on Mac
 or **Ctrl+Alt+N** on Windows/Linux, including while typing in the chat composer.
 This opens the draft page without sending a message or clearing your current chat
-draft. In the Mac app, **⌘N** still opens a new Gateway window.
+draft. The native Mac app keeps **⌘⇧N** for **New Thread** and **⌘N** for a new
+Gateway window; its menu shortcuts do not change.
 
 If your keyboard layout or a system shortcut prevents the chord from reaching
 OpenClaw, use the sidebar's **+** button. Option-only and AltGr character entry
