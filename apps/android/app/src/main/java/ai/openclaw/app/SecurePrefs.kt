@@ -641,18 +641,16 @@ class SecurePrefs(
     securePrefs.edit { putString(key, value) }
   }
 
-  // KTX edit(commit = true) discards commit's Boolean; the identity migration fails closed on it.
-  @Suppress("UseKtx")
   override fun putStringSynchronously(
     key: String,
     value: String,
-  ): Boolean = securePrefs.edit().putString(key, value).commit()
+  ): Boolean = commitSecureStrings(mapOf(key to value))
 
-  override fun commitSecureStrings(values: Map<String, String>): Boolean =
+  override fun commitSecureStrings(values: Map<String, String?>): Boolean =
     synchronized(securePrefs) {
       val previous = values.keys.associateWith { securePrefs.getString(it, null) }
       val editor = securePrefs.edit()
-      values.forEach { (key, value) -> editor.putString(key, value) }
+      values.forEach { (key, value) -> if (value == null) editor.remove(key) else editor.putString(key, value) }
       val committed = runCatching { editor.commit() }.getOrDefault(false)
       if (!committed) {
         // commit(false) can still publish its changes in memory. Keep failed handoffs

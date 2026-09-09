@@ -6,6 +6,7 @@ import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -108,6 +109,7 @@ class GatewayRegistryStoreTest {
   @Test
   fun failedRemovalCommitDoesNotPublishCandidateState() {
     val (_, securePrefs) = freshPrefs()
+    var failCommit = false
     val failingCommitPrefs =
       object : SharedPreferences by securePrefs {
         override fun edit(): SharedPreferences.Editor {
@@ -121,7 +123,7 @@ class GatewayRegistryStoreTest {
               return this
             }
 
-            override fun commit(): Boolean = false
+            override fun commit(): Boolean = if (failCommit) false else editor.commit()
           }
         }
       }
@@ -129,11 +131,39 @@ class GatewayRegistryStoreTest {
     val alpha = manualEntry("alpha", "alpha.example")
     store.upsert(alpha)
     store.setActive(alpha.stableId)
+    failCommit = true
 
     assertFalse(store.remove(alpha.stableId))
     assertEquals(listOf(alpha.stableId), store.entries.value.map { it.stableId })
     assertEquals(alpha.stableId, store.activeStableId.value)
     assertEquals(listOf(alpha.stableId), store.connectedStableIds.value)
+  }
+
+  @Test
+  fun failedSelectionCommitKeepsTheDurableRouteAndDoesNotNotify() {
+    val (prefs, securePrefs) = freshPrefs()
+    var failCommit = false
+    val notifications = mutableListOf<String?>()
+    val store =
+      GatewayRegistryStore(
+        object : GatewayCredentialStore by prefs {
+          override fun commitSecureStrings(values: Map<String, String?>): Boolean = if (failCommit) false else prefs.commitSecureStrings(values)
+        },
+        onActiveChanged = notifications::add,
+      )
+    val alpha = manualEntry("alpha", "alpha.example")
+    val beta = manualEntry("beta", "beta.example")
+    store.upsert(alpha)
+    store.upsert(beta)
+    assertTrue(store.setActive(alpha.stableId))
+    failCommit = true
+
+    assertFalse(store.setActive(beta.stableId))
+    assertFalse(store.setActive(null))
+    assertEquals(alpha.stableId, store.activeStableId.value)
+    assertEquals(listOf(alpha.stableId), store.connectedStableIds.value)
+    assertEquals(listOf(alpha.stableId), notifications)
+    assertEquals(alpha.stableId, GatewayRegistryStore(TestGatewayCredentialStore(securePrefs)).activeStableId.value)
   }
 
   @Test
@@ -183,7 +213,7 @@ class GatewayRegistryStoreTest {
   }
 
   @Test
-  fun postCommitObserverFailureDoesNotUndoDurableRemoval() {
+  fun postCommitObserverFailureDoesNotUndoDurableSelectionOrRemoval() {
     val (prefs, securePrefs) = freshPrefs()
     var failObserver = false
     val store =
@@ -191,16 +221,34 @@ class GatewayRegistryStoreTest {
         if (failObserver) error("simulated observer failure")
       }
     val alpha = manualEntry("alpha", "alpha.example")
-    store.upsert(alpha)
-    store.setActive(alpha.stableId)
     failObserver = true
+    assertTrue(store.upsertAndSetActive(alpha, mapOf("gateway.credentials.alpha" to "credential")))
+    assertEquals(alpha.stableId, store.activeStableId.value)
+    assertEquals(alpha.stableId, GatewayRegistryStore(TestGatewayCredentialStore(securePrefs)).activeStableId.value)
+    assertEquals("credential", securePrefs.getString("gateway.credentials.alpha", null))
 
-    assertTrue(store.remove(alpha.stableId))
+    assertTrue(store.remove(alpha.stableId, mapOf("gateway.credentials.alpha" to null)))
     assertTrue(store.entries.value.isEmpty())
     assertNull(store.activeStableId.value)
     val restored = GatewayRegistryStore(TestGatewayCredentialStore(securePrefs))
     assertTrue(restored.entries.value.isEmpty())
     assertNull(restored.activeStableId.value)
+    assertNull(securePrefs.getString("gateway.credentials.alpha", null))
+  }
+
+  @Test
+  fun accompanyingCredentialEditsCannotOverrideRegistryAuthority() {
+    val (prefs, securePrefs) = freshPrefs()
+    val store = GatewayRegistryStore(prefs)
+    val alpha = manualEntry("alpha", "alpha.example")
+    assertTrue(store.upsertAndSetActive(alpha))
+    val before = securePrefs.all.toMap()
+    val edits = mapOf(GatewayRegistryStore.STORAGE_KEY to null, "gateway.credentials.alpha" to "replacement")
+
+    assertThrows(IllegalArgumentException::class.java) { store.upsertAndSetActive(alpha, edits) }
+    assertThrows(IllegalArgumentException::class.java) { store.remove(alpha.stableId, edits) }
+    assertEquals(before, securePrefs.all)
+    assertEquals(alpha.stableId, store.activeStableId.value)
   }
 
   private fun freshPrefs(): Pair<GatewayCredentialStore, SharedPreferences> {

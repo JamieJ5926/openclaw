@@ -75,39 +75,37 @@ class GatewayRegistryStore(
   fun upsert(entry: GatewayRegistryEntry): Unit =
     synchronized(mutationLock) {
       if (!mutationsAllowed) return@synchronized
-      val stableId = entry.stableId.trim()
-      require(stableId.isNotEmpty()) { "Gateway stable id cannot be empty" }
-      val existing = _entries.value.firstOrNull { it.stableId == stableId }
-      val normalized =
-        entry.copy(
-          stableId = stableId,
-          name = entry.name.trim().ifEmpty { stableId },
-          host = entry.host?.trim()?.takeIf { it.isNotEmpty() },
-          contextPath = normalizeGatewayContextPath(entry.contextPath),
-          lastConnectedAtMs =
-            if (entry.lastConnectedAtMs == 0L) {
-              existing?.lastConnectedAtMs ?: 0L
-            } else {
-              entry.lastConnectedAtMs
-            },
-        )
-      _entries.value = (_entries.value.filterNot { it.stableId == stableId } + normalized).sortedForStorage()
+      _entries.value = entriesWith(entry)
       persist()
     }
 
-  fun setActive(stableId: String?): Unit =
+  /** Registration, selection and app-owned credential edits share one durable commit. */
+  fun upsertAndSetActive(
+    entry: GatewayRegistryEntry,
+    credentialEdits: Map<String, String?> = emptyMap(),
+  ): Boolean =
     synchronized(mutationLock) {
-      if (!mutationsAllowed) return@synchronized
+      if (!mutationsAllowed) return@synchronized false
+      val stableId = entry.stableId.trim()
+      commitAndPublish(
+        entriesWith(entry),
+        stableId,
+        (_connectedStableIds.value + stableId).distinct(),
+        credentialEdits,
+        notifyActive = true,
+      )
+    }
+
+  fun setActive(stableId: String?): Boolean =
+    synchronized(mutationLock) {
+      if (!mutationsAllowed) return@synchronized false
       val normalized = stableId?.trim()?.takeIf { it.isNotEmpty() }
       require(normalized == null || _entries.value.any { it.stableId == normalized }) {
         "Active gateway must exist in the registry"
       }
-      _activeStableId.value = normalized
-      if (normalized != null && normalized !in _connectedStableIds.value) {
-        _connectedStableIds.value = _connectedStableIds.value + normalized
-      }
-      persist()
-      onActiveChanged?.invoke(normalized)
+      val nextConnected =
+        if (normalized != null) (_connectedStableIds.value + normalized).distinct() else _connectedStableIds.value
+      commitAndPublish(_entries.value, normalized, nextConnected, notifyActive = true)
     }
 
   fun setConnectionEnabled(
@@ -146,7 +144,10 @@ class GatewayRegistryStore(
       upsert(existing.copy(lastConnectedAtMs = atMs))
     }
 
-  fun remove(stableId: String): Boolean =
+  fun remove(
+    stableId: String,
+    credentialEdits: Map<String, String?> = emptyMap(),
+  ): Boolean =
     synchronized(mutationLock) {
       if (!mutationsAllowed) return@synchronized false
       val normalized = stableId.trim()
@@ -154,18 +155,13 @@ class GatewayRegistryStore(
       val previousActiveStableId = _activeStableId.value
       val nextActiveStableId = previousActiveStableId?.takeUnless { it == normalized }
       val nextConnectedStableIds = _connectedStableIds.value.filterNot { it == normalized }
-      if (!persistSynchronously(nextEntries, nextActiveStableId, nextConnectedStableIds)) return@synchronized false
-
-      // Publish only after the durable commit. Notification is post-commit and cannot turn a
-      // successful removal into a failure that would cancel the database recovery marker.
-      _entries.value = nextEntries
-      _activeStableId.value = nextActiveStableId
-      _connectedStableIds.value = nextConnectedStableIds
-      if (previousActiveStableId != nextActiveStableId) {
-        runCatching { onActiveChanged?.invoke(nextActiveStableId) }
-          .onFailure { Log.e("GatewayRegistry", "Active-gateway observer failed after durable removal", it) }
-      }
-      true
+      commitAndPublish(
+        nextEntries,
+        nextActiveStableId,
+        nextConnectedStableIds,
+        credentialEdits,
+        notifyActive = previousActiveStableId != nextActiveStableId,
+      )
     }
 
   fun activeEntry(): GatewayRegistryEntry? =
@@ -181,16 +177,46 @@ class GatewayRegistryStore(
     prefs.putString(STORAGE_KEY, encodedRegistry())
   }
 
-  private fun persistSynchronously(
+  private fun entriesWith(entry: GatewayRegistryEntry): List<GatewayRegistryEntry> {
+    val stableId = entry.stableId.trim()
+    require(stableId.isNotEmpty()) { "Gateway stable id cannot be empty" }
+    val existing = _entries.value.firstOrNull { it.stableId == stableId }
+    val normalized =
+      entry.copy(
+        stableId = stableId,
+        name = entry.name.trim().ifEmpty { stableId },
+        host = entry.host?.trim()?.takeIf { it.isNotEmpty() },
+        contextPath = normalizeGatewayContextPath(entry.contextPath),
+        lastConnectedAtMs = entry.lastConnectedAtMs.takeUnless { it == 0L } ?: existing?.lastConnectedAtMs ?: 0L,
+      )
+    return (_entries.value.filterNot { it.stableId == stableId } + normalized).sortedForStorage()
+  }
+
+  private fun commitAndPublish(
     entries: List<GatewayRegistryEntry>,
     activeStableId: String?,
     connectedStableIds: List<String>,
-  ): Boolean =
-    mutationsAllowed &&
-      prefs.putStringSynchronously(
-        STORAGE_KEY,
-        encodedRegistry(entries, activeStableId, connectedStableIds),
+    credentialEdits: Map<String, String?> = emptyMap(),
+    notifyActive: Boolean,
+  ): Boolean {
+    require(STORAGE_KEY !in credentialEdits) { "Credential edits cannot replace the gateway registry" }
+    if (!prefs.commitSecureStrings(
+        credentialEdits + (STORAGE_KEY to encodedRegistry(entries, activeStableId, connectedStableIds)),
       )
+    ) {
+      return false
+    }
+    // Registry lock precedes the credential lock. Publish only after commit; an observer
+    // failure cannot turn durable success into an apparent rollback or recovery cancellation.
+    _entries.value = entries
+    _activeStableId.value = activeStableId
+    _connectedStableIds.value = connectedStableIds
+    if (notifyActive) {
+      runCatching { onActiveChanged?.invoke(activeStableId) }
+        .onFailure { Log.e("GatewayRegistry", "Active-gateway observer failed after durable commit", it) }
+    }
+    return true
+  }
 
   private fun encodedRegistry(
     entries: List<GatewayRegistryEntry> = _entries.value,

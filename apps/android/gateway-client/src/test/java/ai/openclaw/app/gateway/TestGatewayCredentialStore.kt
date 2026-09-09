@@ -21,9 +21,9 @@ internal class TestGatewayCredentialStore(
     value: String,
   ): Boolean = backing.edit().putString(key, value).commit()
 
-  override fun commitSecureStrings(values: Map<String, String>): Boolean {
+  override fun commitSecureStrings(values: Map<String, String?>): Boolean {
     val editor = backing.edit()
-    values.forEach { (key, value) -> editor.putString(key, value) }
+    values.forEach { (key, value) -> if (value == null) editor.remove(key) else editor.putString(key, value) }
     return editor.commit()
   }
 

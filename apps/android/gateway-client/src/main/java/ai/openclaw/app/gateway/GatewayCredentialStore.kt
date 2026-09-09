@@ -15,8 +15,8 @@ interface GatewayCredentialStore {
     value: String,
   ): Boolean
 
-  /** Commits one credential update and restores previous in-memory values on failure. */
-  fun commitSecureStrings(values: Map<String, String>): Boolean
+  /** Commits one update (null removes a key), restoring previous in-memory values on failure. */
+  fun commitSecureStrings(values: Map<String, String?>): Boolean
 
   fun remove(key: String)
 }

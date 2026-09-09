@@ -3635,11 +3635,7 @@ class NodeRuntime private constructor(
         if (!prepare()) return@withLock false
         synchronized(gatewayLifecycleIntentLock) {
           if (!intent()) return@withLock false
-          if (prefs.gatewayRegistry.entries.value
-              .any { it.stableId == endpoint.stableId }
-          ) {
-            prefs.gatewayRegistry.setActive(endpoint.stableId)
-          }
+          if (!registerGateway(endpoint)) return@withLock false
           beginConnect(endpoint, resolveGatewayConnectAuth(endpoint, explicitAuth), intent)
         }
         chat.restoreSelectedGatewayOfflineState()
@@ -4886,7 +4882,6 @@ class NodeRuntime private constructor(
               GatewayTlsTrustDecision.SystemTrusted -> {
                 // Automatic platform trust only applies where no user-accepted pin exists.
                 // Replacing a pin always requires explicit confirmation in the trust prompt.
-                registerGateway(endpoint, setActive = true)
                 connectAfterTlsCheckLocked(endpoint = endpoint, auth = auth, connectAttemptId = connectAttemptId)
               }
 
@@ -5031,9 +5026,12 @@ class NodeRuntime private constructor(
         finishGatewayConnectionOperation(intent)
         return@launchGatewayLifecycle
       }
+      if (!registerGateway(prompt.endpoint)) {
+        finishGatewayConnectionOperation(intent)
+        return@launchGatewayLifecycle
+      }
       _pendingGatewayTrust.value = null
       prefs.saveGatewayTlsFingerprint(prompt.endpoint.stableId, acceptedFingerprint)
-      registerGateway(prompt.endpoint, setActive = true)
       beginConnect(endpoint = prompt.endpoint, auth = prompt.auth, intent = intent)
     }
   }
@@ -5047,9 +5045,12 @@ class NodeRuntime private constructor(
         finishGatewayConnectionOperation(intent)
         return@launchGatewayLifecycle
       }
+      if (!registerGateway(prompt.endpoint)) {
+        finishGatewayConnectionOperation(intent)
+        return@launchGatewayLifecycle
+      }
       _pendingGatewayTrust.value = null
       prefs.clearGatewayTlsFingerprint(prompt.endpoint.stableId)
-      registerGateway(prompt.endpoint, setActive = true)
       beginConnect(endpoint = prompt.endpoint, auth = prompt.auth, intent = intent)
     }
   }
@@ -5275,20 +5276,19 @@ class NodeRuntime private constructor(
 
   private fun recordConnectedGateway() {
     val endpoint = connectedEndpoint ?: return
-    registerGateway(endpoint, setActive = true)
+    // Selection is authoritative before either socket starts; hello only records the timestamp.
     prefs.gatewayRegistry.markConnected(endpoint.stableId, System.currentTimeMillis())
   }
 
-  private fun registerGateway(
-    endpoint: GatewayEndpoint,
-    setActive: Boolean,
-  ) {
+  private fun registerGateway(endpoint: GatewayEndpoint): Boolean {
     val existing =
       prefs.gatewayRegistry.entries.value
         .firstOrNull { it.stableId == endpoint.stableId }
     val entry = gatewayRegistryEntry(endpoint, existing)
-    prefs.gatewayRegistry.upsert(entry)
-    if (setActive) prefs.gatewayRegistry.setActive(endpoint.stableId)
+    if (prefs.gatewayRegistry.upsertAndSetActive(entry)) return true
+    connectingEndpointStableId = null
+    setStandaloneGatewayStatus(nativeText("Failed: couldn't save the selected gateway. Retry connect.").source)
+    return false
   }
 
   private suspend fun drainGatewayConnectionsForConnect(
