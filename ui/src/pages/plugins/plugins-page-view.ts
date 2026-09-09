@@ -147,6 +147,7 @@ export function renderPluginsPage(model: PluginsPageViewModel) {
         : nothing
     }
     ${renderSettingsWorkspace(html`
+      <openclaw-plugin-manager></openclaw-plugin-manager>
       ${
         model.surface === "discovery"
           ? html`<wa-tab-panel
