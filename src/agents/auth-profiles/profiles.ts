@@ -271,8 +271,10 @@ function createAuthProfileRemovalTarget(params: {
   profileIds?: ReadonlySet<string>;
   provider?: string;
 }): AuthProfileRemovalTarget {
+  // Removal compares the physical write target, without inherited credentials.
   const store = loadAuthProfileStoreWithoutExternalProfiles(params.agentDir, {
     allowKeychainPrompt: false,
+    inheritedAuthDir: params.agentDir,
   });
   const profileIds =
     params.profileIds ?? new Set(listProfilesForProvider(store, params.provider ?? ""));
@@ -322,6 +324,7 @@ async function removeAuthProfileTargetsWithLocks(
     for (const target of targets) {
       const current = loadAuthProfileStoreWithoutExternalProfiles(target.agentDir, {
         allowKeychainPrompt: false,
+        inheritedAuthDir: target.agentDir,
       });
       if (!authProfileRemovalTargetMatches(target, current)) {
         return { kind: "retry" };

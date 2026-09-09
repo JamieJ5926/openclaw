@@ -69,6 +69,35 @@ afterEach(() => {
 });
 
 describe("API-key storage and selection owners", () => {
+  it.each(["main", "reader"])(
+    "removes a shared bound key through %s without confusing inheritance with a changed local row",
+    async (caller) => {
+      await upsertAuthProfileWithLockOrThrow({
+        profileId: "sample:bound",
+        credential: { type: "api_key", provider: "sample", key: "removed-shared" },
+      });
+      await upsertAuthProfileWithLockOrThrow({
+        profileId: "sample:backup",
+        credential: { type: "api_key", provider: "sample", key: "kept-shared" },
+      });
+      writeConfig({
+        models: { providers: { sample: { ...providerConnection, apiKey: "sample:bound" } } },
+      });
+      await removeModelAuthCredentials({
+        cfg: await loadValidConfigOrThrow(),
+        agentDir: agentDir(caller),
+        profileIds: ["sample:bound"],
+      });
+      const shared = loadPersistedAuthProfileStore();
+      expect(shared?.profiles["sample:bound"]).toBeUndefined();
+      expect(shared?.profiles["sample:backup"]).toMatchObject({ key: "kept-shared" });
+      expect((await loadValidConfigOrThrow()).models?.providers?.sample?.apiKey).toBeUndefined();
+      expect(
+        ensureAuthProfileStoreWithoutExternalProfiles(agentDir(caller)).profiles["sample:bound"],
+      ).toBeUndefined();
+    },
+  );
+
   it.each(["writer", "reader"])(
     "rejects a shared-key replacement shadowed by %s without changing credentials or config",
     async (owner) => {
