@@ -32,13 +32,13 @@ export const execSchema = Type.Object({
   ),
   env: Type.Optional(
     Type.Record(Type.String(), Type.String(), {
-      description: "Literal overrides; no expansion. Omit to inherit.",
+      description: "Literal overrides; no expansion.",
     }),
   ),
   secretEgress: Type.Optional(
     Type.Boolean({
       description:
-        "Gateway only: false omits protected store secrets and managed proxy injection for this command. Refused if proxy routing policy requires it. Inherited environment and other credentials are unchanged. Omit for default behavior.",
+        "Gateway only: false omits protected store secrets/proxy; fails if routing required. Inherited env/auth unchanged. Default true.",
     }),
   ),
   yieldMs: Type.Optional(
@@ -53,31 +53,31 @@ export const execSchema = Type.Object({
   ),
   timeoutSeconds: Type.Optional(
     Type.Number({
-      description: "Process lifetime in seconds; 0 disables.",
+      description: "Lifetime seconds; 0 disables.",
     }),
   ),
   pty: Type.Optional(
     Type.Boolean({
-      description: "PTY for TTY-required CLIs/coding agents.",
+      description: "Use PTY.",
     }),
   ),
   elevated: Type.Optional(
     Type.Boolean({
-      description: "Host elevation if allowed.",
+      description: "Elevate if allowed.",
     }),
   ),
   host: optionalStringEnum(EXEC_TOOL_HOST_VALUES, {
-    description: "Omit/auto: inherit configured host.",
+    description: "Omit/auto: configured host.",
   }),
   ask: Type.Optional(
     Type.String({
       description:
-        "Requests stricter approvals under tools.exec.mode and host policy; channel-origin calls cannot override host ask=off.",
+        "Stricter tools.exec.mode/host approvals; channel-origin cannot override ask=off.",
     }),
   ),
   node: Type.Optional(
     Type.String({
-      description: "Node id/name for host=node.",
+      description: "Node id/name.",
     }),
   ),
 });

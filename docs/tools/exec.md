@@ -30,6 +30,8 @@ OpenClaw omits their sentinels and its secret-egress proxy credentials for this 
 The call is refused if the running proxy has an explicit traffic allowlist (including
 `[]`) or bypass-host routing. Omitted/`true` keeps the default behavior. Ordinary
 store environment, inherited proxy/CA settings, and other authentication are unchanged.
+Keep the default if the command needs a protected-store API key; this option omits
+that key's sentinel too.
 </ParamField>
 
 <ParamField path="yieldMs" type="number" default="10000">

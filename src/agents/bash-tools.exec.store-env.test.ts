@@ -566,8 +566,9 @@ describe("exec store environment", () => {
     );
   });
 
-  it("preserves inherited proxy and trust settings when secret injection is disabled", async () => {
+  it("preserves inherited inference auth, proxy and trust settings when secret injection is disabled", async () => {
     const inherited = {
+      OPENAI_API_KEY: "operator-inference-fixture",
       HTTP_PROXY: "http://operator-proxy.test:8080",
       HTTPS_PROXY: "http://operator-proxy.test:8080",
       NODE_EXTRA_CA_CERTS: "/operator/ca.pem",
