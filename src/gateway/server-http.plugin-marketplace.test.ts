@@ -51,24 +51,31 @@ it("serves marketplace browser reads while preserving plugin HTTP boundaries", a
         isStartupPluginRuntimeReady: () => true,
       },
       run: async (server) => {
-        for (const method of ["GET", "HEAD"]) {
-          const { res, getBody } = await sendGatewayRequest(server, {
-            path: "/plugins",
-            method,
-            headers: { accept: "text/html" },
-          });
-          expect(res.statusCode, method).toBe(200);
-          if (method === "GET") {
-            expect(getBody()).toContain("spa fallback");
-          } else {
-            expect(getBody()).toBe("");
+        const documentPaths = ["/plugins", "/plugins/ch_bWF0cml4", "/plugins/local_bWVtb3J5"];
+        for (const pathname of documentPaths) {
+          for (const method of ["GET", "HEAD"]) {
+            const { res, getBody } = await sendGatewayRequest(server, {
+              path: pathname,
+              method,
+              headers: { accept: "text/html" },
+            });
+            expect(res.statusCode, `${method} ${pathname}`).toBe(200);
+            if (method === "GET") {
+              expect(getBody()).toContain("spa fallback");
+            } else {
+              expect(getBody()).toBe("");
+            }
           }
         }
         for (const request of [
-          { path: "/plugins", method: "GET", headers: { accept: "application/json" } },
-          { path: "/plugins", method: "GET", headers: { accept: "text/html;q=0" } },
-          { path: "/plugins", method: "POST", headers: { accept: "text/html" } },
+          ...documentPaths.flatMap((pathname) => [
+            { path: pathname, method: "GET", headers: { accept: "application/json" } },
+            { path: pathname, method: "GET", headers: { accept: "text/html;q=0" } },
+            { path: pathname, method: "POST", headers: { accept: "text/html" } },
+          ]),
           { path: "/plugins/unclaimed", method: "GET", headers: { accept: "text/html" } },
+          { path: "/plugins/ch_a", method: "GET", headers: { accept: "text/html" } },
+          { path: "/plugins/ch_bWF0cml4/extra", method: "GET", headers: { accept: "text/html" } },
         ]) {
           const { res, getBody } = await sendGatewayRequest(server, request);
           expect(res.statusCode, JSON.stringify(request)).toBe(404);
