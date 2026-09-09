@@ -266,7 +266,7 @@ export class PluginsConsentController {
     await this.runMutation(
       installIdentity,
       (client) => installPlugin(client, request),
-      async (result, refreshError, client) => {
+      async (result, refreshError, client, isCurrent) => {
         const installedPluginKey = pluginRowKey(result.plugin.id);
         this.host.applyMutationResult(result);
         if (installedPluginKey !== installIdentity) {
@@ -277,6 +277,9 @@ export class PluginsConsentController {
           committedMutationMessage("installed", result, refreshError),
         );
         await this.host.refreshCatalogAfterMutation(client);
+        if (!isCurrent()) {
+          return;
+        }
         const committedObserver = this.mutationObservers.get(installIdentity);
         this.mutationObservers.delete(installIdentity);
         await committedObserver?.onCommitted?.(result, refreshError);
@@ -342,10 +345,13 @@ export class PluginsConsentController {
           committedMutationMessage(enabled ? "enabled" : "disabled", result, refreshError),
         );
         await this.host.refreshCatalogAfterMutation(client);
+        if (!isCurrent()) {
+          return;
+        }
         const committedObserver = this.mutationObservers.get(key);
         this.mutationObservers.delete(key);
         await committedObserver?.onCommitted?.(result, refreshError);
-        if (isCurrent() && !result.restartRequired) {
+        if (!result.restartRequired) {
           // Plugin tabs come from hello; reconnect after the registry refresh.
           this.host.reconnectAfterMutation(key);
         }

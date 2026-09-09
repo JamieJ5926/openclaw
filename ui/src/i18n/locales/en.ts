@@ -3235,6 +3235,11 @@ export const en: TranslationMap & {
         "The Gateway reconnected, but the installed plugin was not found. Retry to refresh its state.",
       reconnectTimedOut:
         "The Gateway did not reconnect after installation. Check the Gateway status, then retry.",
+      destinationChanged:
+        "The Gateway or operator changed during installation. Review the plugin again before continuing.",
+      restartReason: "Apply an installed plugin change",
+      restartFailed: "The Gateway could not be restarted. Check its status, then retry.",
+      pluginUnhealthy: "The plugin reported an error after installation.",
       configSaveFailed: "Plugin configuration could not be saved.",
       successTitle: "Plugin ready",
       successBody: "{name} is installed and enabled.",

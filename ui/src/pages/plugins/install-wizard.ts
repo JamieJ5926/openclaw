@@ -286,10 +286,12 @@ export function renderPluginInstallWizard(props: PluginInstallWizardProps): Temp
   return html`<openclaw-modal-dialog
     label=${t("pluginsPage.installWizard.title", { name: catalog.name })}
     style="--openclaw-modal-width: min(720px, calc(100vw - 32px));"
-    @modal-cancel=${() => {
-      if (!isWorking) {
-        props.onClose();
+    @modal-cancel=${(event: Event) => {
+      if (isWorking) {
+        event.preventDefault();
+        return;
       }
+      props.onClose();
     }}
   >
     <section class="plugin-install-wizard oc-card" data-stage=${props.state.stage}>

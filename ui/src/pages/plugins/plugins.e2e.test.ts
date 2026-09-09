@@ -46,6 +46,7 @@ const updateScreenshots = process.env.OPENCLAW_UPDATE_E2E_SCREENSHOTS === "1";
 const artifactDir = path.resolve(process.cwd(), ".artifacts/control-ui-e2e/plugins");
 const desktopViewport = { height: 1000, width: 1440 };
 const pluginMethods = [
+  "gateway.restart.request",
   "plugins.list",
   "plugins.inspect",
   "plugins.search",
@@ -108,6 +109,7 @@ async function newContext(viewport = desktopViewport): Promise<BrowserContext> {
 
 function pluginMethodResponses() {
   return {
+    "gateway.restart.request": { ok: true, status: "scheduled" },
     "config.get": configSnapshot(false),
     "plugins.list": initialInventory,
     "plugins.inspect": {
@@ -523,6 +525,16 @@ describeControlUiE2e("Control UI Plugins mocked Gateway E2E", () => {
 
       const installRequest = await gateway.waitForRequest("plugins.install");
       expect(installRequest.params).toEqual({ source: "clawhub", packageName: "matrix" });
+      expect((await gateway.waitForRequest("gateway.restart.request")).params).toEqual({
+        reason: "Apply an installed plugin change",
+      });
+      const cancel = await wizard.evaluate((element) => {
+        const event = new CustomEvent("modal-cancel", { cancelable: true });
+        element.dispatchEvent(event);
+        return event.defaultPrevented;
+      });
+      expect(cancel).toBe(true);
+      expect(await wizard.count()).toBe(1);
       await gateway.setOnline(false);
       await gateway.setOnline(true);
 
@@ -537,6 +549,9 @@ describeControlUiE2e("Control UI Plugins mocked Gateway E2E", () => {
       await wizard.getByRole("button", { name: "Save and enable", exact: true }).click();
 
       await gateway.waitForRequest("plugins.setEnabled");
+      await expect
+        .poll(async () => (await gateway.getRequests("gateway.restart.request")).length)
+        .toBe(2);
       await gateway.setOnline(false);
       await gateway.setOnline(true);
       await wizard.getByText("Plugin ready", { exact: true }).waitFor();

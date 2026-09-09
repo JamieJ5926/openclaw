@@ -11,6 +11,7 @@ import {
 } from "../../app-route-paths.ts";
 import { applicationContext, type ApplicationContext } from "../../app/context.ts";
 import { resolveControlUiAuthCandidates } from "../../app/control-ui-auth.ts";
+import { gatewayPresentationScope } from "../../app/gateway-presentation-scope.ts";
 import { hasOperatorAdminAccess } from "../../app/operator-access.ts";
 import { t } from "../../i18n/index.ts";
 import { formatUiError, formatUiExternalText } from "../../lib/format-error.ts";
@@ -87,6 +88,8 @@ export class PluginsPage extends OpenClawLightDomElement {
   private preserveMessageKeyOnReconnect: string | null = null;
   private iconAuthCandidates: string[] = [];
   private installReconnectTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
+  private installAttempt = 0;
+  private installOwner: object | null = null;
   private readonly pluginIcons = new PluginIconController({
     getFetchContext: () => ({
       resourceBasePath: this.context.resourceBasePath,
@@ -184,10 +187,6 @@ export class PluginsPage extends OpenClawLightDomElement {
         const completedSave = this.configAutoSaveStatus === "saving" && nextStatus === "saved";
         this.configAutoSaveStatus = nextStatus;
         this.requestUpdate();
-        if (this.installWizard?.stage === "configuring" && runtimeConfig.state.connected) {
-          void runtimeConfig.ensureLoaded();
-          void runtimeConfig.ensureSchemaLoaded();
-        }
         if (completedSave && this.pluginConfigEditPending) {
           this.pluginConfigEditPending = false;
           void this.refreshCatalog();
@@ -210,6 +209,7 @@ export class PluginsPage extends OpenClawLightDomElement {
   override disconnectedCallback() {
     document.removeEventListener("keydown", this.handleDocumentKeydown, true);
     this.clearInstallReconnectTimeout();
+    this.retireInstallAttempt();
     this.discovery.disconnect();
     this.subscriptions.clear();
     this.pluginIcons.reset();
@@ -349,8 +349,22 @@ export class PluginsPage extends OpenClawLightDomElement {
     this.detail = null;
     this.catalogDetail = null;
     if (this.installWizardBusy && this.installWizard) {
-      this.installWizard = { ...this.installWizard, stage: "reconnecting", error: undefined };
-      this.armInstallReconnectTimeout(this.installWizard.catalogId);
+      if (!this.installOwnerIsCurrent()) {
+        const key = this.installWizardKey();
+        if (key) {
+          this.consentController.cancelMutationObserver(key);
+        }
+        const wizard = this.installWizard;
+        this.retireInstallAttempt();
+        this.installWizard = {
+          ...wizard,
+          stage: "error",
+          error: t("pluginsPage.installWizard.destinationChanged"),
+        };
+      } else {
+        this.installWizard = { ...this.installWizard, stage: "reconnecting", error: undefined };
+        this.armInstallReconnectTimeout(this.installAttempt, this.installWizard.catalogId);
+      }
     }
     this.consentController.reset();
   }
@@ -373,15 +387,20 @@ export class PluginsPage extends OpenClawLightDomElement {
     }
   }
 
-  private armInstallReconnectTimeout(catalogId: string) {
+  private armInstallReconnectTimeout(attempt: number, catalogId: string) {
     this.clearInstallReconnectTimeout();
     this.installReconnectTimer = globalThis.setTimeout(() => {
       this.installReconnectTimer = null;
       if (
         this.installWizard?.catalogId === catalogId &&
-        this.installWizard.stage === "reconnecting"
+        this.installWizard.stage === "reconnecting" &&
+        this.installIsCurrent(attempt, catalogId)
       ) {
-        this.failInstallWizard(catalogId, t("pluginsPage.installWizard.reconnectTimedOut"));
+        this.failInstallWizard(
+          attempt,
+          catalogId,
+          t("pluginsPage.installWizard.reconnectTimedOut"),
+        );
       }
     }, INSTALL_RECONNECT_TIMEOUT_MS);
   }
@@ -392,6 +411,8 @@ export class PluginsPage extends OpenClawLightDomElement {
       return;
     }
     this.clearInstallReconnectTimeout();
+    this.installAttempt += 1;
+    this.installOwner = gatewayPresentationScope(this.context.gateway);
     this.installWizard = {
       catalogId: result.plugin.id,
       detail: result,
@@ -410,6 +431,7 @@ export class PluginsPage extends OpenClawLightDomElement {
     if (key) {
       this.consentController.cancelMutationObserver(key);
     }
+    this.retireInstallAttempt();
     this.installWizard = null;
   }
 
@@ -428,34 +450,37 @@ export class PluginsPage extends OpenClawLightDomElement {
   private beginInstallWizard() {
     const wizard = this.installWizard;
     const key = this.installWizardKey(wizard);
-    if (!wizard || !key || !this.canMutate()) {
+    const attempt = this.installAttempt;
+    if (!wizard || !key || !this.canMutate() || !this.installIsCurrent(attempt, wizard.catalogId)) {
       return;
     }
     this.installWizard = { ...wizard, stage: "installing", error: undefined };
     void this.consentController.install(wizard.request, key, {
       reviewConfirmed: true,
-      onCommitted: (result) => {
-        if (this.installWizard?.catalogId !== wizard.catalogId) {
+      onCommitted: async (result) => {
+        const current = this.installWizard;
+        if (!current || !this.installIsCurrent(attempt, wizard.catalogId)) {
           return;
         }
         this.installWizard = {
-          ...this.installWizard,
+          ...current,
           pluginId: result.plugin.id,
           stage: "reconnecting",
           policyReason: undefined,
           error: undefined,
         };
         if (result.restartRequired) {
-          this.armInstallReconnectTimeout(wizard.catalogId);
+          await this.restartInstall(attempt, wizard.catalogId);
         } else {
           void this.resumeInstallWizard();
         }
       },
-      onFailure: (error) => this.failInstallWizard(wizard.catalogId, error),
+      onFailure: (error) => this.failInstallWizard(attempt, wizard.catalogId, error),
       onInstallPolicyWarning: (_request, reason) => {
-        if (this.installWizard?.catalogId === wizard.catalogId) {
+        const current = this.installWizard;
+        if (current && this.installIsCurrent(attempt, wizard.catalogId)) {
           this.installWizard = {
-            ...this.installWizard,
+            ...current,
             stage: "policy-warning",
             policyReason: reason,
           };
@@ -467,7 +492,7 @@ export class PluginsPage extends OpenClawLightDomElement {
   private continueInstallPolicyWarning() {
     const wizard = this.installWizard;
     const key = this.installWizardKey(wizard);
-    if (!wizard || !key) {
+    if (!wizard || !key || !this.installIsCurrent(this.installAttempt, wizard.catalogId)) {
       return;
     }
     this.installWizard = { ...wizard, stage: "installing", error: undefined };
@@ -477,10 +502,11 @@ export class PluginsPage extends OpenClawLightDomElement {
     );
   }
 
-  private failInstallWizard(catalogId: string, error: string) {
-    if (this.installWizard?.catalogId === catalogId) {
+  private failInstallWizard(attempt: number, catalogId: string, error: string) {
+    const current = this.installWizard;
+    if (current && this.installIsCurrent(attempt, catalogId)) {
       this.clearInstallReconnectTimeout();
-      this.installWizard = { ...this.installWizard, stage: "error", error };
+      this.installWizard = { ...current, stage: "error", error };
     }
   }
 
@@ -505,15 +531,30 @@ export class PluginsPage extends OpenClawLightDomElement {
 
   private async resumeInstallWizard(): Promise<void> {
     const wizard = this.installWizard;
-    if (!wizard || wizard.stage !== "reconnecting" || !this.gateway.connected) {
+    const attempt = this.installAttempt;
+    if (
+      !wizard ||
+      wizard.stage !== "reconnecting" ||
+      !this.gateway.connected ||
+      !this.installIsCurrent(attempt, wizard.catalogId)
+    ) {
       return;
     }
     this.clearInstallReconnectTimeout();
     const plugin = this.installedWizardPlugin();
     if (!plugin) {
       this.failInstallWizard(
+        attempt,
         wizard.catalogId,
         t("pluginsPage.installWizard.installedStateMissing"),
+      );
+      return;
+    }
+    if (plugin.state === "error") {
+      this.failInstallWizard(
+        attempt,
+        wizard.catalogId,
+        plugin.error ?? t("pluginsPage.installWizard.pluginUnhealthy"),
       );
       return;
     }
@@ -525,6 +566,9 @@ export class PluginsPage extends OpenClawLightDomElement {
           this.context.runtimeConfig.ensureLoaded(),
           this.context.runtimeConfig.ensureSchemaLoaded(),
         ]);
+      }
+      if (!this.installIsCurrent(attempt, wizard.catalogId)) {
+        return;
       }
       this.requestUpdate();
       return;
@@ -539,22 +583,34 @@ export class PluginsPage extends OpenClawLightDomElement {
     if (!wizard?.pluginId || wizard.stage !== "configuring" || !this.canEditConfig()) {
       return;
     }
+    const attempt = this.installAttempt;
+    if (!this.installIsCurrent(attempt, wizard.catalogId)) {
+      return;
+    }
     const saved = await this.context.runtimeConfig.save();
     if (!saved) {
       this.failInstallWizard(
+        attempt,
         wizard.catalogId,
         this.context.runtimeConfig.state.lastError ??
           t("pluginsPage.installWizard.configSaveFailed"),
       );
       return;
     }
+    if (!this.installIsCurrent(attempt, wizard.catalogId)) {
+      return;
+    }
     await this.refreshCatalog();
+    if (!this.installIsCurrent(attempt, wizard.catalogId)) {
+      return;
+    }
     this.enableInstalledWizardPlugin(wizard.pluginId);
   }
 
   private enableInstalledWizardPlugin(pluginId: string) {
     const wizard = this.installWizard;
-    if (!wizard) {
+    const attempt = this.installAttempt;
+    if (!wizard || !this.installIsCurrent(attempt, wizard.catalogId)) {
       return;
     }
     const key = pluginRowKey(pluginId);
@@ -566,21 +622,30 @@ export class PluginsPage extends OpenClawLightDomElement {
       {},
       {
         onCommitted: (result) => {
-          if (this.installWizard?.catalogId !== wizard.catalogId) {
+          const current = this.installWizard;
+          if (!current || !this.installIsCurrent(attempt, wizard.catalogId)) {
+            return;
+          }
+          if (result.plugin.state === "error") {
+            this.failInstallWizard(
+              attempt,
+              wizard.catalogId,
+              result.plugin.error ?? t("pluginsPage.installWizard.pluginUnhealthy"),
+            );
             return;
           }
           this.installWizard = {
-            ...this.installWizard,
+            ...current,
             pluginId: result.plugin.id,
             stage: result.restartRequired ? "reconnecting" : "success",
           };
           if (result.restartRequired) {
-            this.armInstallReconnectTimeout(wizard.catalogId);
+            void this.restartInstall(attempt, wizard.catalogId);
           } else {
             this.clearInstallReconnectTimeout();
           }
         },
-        onFailure: (error) => this.failInstallWizard(wizard.catalogId, error),
+        onFailure: (error) => this.failInstallWizard(attempt, wizard.catalogId, error),
       },
     );
   }
@@ -590,13 +655,70 @@ export class PluginsPage extends OpenClawLightDomElement {
     if (!wizard) {
       return;
     }
+    if (!this.installOwnerIsCurrent()) {
+      this.installAttempt += 1;
+      this.installOwner = gatewayPresentationScope(this.context.gateway);
+      this.installWizard = {
+        ...wizard,
+        pluginId: undefined,
+        stage: "review",
+        error: undefined,
+      };
+      return;
+    }
     if (wizard.pluginId) {
       this.installWizard = { ...wizard, stage: "reconnecting", error: undefined };
-      this.armInstallReconnectTimeout(wizard.catalogId);
+      this.armInstallReconnectTimeout(this.installAttempt, wizard.catalogId);
       void this.refreshCatalog().then(() => this.resumeInstallWizard());
       return;
     }
     this.installWizard = { ...wizard, stage: "review", error: undefined };
+  }
+
+  private installOwnerIsCurrent(): boolean {
+    return (
+      this.installOwner !== null &&
+      this.installOwner === gatewayPresentationScope(this.context.gateway)
+    );
+  }
+
+  private installIsCurrent(attempt: number, catalogId: string): boolean {
+    return (
+      attempt === this.installAttempt &&
+      this.installOwnerIsCurrent() &&
+      this.installWizard?.catalogId === catalogId
+    );
+  }
+
+  private retireInstallAttempt(): void {
+    this.installAttempt += 1;
+    this.installOwner = null;
+  }
+
+  private async restartInstall(attempt: number, catalogId: string): Promise<void> {
+    if (!this.installIsCurrent(attempt, catalogId)) {
+      return;
+    }
+    const scope = this.gateway.capture();
+    if (!scope) {
+      this.failInstallWizard(attempt, catalogId, t("pluginsPage.installWizard.restartFailed"));
+      return;
+    }
+    try {
+      await scope.client.request("gateway.restart.request", {
+        reason: t("pluginsPage.installWizard.restartReason"),
+      });
+    } catch (error) {
+      this.failInstallWizard(
+        attempt,
+        catalogId,
+        error instanceof Error ? error.message : t("pluginsPage.installWizard.restartFailed"),
+      );
+      return;
+    }
+    if (this.installIsCurrent(attempt, catalogId)) {
+      this.armInstallReconnectTimeout(attempt, catalogId);
+    }
   }
 
   private manageInstalledWizardPlugin() {
