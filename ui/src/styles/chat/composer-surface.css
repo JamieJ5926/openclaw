@@ -377,24 +377,6 @@
   text-overflow: ellipsis;
 }
 
-/* Capture mode pares the footer back to the two decisions that matter: stop
-   recording or accept the transcript. Draft content and attachments remain in
-   place so entering the mode never discards operator context. */
-.agent-chat__input--dictating .agent-chat__composer-lead,
-.agent-chat__input--dictating .agent-chat__composer-meta,
-.agent-chat__input--dictating .agent-chat__composer-controls,
-.agent-chat__input--dictating .chat-talk-input-picker {
-  display: none;
-}
-
-.agent-chat__input--dictating .agent-chat__composer-footer {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.agent-chat__input--dictating .agent-chat__composer-trail {
-  grid-column: 1;
-}
-
 .agent-chat__composer-input-row {
   display: flex;
   align-items: flex-end;
@@ -794,24 +776,6 @@
 
 .chat-desktop-primary-action {
   display: contents;
-}
-
-/* Live voice input: the level meter itself is the control. It stays unframed
-   inside the composer; the waveform is enough state, and hover reveals stop. */
-.chat-send-btn.chat-send-btn--voice-live {
-  position: relative;
-  width: auto;
-  min-width: 64px;
-  padding: 0 14px;
-  border-radius: var(--radius-full);
-  background: transparent;
-  color: var(--accent);
-  box-shadow: none;
-}
-
-.chat-send-btn.chat-send-btn--voice-live:hover:not(:disabled) {
-  background: var(--chat-composer-hover);
-  box-shadow: none;
 }
 
 /* Soft danger fill so Stop generating reads as the one destructive control

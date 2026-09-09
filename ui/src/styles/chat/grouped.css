@@ -750,8 +750,6 @@ img.chat-avatar.chat-avatar--logo {
     --chat-footer-detail-position: static;
     --chat-message-action-opacity: var(--chat-footer-disclosure-opacity, 0);
     --chat-message-action-pointer-events: var(--chat-footer-disclosure-pointer-events, none);
-    padding-bottom: calc(var(--chat-turn-gap) - var(--chat-touch-row-margin));
-    margin-bottom: var(--chat-touch-row-margin);
   }
 
   .chat-group.chat-group--with-footer:has(
@@ -1185,25 +1183,8 @@ img.chat-avatar.chat-avatar--logo {
 }
 
 @media (max-width: 768px), (max-width: 932px) and (max-height: 500px) and (orientation: landscape) {
-  .chat-group {
-    --chat-avatar-column: 0px;
-    --chat-avatar-gap: 0px;
-    --chat-message-column-max: 82%;
-    margin-inline: 0;
-  }
-
-  .chat-group :is(.chat-avatar, .chat-avatar-slot) {
-    display: none;
-  }
-
   /* Peer names carry identity when narrow rows have no avatar column. */
   .chat-group.user.chat-group--peer {
     --chat-persistent-footer-opacity: 1;
-  }
-}
-
-@media (max-width: 400px) {
-  .chat-group {
-    --chat-message-column-max: 88%;
   }
 }

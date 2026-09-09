@@ -2,13 +2,17 @@ import type { Page } from "playwright";
 import { expect, it } from "vitest";
 import type { ApplicationRuntime } from "../app/bootstrap.ts";
 import {
+  controlUiSessionUrl,
   defaultControlUiFeatureMethods,
   installMockGateway,
   startControlUiE2eServer,
   waitForControlUiRoute,
 } from "../test-helpers/control-ui-e2e.ts";
 import { createControlUiSessionRow } from "../test-helpers/control-ui-session-fixtures.ts";
-import { createControlUiE2eSuite } from "./control-ui-e2e-suite.test-support.ts";
+import {
+  createControlUiE2eSuite,
+  holdModuleResponse,
+} from "./control-ui-e2e-suite.test-support.ts";
 
 const suite = createControlUiE2eSuite({
   name: "Control UI startup presentation",
@@ -322,6 +326,60 @@ async function startupRegionBounds(page: Page) {
 }
 
 suite.define(() => {
+  it.each([
+    { width: 390, height: 844 },
+    { width: 700, height: 900 },
+    { width: 900, height: 400 },
+  ])(
+    "keeps group skeleton geometry fixed through late route CSS at $width x $height",
+    async (viewport) => {
+      await suite.withPage({ viewport, colorScheme: "dark" }, async ({ page }) => {
+        const sessionKey = "agent:main:telegram:group:startup";
+        const gateway = await installMockGateway(page, {
+          sessionKey,
+          heldMethods: ["agent.identity.get", "chat.startup"],
+          historyMessages: [{ role: "assistant", content: [{ type: "text", text: historyText }] }],
+        });
+        const styles = await holdModuleResponse(page, /\/styles\/chat\/grouped\.css(?:\?|$)/u);
+        try {
+          await page.goto(controlUiSessionUrl(suite.server.baseUrl, sessionKey));
+          const styleUrl = await styles.request;
+          await page.waitForFunction(() => {
+            const bubble = document.querySelector("openclaw-startup-chat-pane .chat-bubble");
+            return bubble && Number(getComputedStyle(bubble, "::after").opacity) === 1;
+          });
+          const geometry = () =>
+            page.locator("openclaw-startup-chat-pane").evaluate((pane) =>
+              [
+                ...pane.querySelectorAll(
+                  ".chat-group, .chat-avatar, .chat-group-messages, .chat-bubble",
+                ),
+              ].map((element) => {
+                const box = element.getBoundingClientRect();
+                return [getComputedStyle(element).display, box.x, box.y, box.width, box.height];
+              }),
+            );
+          const before = await geometry();
+          styles.release();
+          await page.addScriptTag({ type: "module", url: styleUrl });
+          await page.evaluate(
+            () =>
+              new Promise<void>((resolve) => {
+                requestAnimationFrame(() => resolve());
+              }),
+          );
+          expect(await geometry()).toEqual(before);
+          await gateway.waitForRequest("agent.identity.get");
+          await gateway.waitForRequest("chat.startup");
+          await gateway.resolveDeferred("agent.identity.get");
+          await gateway.resolveDeferred("chat.startup");
+          await page.locator('.shell[data-startup-stage="ready"]').waitFor();
+        } finally {
+          styles.release();
+        }
+      });
+    },
+  );
   it("paints a fast cold startup without ever flashing skeletons", async () => {
     await suite.withPage(
       { viewport: { width: 1440, height: 900 }, colorScheme: "dark" },
