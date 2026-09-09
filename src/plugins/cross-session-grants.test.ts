@@ -1,6 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { resetPluginStateStoreForTests } from "../plugin-state/plugin-state-store.js";
+import { pluginStateEntries } from "../plugin-state/plugin-state-store.sqlite.js";
 import { createCrossSessionGrantRuntime } from "./cross-session-grants.js";
 import type { CrossSessionGrant } from "./runtime/types.js";
 
@@ -42,6 +43,7 @@ describe("cross-session grant runtime", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     resetPluginStateStoreForTests();
   });
 
@@ -81,6 +83,65 @@ describe("cross-session grant runtime", () => {
     live = false;
     expect(runtime.authorize(authority(nextLifecycle.signal))).toBeUndefined();
   });
+
+  it.for(["allowStanding", "revoke", "applyRevocation", "acknowledgeRevocation"] as const)(
+    "keeps rejected %s mutations from extending persisted expiry",
+    (operation) => {
+      const runtime = createCrossSessionGrantRuntime("reef", () => live, env);
+      const controller = new AbortController();
+      const signal = controller.signal;
+      const started = Date.now();
+      const clock = vi.spyOn(Date, "now").mockReturnValue(started);
+      expect(runtime.create(grant, signal)).toBe(true);
+      expect(runtime.allowStanding(authority(signal))).toBe(true);
+      const rows = () =>
+        pluginStateEntries({
+          pluginId: "core:cross-session-grants:reef",
+          namespace: "grants",
+          env,
+        });
+      const before = rows();
+      expect(before).toHaveLength(1);
+      expect(before[0]?.expiresAt).toBe(started + 7 * 24 * 60 * 60_000);
+      const reject = () => {
+        switch (operation) {
+          case "allowStanding":
+            expect(runtime.allowStanding(authority(signal, { subjectBinding: "wrong-key" }))).toBe(
+              false,
+            );
+            break;
+          case "revoke":
+            expect(
+              runtime.revoke({ grantId: grant.grantId, expectedGeneration: 1, signal }),
+            ).toBeUndefined();
+            break;
+          case "applyRevocation":
+            expect(runtime.applyRevocation(authority(signal, { generation: 1 }))).toBe(false);
+            break;
+          case "acknowledgeRevocation":
+            expect(
+              runtime.acknowledgeRevocation({ grantId: grant.grantId, generation: 0, signal }),
+            ).toBe(false);
+        }
+      };
+      // Exercise binding/role rejection, then retired and aborted callers, against one original TTL.
+      clock.mockReturnValue(started + 6 * 24 * 60 * 60_000);
+      reject();
+      live = false;
+      reject();
+      live = true;
+      controller.abort();
+      reject();
+      expect(rows()).toEqual(before);
+      resetPluginStateStoreForTests();
+      const reopened = createCrossSessionGrantRuntime("reef", () => live, env);
+      const freshSignal = new AbortController().signal;
+      expect(reopened.authorize(authority(freshSignal))).toMatchObject({ standing: true });
+      clock.mockReturnValue(before[0]!.expiresAt!);
+      expect(reopened.authorize(authority(freshSignal))).toBeUndefined();
+      expect(reopened.list(freshSignal)).toEqual([]);
+    },
+  );
 
   it("accepts exact grant redelivery without allowing identifier rebinding", () => {
     const runtime = createCrossSessionGrantRuntime("reef", () => live, env);

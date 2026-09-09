@@ -63,6 +63,7 @@ describe("spawn input ownership transfer", () => {
     { owner: "plugin grant", boundary: "before facade" },
     { owner: "plugin grant", boundary: "before staging" },
     { owner: "plugin grant", boundary: "after acceptance" },
+    { owner: "plugin grant", boundary: "expired grant" },
   ] as const)(
     "keeps $owner input authority at its current owner: $boundary",
     async ({ owner, boundary }, { signal }) => {
@@ -127,9 +128,22 @@ describe("spawn input ownership transfer", () => {
           generation: 0,
           signal,
         };
-        expect(
-          grants.create({ ...authority, role: "issuer", targetSessionKey: childKey }, signal),
-        ).toBe(true);
+        // Scope wall-clock control to synchronous store operations; the Gateway runs on real time.
+        const now = Date.now();
+        const clock = boundary === "expired grant" ? vi.spyOn(Date, "now") : undefined;
+        try {
+          clock?.mockReturnValue(now - 8 * 24 * 60 * 60_000);
+          expect(
+            grants.create({ ...authority, role: "issuer", targetSessionKey: childKey }, signal),
+          ).toBe(true);
+          if (clock) {
+            expect(grants.allowStanding(authority)).toBe(true);
+            clock.mockReturnValue(now - 2 * 24 * 60 * 60_000);
+            expect(grants.applyRevocation({ ...authority, generation: 1 })).toBe(false);
+          }
+        } finally {
+          clock?.mockRestore();
+        }
         rejection = "grant revoked before input admission";
         guard = () => {
           if (!grants.authorize(authority)) {
@@ -257,17 +271,25 @@ describe("spawn input ownership transfer", () => {
           (value) => ({ value }),
           (error: unknown) => ({ error }),
         );
-        await Promise.race([
-          boundary === "before facade" ? facadeEntered.promise : staged.promise,
-          outcome.then((value) => {
-            if ("error" in value) {
-              throw value.error;
-            }
-            throw new Error(`Dispatch ended before staging: ${JSON.stringify(value)}`);
-          }),
-        ]);
-        if (boundary === "before staging" || boundary === "before facade") {
-          closeAuthority();
+        if (boundary !== "expired grant") {
+          await Promise.race([
+            boundary === "before facade" ? facadeEntered.promise : staged.promise,
+            outcome.then((value) => {
+              if ("error" in value) {
+                throw value.error;
+              }
+              throw new Error(`Dispatch ended before staging: ${JSON.stringify(value)}`);
+            }),
+          ]);
+        }
+        if (
+          boundary === "before staging" ||
+          boundary === "before facade" ||
+          boundary === "expired grant"
+        ) {
+          if (boundary !== "expired grant") {
+            closeAuthority();
+          }
           releaseWriter.resolve();
           releaseFacade.resolve();
           expect(await outcome).toHaveProperty("error.message", rejection);

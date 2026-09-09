@@ -42,6 +42,7 @@ export function createCrossSessionGrantRuntime(
     const grant = get(authority.grantId, authority.signal);
     return grant && matchesAuthority(grant, authority) ? grant : undefined;
   };
+  // Returning a value rewrites its TTL; rejected mutations must use the no-write sentinel.
   const update = store.update;
   if (!update) {
     throw new Error("Cross-session grants require atomic plugin-state updates");
@@ -84,11 +85,11 @@ export function createCrossSessionGrantRuntime(
       let changed = false;
       update(grantKey(authority.grantId), (existing) => {
         if (!existing || !isPluginLive() || authority.signal.aborted) {
-          return existing;
+          return undefined;
         }
         const grant = validateGrant(existing);
         if (!matchesAuthority(grant, authority)) {
-          return grant;
+          return undefined;
         }
         changed = true;
         return validateGrant({ ...grant, standing: true });
@@ -106,7 +107,7 @@ export function createCrossSessionGrantRuntime(
       let revoked: CrossSessionGrant | undefined;
       update(grantKey(params.grantId), (existing) => {
         if (!existing || !isPluginLive() || params.signal.aborted) {
-          return existing;
+          return undefined;
         }
         const grant = validateGrant(existing);
         if (
@@ -114,7 +115,7 @@ export function createCrossSessionGrantRuntime(
           grant.revoked ||
           grant.generation !== params.expectedGeneration
         ) {
-          return grant;
+          return undefined;
         }
         revoked = validateGrant({
           ...grant,
@@ -131,7 +132,7 @@ export function createCrossSessionGrantRuntime(
       let changed = false;
       update(grantKey(authority.grantId), (existing) => {
         if (!existing || !isPluginLive() || authority.signal.aborted) {
-          return existing;
+          return undefined;
         }
         const grant = validateGrant(existing);
         if (
@@ -141,7 +142,7 @@ export function createCrossSessionGrantRuntime(
           grant.targetSessionId !== authority.targetSessionId ||
           authority.generation <= grant.generation
         ) {
-          return grant;
+          return undefined;
         }
         changed = true;
         return validateGrant({
@@ -158,7 +159,7 @@ export function createCrossSessionGrantRuntime(
       let changed = false;
       update(grantKey(params.grantId), (existing) => {
         if (!existing || !isPluginLive() || params.signal.aborted) {
-          return existing;
+          return undefined;
         }
         const grant = validateGrant(existing);
         if (
@@ -167,7 +168,7 @@ export function createCrossSessionGrantRuntime(
           !grant.revocationPending ||
           grant.generation !== params.generation
         ) {
-          return grant;
+          return undefined;
         }
         changed = true;
         return validateGrant({ ...grant, revocationPending: false });
