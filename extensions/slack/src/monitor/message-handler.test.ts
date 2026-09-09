@@ -22,7 +22,10 @@ const onFlushCallbacks: Array<
 const prepareSlackMessageMock = vi.fn(
   async (_params?: {
     ctx: Parameters<typeof createSlackMessageHandler>[0]["ctx"];
-    opts: { onVisibleDrop?: () => void };
+    opts: {
+      onVisibleDrop?: () => void;
+      ingressObserver?: ReturnType<typeof createIngressObserver>;
+    };
   }): Promise<{
     ctxPayload: Record<string, unknown>;
     route?: { sessionKey: string };
@@ -81,6 +84,17 @@ vi.mock("./message-handler/pipeline.runtime.js", () => ({
   prepareSlackMessage: prepareSlackMessageMock,
   dispatchPreparedSlackMessage: dispatchPreparedSlackMessageMock,
 }));
+
+function createIngressObserver() {
+  const finish = vi.fn();
+  return {
+    stage: vi.fn(),
+    progress: vi.fn(),
+    correlate: vi.fn(),
+    begin: vi.fn(() => ({ finish })),
+    finish,
+  };
+}
 
 function createContext(overrides?: {
   cfg?: OpenClawConfig;
@@ -700,6 +714,112 @@ describe("createSlackMessageHandler", () => {
     expect(turnAdoptionLifecycle.onAdopted).toHaveBeenCalledTimes(1);
     prepared.turnAdoptionLifecycle?.onDeferred();
     expect(turnAdoptionLifecycle.onDeferred).toHaveBeenCalledTimes(1);
+  });
+
+  it("scopes the durable ingress observer to Slack IDs before preparation", async () => {
+    prepareSlackMessageMock.mockResolvedValueOnce({
+      ctxPayload: {},
+      route: { sessionKey: "agent:main:slack:channel:C111" },
+    });
+    const ingressObserver = createIngressObserver();
+    const turnAdoptionLifecycle = {
+      admission: "exclusive" as const,
+      abortSignal: new AbortController().signal,
+      observer: ingressObserver,
+      onAdopted: vi.fn(),
+      onDeferred: vi.fn(),
+      onAbandoned: vi.fn(),
+      onSessionRouted: vi.fn(async () => {}),
+    };
+    const { handler } = createHandlerWithTracker();
+    const handled = handler(
+      {
+        type: "message",
+        team: "T111",
+        channel: "C111",
+        user: "U111",
+        ts: "1709000000.000560",
+        text: "secret body stays out of observation",
+      } as never,
+      { source: "message", awaitDispatch: true, turnAdoptionLifecycle },
+    );
+
+    await vi.waitFor(() => expect(enqueueMock).toHaveBeenCalledTimes(1));
+    expect(resolveThreadTsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        observation: expect.objectContaining({ ingressObserver: expect.any(Object) }),
+      }),
+    );
+    const entry = enqueueMock.mock.calls[0]?.[0] as Record<string, unknown>;
+    await runOnFlush([entry]);
+    await handled;
+
+    expect(prepareSlackMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        opts: expect.objectContaining({ ingressObserver: expect.any(Object) }),
+      }),
+    );
+    expect(ingressObserver.correlate).toHaveBeenCalledWith({
+      providerEventType: "message",
+      teamId: "T111",
+      channelId: "C111",
+      messageTs: "1709000000.000560",
+      threadTs: "1709000000.000560",
+    });
+    expect(ingressObserver.stage).toHaveBeenCalledWith("queued", "none");
+    expect(ingressObserver.stage).toHaveBeenCalledWith("dedupe_wait", "none");
+    expect(JSON.stringify(ingressObserver.correlate.mock.calls)).not.toContain("secret body");
+  });
+
+  it("keeps every same-flush duplicate event observer through preparation", async () => {
+    const firstObserver = createIngressObserver();
+    const secondObserver = createIngressObserver();
+    const { handler } = createHandlerWithTracker();
+    const message = {
+      type: "message" as const,
+      channel: "C111",
+      user: "U111",
+      ts: "1709000000.000570",
+      text: "<@UBOT> hello",
+    };
+    const first = handler(message as never, {
+      source: "message",
+      awaitDispatch: true,
+      ingressObserver: firstObserver,
+    });
+    const second = handler(message as never, {
+      source: "app_mention",
+      wasMentioned: true,
+      awaitDispatch: true,
+      ingressObserver: secondObserver,
+    });
+    await vi.waitFor(() => expect(enqueueMock).toHaveBeenCalledTimes(2));
+
+    const entries = enqueueMock.mock.calls.map((call) => call[0]) as Array<Record<string, unknown>>;
+    await runOnFlush(entries);
+    await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined]);
+
+    const preparedObserver = prepareSlackMessageMock.mock.calls[0]?.[0]?.opts.ingressObserver;
+    preparedObserver?.progress("thread_history", "slack_api");
+    const ticket = preparedObserver?.begin({
+      kind: "api",
+      method: "conversations.replies",
+      profile: "pooled_listener",
+    });
+    ticket?.finish("completed");
+
+    expect(firstObserver.progress).toHaveBeenCalledWith("thread_history", "slack_api");
+    expect(secondObserver.progress).toHaveBeenCalledWith("thread_history", "slack_api");
+    expect(firstObserver.begin).toHaveBeenCalledWith({
+      kind: "api",
+      method: "conversations.replies",
+      profile: "pooled_listener",
+    });
+    expect(secondObserver.begin).toHaveBeenCalledWith({
+      kind: "api",
+      method: "conversations.replies",
+      profile: "pooled_listener",
+    });
   });
 
   it("dispatches a message/app_mention twin pair exactly once", async () => {

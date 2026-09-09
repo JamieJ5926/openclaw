@@ -13,6 +13,7 @@ import {
   type ChannelIngressDrain,
   type CreateChannelIngressDrainOptions,
 } from "./ingress-drain.js";
+import { createUnknownChannelIngressObservabilitySnapshot } from "./ingress-observability.js";
 import type {
   ChannelIngressMonitorDeliveryResult,
   ChannelIngressMonitorFacts,
@@ -21,7 +22,7 @@ import type {
   ChannelIngressMonitorPayloadCodec,
   ChannelIngressMonitorRetention,
 } from "./ingress-monitor-types.js";
-import type { ChannelIngressQueue, ChannelIngressQueueClaim } from "./ingress-queue.js";
+import { type ChannelIngressQueue, type ChannelIngressQueueClaim } from "./ingress-queue.js";
 import {
   DEFAULT_INGRESS_RETRY_DEAD_LETTER_MIN_AGE_MS,
   DEFAULT_INGRESS_RETRY_MAX_ATTEMPTS,
@@ -133,6 +134,7 @@ export function createChannelIngressMonitor<TRaw, TBody, TStoredPayload, TMetada
   let releaseRestartFenceWake = () => {};
   let suspensionDrainPending = false;
   let unsubscribeSuspension: (() => void) | undefined;
+  let unregisterDiagnosticSource: (() => void) | undefined;
   let pollTimer: ReturnType<typeof setInterval> | undefined;
   let lastPrunedAt = 0;
   let admissionTail: Promise<void> = Promise.resolve();
@@ -702,6 +704,9 @@ export function createChannelIngressMonitor<TRaw, TBody, TStoredPayload, TMetada
       // rethrow is what lets the gateway record the failure as dead ingress rather than as
       // one more anonymous channel crash.
       ensureQueueAvailable();
+      unregisterDiagnosticSource ??= getQueue().registerDiagnosticSource?.(
+        () => drain?.activeOperations() ?? { operations: [] },
+      );
       running = true;
       unsubscribeSuspension ??= onGatewaySuspendAdmissionChange((phase) => {
         if (!running) {
@@ -725,6 +730,15 @@ export function createChannelIngressMonitor<TRaw, TBody, TStoredPayload, TMetada
     },
     ensureQueueAvailable,
     requestDrain,
+    getDiagnosticSnapshot: async (sampledAt = now()) => {
+      const snapshot = await getQueue().getDiagnosticSnapshot?.(sampledAt, {
+        activeOperations: drain?.activeOperations() ?? [],
+      });
+      if (snapshot) {
+        return snapshot;
+      }
+      return createUnknownChannelIngressObservabilitySnapshot(sampledAt);
+    },
     pause,
     stop: () => {
       stopTask ??= (async () => {
@@ -732,6 +746,8 @@ export function createChannelIngressMonitor<TRaw, TBody, TStoredPayload, TMetada
         running = false;
         requested = false;
         clearSuspensionSubscription();
+        unregisterDiagnosticSource?.();
+        unregisterDiagnosticSource = undefined;
         releaseRestartFenceWake();
         clearPollTimer();
         publishActivity();

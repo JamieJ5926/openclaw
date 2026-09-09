@@ -6,8 +6,11 @@ import { getRuntimeConfig } from "../config/config.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
   areDiagnosticsEnabledForProcess,
-  emitInternalDiagnosticEvent as emitDiagnosticEvent,
+  createUnknownDiagnosticIngressSnapshot,
+  emitInternalDiagnosticEvent,
+  getDiagnosticIngressSnapshot,
   isDiagnosticsEnabled,
+  resetDiagnosticIngressSnapshotProviderForTest,
   type DiagnosticPhaseSnapshot,
   type DiagnosticLivenessWarningReason,
 } from "../infra/diagnostic-events.js";
@@ -75,6 +78,8 @@ import {
 
 export { diagnosticLogger } from "./diagnostic-runtime.js";
 
+const emitDiagnosticEvent = emitInternalDiagnosticEvent;
+
 const webhookStats = {
   received: 0,
   processed: 0,
@@ -90,7 +95,7 @@ const DEFAULT_LIVENESS_EVENT_LOOP_DELAY_WARN_MS = 1_000;
 const DEFAULT_LIVENESS_EVENT_LOOP_UTILIZATION_WARN = 0.95;
 const DEFAULT_LIVENESS_CPU_CORE_RATIO_WARN = 0.9;
 const DEFAULT_LIVENESS_WARN_COOLDOWN_MS = 120_000;
-const DIAGNOSTIC_HEARTBEAT_INTERVAL_MS = 30_000;
+const DIAGNOSTIC_HEARTBEAT_INTERVAL_MS = 15_000;
 const loadStuckSessionRecoveryRuntime = createLazyRuntimeModule(
   () => import("./diagnostic-stuck-session-recovery.runtime.js"),
 );
@@ -470,6 +475,44 @@ function formatDiagnosticWorkLabels(work: DiagnosticWorkSnapshot): string {
     work.queuedLabels.length > 0 ? `queued=${work.queuedLabels.join("|")}` : "",
   ].filter(Boolean);
   return parts.join(" ");
+}
+
+function emitDiagnosticIngressSnapshotEvent(
+  snapshot: ReturnType<typeof createUnknownDiagnosticIngressSnapshot>,
+): void {
+  if (
+    diagnosticIngressLatestEmittedSampledAt !== undefined &&
+    snapshot.sampledAt < diagnosticIngressLatestEmittedSampledAt
+  ) {
+    return;
+  }
+  diagnosticIngressLatestEmittedSampledAt = snapshot.sampledAt;
+  diag.info("ingress.snapshot", snapshot);
+  emitInternalDiagnosticEvent(snapshot);
+}
+
+function emitDiagnosticIngressSnapshot(now: number): void {
+  if (diagnosticIngressSnapshotInFlight) {
+    emitDiagnosticIngressSnapshotEvent(createUnknownDiagnosticIngressSnapshot(now));
+    return;
+  }
+  const generation = diagnosticIngressSnapshotGeneration;
+  diagnosticIngressSnapshotInFlight = true;
+  void (async () => {
+    try {
+      const snapshot = await getDiagnosticIngressSnapshot(now);
+      if (generation !== diagnosticIngressSnapshotGeneration) {
+        return;
+      }
+      emitDiagnosticIngressSnapshotEvent(snapshot);
+    } catch {
+      // getDiagnosticIngressSnapshot owns provider fallback; this guard keeps the heartbeat alive.
+    } finally {
+      if (generation === diagnosticIngressSnapshotGeneration) {
+        diagnosticIngressSnapshotInFlight = false;
+      }
+    }
+  })();
 }
 
 function resolveStuckSessionWarnMs(): number {
@@ -1112,6 +1155,9 @@ export function logToolLoopAction(
 
 let heartbeatInterval: NodeJS.Timeout | null = null;
 let lastDiagnosticHeartbeatTickAt: number | undefined;
+let diagnosticIngressSnapshotInFlight = false;
+let diagnosticIngressSnapshotGeneration = 0;
+let diagnosticIngressLatestEmittedSampledAt: number | undefined;
 
 export function startDiagnosticHeartbeat(
   config?: OpenClawConfig,
@@ -1129,6 +1175,8 @@ export function startDiagnosticHeartbeat(
   if (heartbeatInterval) {
     return;
   }
+  diagnosticIngressSnapshotGeneration += 1;
+  diagnosticIngressLatestEmittedSampledAt = undefined;
   // Gateway supplies its lifecycle-owned monitor; other runtimes retain the
   // built-in sampler. Never allocate two perf monitors for one heartbeat.
   if (!opts?.sampleLiveness) {
@@ -1187,6 +1235,7 @@ export function startDiagnosticHeartbeat(
         emitSample: shouldRecordMemorySample,
       });
     }
+    void emitDiagnosticIngressSnapshot(now);
 
     if (!shouldRecordMemorySample) {
       return;
@@ -1297,6 +1346,9 @@ export function stopDiagnosticHeartbeat() {
     heartbeatInterval = null;
   }
   lastDiagnosticHeartbeatTickAt = undefined;
+  diagnosticIngressSnapshotGeneration += 1;
+  diagnosticIngressSnapshotInFlight = false;
+  diagnosticIngressLatestEmittedSampledAt = undefined;
   stopDiagnosticRunActivityTracking();
   retireDiagnosticSessionObservations();
   stopDiagnosticLivenessSampler();
@@ -1317,6 +1369,8 @@ function resetDiagnosticStateForTest(): void {
   resetDiagnosticMemoryForTest();
   resetDiagnosticPhasesForTest();
   resetDiagnosticStabilityRecorderForTest();
+  resetDiagnosticIngressSnapshotProviderForTest();
+  diagnosticIngressLatestEmittedSampledAt = undefined;
 }
 
 const testing = {

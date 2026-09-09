@@ -10,6 +10,10 @@ import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runti
 import { formatSlackFileReferenceList } from "../file-reference.js";
 import type { SlackAttachment, SlackFile } from "../types.js";
 import {
+  observeSlackIngressApiCall,
+  type SlackIngressApiObservationOptions,
+} from "./ingress-observability.js";
+import {
   hasSlackTableBlock,
   isSlackUnfurlAttachment,
   resolveSlackBlocksText,
@@ -127,6 +131,7 @@ export async function resolveSlackThreadStarter(params: {
   threadTs: string;
   client: SlackWebClient;
   workspaceScope: { accountId: string; teamId: string };
+  observation?: SlackIngressApiObservationOptions;
 }): Promise<SlackThreadStarter | null> {
   evictThreadStarterCache();
   const cacheKey = JSON.stringify([
@@ -144,12 +149,20 @@ export async function resolveSlackThreadStarter(params: {
     THREAD_STARTER_CACHE.delete(cacheKey);
   }
   try {
-    const response = (await params.client.conversations.replies({
-      channel: params.channelId,
-      ts: params.threadTs,
-      limit: 1,
-      inclusive: true,
-    })) as {
+    const response = (await observeSlackIngressApiCall(
+      {
+        ...params.observation,
+        ingressClientProfile: params.observation?.ingressClientProfile ?? "pooled_listener",
+      },
+      { method: "conversations.replies" },
+      () =>
+        params.client.conversations.replies({
+          channel: params.channelId,
+          ts: params.threadTs,
+          limit: 1,
+          inclusive: true,
+        }),
+    )) as {
       messages?: Array<{
         text?: string;
         user?: string;
@@ -231,6 +244,7 @@ export async function resolveSlackThreadHistory(params: {
   client: SlackWebClient;
   currentMessageTs?: string;
   limit?: number;
+  observation?: SlackIngressApiObservationOptions;
 }): Promise<SlackThreadMessage[]> {
   const maxMessages = params.limit ?? 20;
   if (!Number.isFinite(maxMessages) || maxMessages <= 0) {
@@ -246,13 +260,21 @@ export async function resolveSlackThreadHistory(params: {
   try {
     do {
       pagesFetched += 1;
-      const response = (await params.client.conversations.replies({
-        channel: params.channelId,
-        ts: params.threadTs,
-        limit: fetchLimit,
-        inclusive: true,
-        ...(cursor ? { cursor } : {}),
-      })) as SlackRepliesPage;
+      const response = (await observeSlackIngressApiCall(
+        {
+          ...params.observation,
+          ingressClientProfile: params.observation?.ingressClientProfile ?? "pooled_listener",
+        },
+        { method: "conversations.replies" },
+        () =>
+          params.client.conversations.replies({
+            channel: params.channelId,
+            ts: params.threadTs,
+            limit: fetchLimit,
+            inclusive: true,
+            ...(cursor ? { cursor } : {}),
+          }),
+      )) as SlackRepliesPage;
 
       for (const msg of response.messages ?? []) {
         const text = resolveSlackMessageText(msg);

@@ -30,6 +30,10 @@ import {
   SLACK_USER_NAME_KIND,
 } from "./ingress-identity.js";
 import { isTransientSlackThreadLookupError } from "./thread-resolution.js";
+import {
+  observeSlackIngressApiCall,
+  type SlackIngressApiObservationOptions,
+} from "./ingress-observability.js";
 
 type SlackChannelMembersCacheEntry = {
   expiresAtMs: number;
@@ -127,15 +131,24 @@ async function fetchSlackChannelMemberIds(
   ctx: SlackMonitorContext,
   channelId: string,
   eventScope?: SlackEventScope,
+  observation?: SlackIngressApiObservationOptions,
 ): Promise<Set<string>> {
   const members = await collectSlackCursorPages({
     fetchPage: (cursor) =>
-      (eventScope?.client ?? ctx.app.client).conversations.members({
-        token: ctx.botToken,
-        channel: channelId,
-        limit: 999,
-        ...(cursor ? { cursor } : {}),
-      }),
+      observeSlackIngressApiCall(
+        {
+          ...observation,
+          ingressClientProfile: observation?.ingressClientProfile ?? "pooled_listener",
+        },
+        { method: "conversations.members" },
+        () =>
+          (eventScope?.client ?? ctx.app.client).conversations.members({
+            token: ctx.botToken,
+            channel: channelId,
+            limit: 999,
+            ...(cursor ? { cursor } : {}),
+          }),
+      ),
     collectPageItems: (response) => normalizeAllowListLower(response.members),
   });
   return new Set(members);
@@ -145,6 +158,7 @@ async function resolveSlackChannelMemberIds(
   ctx: SlackMonitorContext,
   channelId: string,
   eventScope?: SlackEventScope,
+  observation?: SlackIngressApiObservationOptions,
 ): Promise<Set<string>> {
   const cache = getChannelMembersCache(ctx);
   const key = `${ctx.accountId}:${eventScope ? `${eventScope.teamId}:` : ""}${channelId}`;
@@ -165,7 +179,7 @@ async function resolveSlackChannelMemberIds(
     return await cached.pending;
   }
 
-  const pending = fetchSlackChannelMemberIds(ctx, channelId, eventScope);
+  const pending = fetchSlackChannelMemberIds(ctx, channelId, eventScope, observation);
   const pendingExpiresAtMs =
     ttlMs > 0 ? resolveExpiresAtMsFromDurationMs(ttlMs, { nowMs: rawNowMs }) : undefined;
   cache.set(key, {
@@ -213,6 +227,7 @@ export async function authorizeSlackBotRoomMessage(params: {
   channelUsers?: Array<string | number>;
   allowFromLower: string[];
   eventScope?: SlackEventScope;
+  observation?: SlackIngressApiObservationOptions;
 }): Promise<boolean> {
   const channelUserAllowList = normalizeAllowListLower(params.channelUsers).filter(
     (entry) => entry !== "*",
@@ -243,6 +258,7 @@ export async function authorizeSlackBotRoomMessage(params: {
       params.ctx,
       params.channelId,
       params.eventScope,
+      params.observation,
     );
     if (explicitOwnerIds.some((ownerId) => channelMemberIds.has(ownerId))) {
       return true;

@@ -1,6 +1,18 @@
 // Defines and sanitizes runtime diagnostic event payloads.
 import { randomUUID } from "node:crypto";
 import type { EmbeddedAgentExecutionPhase } from "../agents/embedded-agent-runner/execution-phase.js";
+import {
+  CHANNEL_INGRESS_BLOCKERS,
+  CHANNEL_INGRESS_OPERATION_KINDS,
+  CHANNEL_INGRESS_PREPARATION_STAGES,
+  CHANNEL_INGRESS_OBSERVABILITY_SCHEMA_VERSION,
+  createUnknownChannelIngressObservabilitySnapshot,
+  type ChannelIngressObservabilitySnapshot,
+} from "../channels/message/ingress-observability.js";
+import {
+  getRegisteredChannelIngressDiagnosticSnapshot,
+  resetRegisteredChannelIngressDiagnosticSourcesForTest,
+} from "../channels/message/ingress-queue.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { TalkBrain, TalkEventType, TalkMode, TalkTransport } from "../talk/talk-events.js";
 import {
@@ -32,6 +44,28 @@ import {
 import { isBlockedObjectKey } from "./prototype-keys.js";
 
 export type DiagnosticSessionState = "idle" | "processing" | "waiting";
+
+export {
+  CHANNEL_INGRESS_BLOCKERS,
+  CHANNEL_INGRESS_OPERATION_KINDS,
+  CHANNEL_INGRESS_PREPARATION_STAGES,
+  CHANNEL_INGRESS_OBSERVABILITY_SCHEMA_VERSION,
+};
+export type {
+  ChannelIngressBlocker,
+  ChannelIngressBlockerSnapshot,
+  ChannelIngressObservabilitySnapshot,
+  ChannelIngressOperationAggregate,
+  ChannelIngressOperationKind,
+  ChannelIngressPreparationStage,
+  ChannelIngressSnapshotEvent,
+  ChannelIngressStageSnapshot,
+  ChannelIngressUnknownProgressSnapshot,
+} from "../channels/message/ingress-observability.js";
+
+export type DiagnosticIngressSnapshotProvider = (
+  now: number,
+) => ChannelIngressObservabilitySnapshot | Promise<ChannelIngressObservabilitySnapshot>;
 
 type DiagnosticBaseEvent = {
   ts: number;
@@ -460,6 +494,9 @@ export type DiagnosticHeartbeatEvent = DiagnosticBaseEvent & {
   queued: number;
 };
 
+export type DiagnosticIngressSnapshotEvent = DiagnosticBaseEvent &
+  ChannelIngressObservabilitySnapshot;
+
 export type DiagnosticLivenessWarningReason = "event_loop_delay" | "event_loop_utilization" | "cpu";
 
 export type DiagnosticPhaseDetails = Record<string, string | number | boolean>;
@@ -866,6 +903,7 @@ export type DiagnosticEventPayload =
   | DiagnosticGatewayEventLoopSampleEvent
   | DiagnosticGcEvent
   | DiagnosticHeartbeatEvent
+  | DiagnosticIngressSnapshotEvent
   | DiagnosticLivenessWarningEvent
   | DiagnosticPhaseCompletedEvent
   | DiagnosticToolLoopEvent
@@ -1011,6 +1049,7 @@ type DiagnosticEventsGlobalState = {
 const MAX_ASYNC_DIAGNOSTIC_EVENTS = 10_000;
 const MAX_ASYNC_DIAGNOSTIC_EVENTS_PER_TURN = 100;
 const DIAGNOSTIC_EVENTS_STATE_KEY = Symbol.for("openclaw.diagnosticEvents.state.v1");
+let diagnosticIngressSnapshotProvider: DiagnosticIngressSnapshotProvider | undefined;
 const ASYNC_DIAGNOSTIC_EVENT_TYPES = new Set<DiagnosticEventPayload["type"]>([
   "diagnostic.gc",
   "gateway.event_loop.sample",
@@ -1121,6 +1160,41 @@ export function setDiagnosticsEnabledForProcess(enabled: boolean): void {
 /** Returns the current process-wide diagnostic dispatcher enable flag. */
 export function areDiagnosticsEnabledForProcess(): boolean {
   return getDiagnosticEventsState().enabled;
+}
+
+export function createUnknownDiagnosticIngressSnapshot(
+  now = Date.now(),
+): ChannelIngressObservabilitySnapshot {
+  return createUnknownChannelIngressObservabilitySnapshot(now);
+}
+
+export function setDiagnosticIngressSnapshotProvider(
+  provider: DiagnosticIngressSnapshotProvider,
+): () => void {
+  diagnosticIngressSnapshotProvider = provider;
+  return () => {
+    if (diagnosticIngressSnapshotProvider === provider) {
+      diagnosticIngressSnapshotProvider = undefined;
+    }
+  };
+}
+
+export async function getDiagnosticIngressSnapshot(
+  now = Date.now(),
+): Promise<ChannelIngressObservabilitySnapshot> {
+  const provider = diagnosticIngressSnapshotProvider;
+  try {
+    if (!provider) {
+      return await getRegisteredChannelIngressDiagnosticSnapshot(now);
+    }
+    return await provider(now);
+  } catch {
+    return createUnknownDiagnosticIngressSnapshot(now);
+  }
+}
+
+export function resetDiagnosticIngressSnapshotProviderForTest(): void {
+  diagnosticIngressSnapshotProvider = undefined;
 }
 
 function isDiagnosticEventListenerInterested(
@@ -1689,6 +1763,7 @@ export function resetDiagnosticEventsForTest(): void {
   state.asyncDroppedTrustedEvents = 0;
   state.asyncDroppedUntrustedEvents = 0;
   state.asyncDroppedPriorityEvents = 0;
+  resetRegisteredChannelIngressDiagnosticSourcesForTest();
   resetDiagnosticTracePropagationForTest();
 }
 /* oxlint-disable max-lines -- TODO: split this grandfathered oversized file. */

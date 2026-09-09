@@ -30,6 +30,32 @@ export {
 } from "../channels/message-access/runtime-identity.js";
 export { readChannelIngressStoreAllowFromForDmPolicy } from "../channels/message-access/store-allow-from.js";
 export { resolveChannelImplicitMentions } from "../config/implicit-mentions.js";
+export { getChannelIngressDiagnosticSnapshot } from "../channels/message/ingress-queue.js";
+export {
+  CHANNEL_INGRESS_OBSERVABILITY_METADATA_KEY,
+  CHANNEL_INGRESS_OBSERVABILITY_SCHEMA_VERSION,
+  observeChannelIngressDedupeWait,
+} from "../channels/message/ingress-observability.js";
+export type {
+  ChannelIngressActiveOperationSnapshot,
+  ChannelIngressActiveOperationsSnapshot,
+  ChannelIngressBlocker,
+  ChannelIngressBlockerSnapshot,
+  ChannelIngressCorrelation,
+  ChannelIngressLifecycleObserver,
+  ChannelIngressObservabilitySnapshot,
+  ChannelIngressObservationRecordRef,
+  ChannelIngressOperationAggregate,
+  ChannelIngressOldestOperationSnapshot,
+  ChannelIngressOperationKind,
+  ChannelIngressOperationOutcome,
+  ChannelIngressOperationRequest,
+  ChannelIngressPreparationStage,
+  ChannelIngressProgressUpdate,
+  ChannelIngressSnapshotEvent,
+  ChannelIngressStageSnapshot,
+  ChannelIngressUnknownProgressSnapshot,
+} from "../channels/message/ingress-observability.js";
 export type {
   ChannelIngressAccessGroupMembershipResolver,
   ChannelIngressCommandPresetInput,
@@ -127,6 +153,7 @@ export function createStandardRawEventIngressMonitor<
     start: monitor.start,
     stop: monitor.stop,
     waitForIdle: monitor.waitForIdle,
+    getDiagnosticSnapshot: monitor.getDiagnosticSnapshot,
   };
 }
 

@@ -1,4 +1,5 @@
 import type { ChannelIngressQueueClaim } from "./ingress-queue.js";
+import type { ChannelIngressLifecycleObserver } from "./ingress-observability.js";
 
 /** Stable identity and serialization lane extracted before durable admission. */
 export type ChannelIngressMonitorFacts = { eventId: string; laneKey: string };
@@ -9,6 +10,7 @@ type ChannelIngressPayloadEnvelope<TBody> = { version: number; body: TBody };
 /** Claim ownership lifecycle handed to one channel delivery. */
 export type ChannelIngressMonitorLifecycle = {
   admission: "exclusive";
+  observer?: ChannelIngressLifecycleObserver;
   abortSignal: AbortSignal;
   onAdopted: () => void | Promise<void>;
   onDeferred: () => void;
