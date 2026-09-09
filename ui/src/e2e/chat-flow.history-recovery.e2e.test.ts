@@ -725,7 +725,7 @@ suite.define(() => {
 
     try {
       await page.goto(controlUiSessionUrl(suite.server.baseUrl, "global"));
-      const composer = page.locator(".agent-chat__composer-combobox textarea");
+      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
       await composer.waitFor({ state: "visible", timeout: 10_000 });
 
       await gateway.setOnline(false);

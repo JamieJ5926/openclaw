@@ -262,7 +262,7 @@ suite.define(() => {
 
       // Enter-sends while voice is active; the deferred chat.send keeps the
       // run abortable so both stop controls render side by side.
-      const textarea = page.locator(".agent-chat__input textarea");
+      const textarea = page.locator("openclaw-chat-pane .agent-chat__input textarea");
       await textarea.fill("Keep working on the report");
       await textarea.press("Enter");
       const sendRequest = await gateway.waitForRequest("chat.send");

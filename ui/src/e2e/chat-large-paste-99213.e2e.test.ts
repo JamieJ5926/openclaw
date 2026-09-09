@@ -207,7 +207,9 @@ describeControlUiE2e("Control UI #99213 large screenshot paste proof", () => {
         .getByText("The existing assistant reply is taller than the virtualizer estimate.")
         .waitFor({ timeout: 10_000 });
 
-      const composer = recorded.page.locator(".agent-chat__composer-combobox textarea");
+      const composer = recorded.page.locator(
+        "openclaw-chat-pane .agent-chat__composer-combobox textarea",
+      );
       await composer.focus();
       await recorded.page.evaluate(async (text) => {
         await navigator.clipboard.writeText(text);

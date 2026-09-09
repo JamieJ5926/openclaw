@@ -161,7 +161,7 @@ function configPatchRaw(request: { params?: unknown }) {
 }
 
 async function openMenu(page: Page) {
-  const composer = page.locator(".agent-chat__input");
+  const composer = page.locator("openclaw-chat-pane .agent-chat__input");
   const dropdown = composer.locator("wa-dropdown.agent-chat__capability-menu");
   const skills = composer.getByRole("menuitem", { name: "Skills" });
   const isOpen = await dropdown.evaluate((node) => (node as HTMLElement & { open: boolean }).open);

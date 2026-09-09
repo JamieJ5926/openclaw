@@ -115,7 +115,10 @@ suite.define(() => {
             document.documentElement.dir = dir;
           }, direction);
           await captureProof(page, `restored-width-${direction}.png`);
-          for (const frame of [transcript, page.locator(".agent-chat__composer-shell")]) {
+          for (const frame of [
+            transcript,
+            page.locator("openclaw-chat-pane .agent-chat__composer-shell"),
+          ]) {
             const bounds = await frame.evaluate((element) => {
               const rect = element.getBoundingClientRect();
               return { left: rect.left, right: rect.right };
@@ -192,7 +195,7 @@ suite.define(() => {
             await page.evaluate((dir) => {
               document.documentElement.dir = dir;
             }, direction);
-            await expectColumn(page.locator(".agent-chat__composer-shell"));
+            await expectColumn(page.locator("openclaw-chat-pane .agent-chat__composer-shell"));
             const frame = await transcript.boundingBox();
             expect(frame!.x - Math.max(4, safeAreaLeft)).toBeCloseTo(
               width - 4 - frame!.x - frame!.width,
@@ -202,7 +205,7 @@ suite.define(() => {
             await expect(page.locator(".chat-group .chat-avatar:visible")).toHaveCount(0);
           }
           await page
-            .locator(".agent-chat__composer-combobox textarea")
+            .locator("openclaw-chat-pane .agent-chat__composer-combobox textarea")
             .fill("Read the example file.");
           await page.getByRole("button", { name: "Send message" }).click();
           const request = await gateway.waitForRequest("chat.send");
@@ -266,7 +269,7 @@ suite.define(() => {
             await expect
               .poll(() => thread.evaluate((element) => element.scrollTop))
               .toBeGreaterThan(0);
-            await expectColumn(page.locator(".agent-chat__composer-shell"));
+            await expectColumn(page.locator("openclaw-chat-pane .agent-chat__composer-shell"));
           }
         },
       );
@@ -607,7 +610,7 @@ suite.define(() => {
       const before = await readUserAvatarLayout(priorPrompt);
       const peerBefore = await readUserAvatarLayout(peerPrompt);
 
-      await page.locator(".agent-chat__composer-combobox textarea").fill(prompt);
+      await page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea").fill(prompt);
       await page.getByRole("button", { name: "Send message" }).click();
       const sendRequest = await gateway.waitForRequest("chat.send");
       const afterSend = await readUserAvatarLayout(prompt);
@@ -679,7 +682,7 @@ suite.define(() => {
       await page.goto(controlUiSessionUrl(suite.server.baseUrl, "agent:main:main"));
       await page.getByText("Ready for a delivery check.").waitFor();
       await gateway.deferNext("chat.send");
-      await page.locator(".agent-chat__composer-combobox textarea").fill(prompt);
+      await page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea").fill(prompt);
       await page.getByRole("button", { name: "Send message" }).click();
       const firstSend = await gateway.waitForRequest("chat.send");
       const firstRunId = String((firstSend.params as { idempotencyKey?: unknown }).idempotencyKey);
@@ -717,7 +720,9 @@ suite.define(() => {
       await expect(group).toBeVisible();
       await expect(page.locator(".chat-queue__item--failed")).toHaveCount(0);
       await expect(page.locator(".chat-error")).toHaveCount(0);
-      await expect(page.locator(".agent-chat__composer-combobox textarea")).toHaveValue("");
+      await expect(
+        page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea"),
+      ).toHaveValue("");
       const status = group.locator(".chat-send-status");
       await expect(status).toHaveText("· Not sent · Retry");
       const footerLineCenters = await group

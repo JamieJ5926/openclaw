@@ -147,8 +147,8 @@ describeControlUiE2e("Control UI composer pointer controls", () => {
         content: ":root { --safe-area-bottom: 34px !important; }",
       });
 
-      const composerShell = page.locator(".agent-chat__composer-shell");
-      const textarea = page.locator(".agent-chat__input textarea");
+      const composerShell = page.locator("openclaw-chat-pane .agent-chat__composer-shell");
+      const textarea = page.locator("openclaw-chat-pane .agent-chat__input textarea");
       await textarea.fill("Verify mobile safe-area touch controls");
       await textarea.focus();
       await expect
@@ -230,8 +230,8 @@ describeControlUiE2e("Control UI composer pointer controls", () => {
         content: ":root { --safe-area-bottom: 34px !important; }",
       });
 
-      const composerShell = page.locator(".agent-chat__composer-shell");
-      const textarea = page.locator(".agent-chat__input textarea");
+      const composerShell = page.locator("openclaw-chat-pane .agent-chat__composer-shell");
+      const textarea = page.locator("openclaw-chat-pane .agent-chat__input textarea");
       await textarea.fill("Verify narrow desktop pointer controls");
       await textarea.focus();
       await expect
@@ -301,7 +301,7 @@ describeControlUiE2e("Control UI composer pointer controls", () => {
       });
       await page.goto(`${server.baseUrl}chat`);
       await gateway.waitForRequest("chat.startup");
-      const textarea = page.locator(".agent-chat__input textarea");
+      const textarea = page.locator("openclaw-chat-pane .agent-chat__input textarea");
       await textarea.fill("Verify wide desktop pointer controls");
       await textarea.focus();
       const send = page.getByRole("button", { name: "Send message" });
@@ -380,7 +380,7 @@ describeControlUiE2e("Control UI composer pointer controls", () => {
       await page.addStyleTag({
         content: ":root { --safe-area-bottom: 34px !important; }",
       });
-      const textarea = page.locator(".agent-chat__input textarea");
+      const textarea = page.locator("openclaw-chat-pane .agent-chat__input textarea");
       await textarea.fill("Do not send this draft");
       await textarea.focus();
       const send = page.getByRole("button", { name: "Send message" });

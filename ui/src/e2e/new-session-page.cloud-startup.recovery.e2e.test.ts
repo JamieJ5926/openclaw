@@ -615,7 +615,9 @@ suite.define(() => {
       await pollLocatorText(page.getByRole("alert")).toContain("No matching user message");
       await expectPastedPngImage(retainedTurn.locator("img.chat-message-image"));
       await expect
-        .poll(() => page.locator(".agent-chat__composer-combobox textarea").isDisabled())
+        .poll(() =>
+          page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea").isDisabled(),
+        )
         .toBe(true);
       const recovery = await page.evaluate(() => {
         const key = Object.keys(sessionStorage).find((candidate) =>

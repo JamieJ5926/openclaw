@@ -112,7 +112,9 @@ suite.define(() => {
     };
     const send = async (message: string) => {
       const requestCount = (await gateway.getRequests("chat.send")).length;
-      await page.locator(".agent-chat__composer-combobox textarea").fill(message);
+      await page
+        .locator("openclaw-chat-pane .agent-chat__composer-combobox textarea")
+        .fill(message);
       await page.getByRole("button", { name: "Send message" }).click();
       await expect
         .poll(async () => (await gateway.getRequests("chat.send")).length)
@@ -557,7 +559,7 @@ suite.define(() => {
           const card = page.locator('[data-progress-card-placement="composer"]');
           await expect.poll(() => card.isVisible()).toBe(true);
           const composerFade = await page
-            .locator(".agent-chat__composer-shell")
+            .locator("openclaw-chat-pane .agent-chat__composer-shell")
             .evaluate((node) => getComputedStyle(node, "::before").backgroundImage);
           expect(composerFade).toBe("none");
           const expectMarkerCentered = async () => {

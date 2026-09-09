@@ -39,7 +39,7 @@ suite.define(() => {
               await writeFile(
                 `${artifactDir}/${name}.png`,
                 await takeControlUiViewportScreenshot(page, page.locator(".shell"), [
-                  page.locator(".agent-chat__composer-combobox textarea"),
+                  page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea"),
                 ]),
               );
             }
@@ -62,7 +62,9 @@ suite.define(() => {
             action === "exact authoritative history proof"
               ? "already accepted after the reconnect"
               : "retry with the same key";
-          await page.locator(".agent-chat__composer-combobox textarea").fill(prompt);
+          await page
+            .locator("openclaw-chat-pane .agent-chat__composer-combobox textarea")
+            .fill(prompt);
           await page.getByRole("button", { name: "Send message" }).click();
 
           const firstRequest = await gateway.waitForRequest("chat.send");
@@ -127,7 +129,7 @@ suite.define(() => {
 
           if (action === "discard") {
             await page
-              .locator(".agent-chat__composer-combobox textarea")
+              .locator("openclaw-chat-pane .agent-chat__composer-combobox textarea")
               .fill("send the next message");
             await page.getByRole("button", { name: "Send message" }).click();
             await page
@@ -291,7 +293,7 @@ suite.define(() => {
       });
       try {
         await page.goto(controlUiSessionUrl(suite.server.baseUrl, sessionKey));
-        const composer = page.locator(".agent-chat__composer-combobox textarea");
+        const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
         await composer.waitFor();
         await gateway.setOnline(false);
         await page.locator('.agent-chat__composer-underlaps[data-tone="warn"]').waitFor();
@@ -300,7 +302,7 @@ suite.define(() => {
         await page.locator(".chat-queue").getByText("Waiting for reconnect").waitFor();
         await page.goto(controlUiSessionUrl(suite.server.baseUrl, otherKey));
         await gateway.setOnline(true);
-        await page.locator(".agent-chat__composer-combobox textarea").waitFor();
+        await page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea").waitFor();
         const request = await gateway.waitForRequest("chat.send");
         expect(requireRecord(request.params)).toMatchObject({
           sessionKey,
@@ -401,7 +403,7 @@ suite.define(() => {
         .locator("openclaw-modal-dialog")
         .getByRole("button", { name: "Restore here for review" })
         .click();
-      const composer = page.locator(".agent-chat__composer-combobox textarea");
+      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
       await expect.poll(() => composer.inputValue()).toBe("Review the attached deployment note");
       await page.screenshot({
         animations: "disabled",

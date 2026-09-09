@@ -28,7 +28,9 @@ suite.define(() => {
         await page.goto(`${suite.server.baseUrl}chat/main`);
         await waitForControlUiGatewayReady(page);
         await page.getByText("Split draft owner ready.", { exact: true }).waitFor();
-        await page.locator(".agent-chat__composer-combobox textarea").fill("split seed");
+        await page
+          .locator("openclaw-chat-pane .agent-chat__composer-combobox textarea")
+          .fill("split seed");
         await page.getByRole("button", { name: "Send message", exact: true }).click();
         const seed = await gateway.waitForRequest("chat.send");
         await gateway.emitChatFinal({

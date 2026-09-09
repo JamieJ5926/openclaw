@@ -137,7 +137,7 @@ suite.define(() => {
         const documentIdentity = await input.evaluate((element) =>
           Reflect.get(element.ownerDocument.defaultView!, "documentIdentity"),
         );
-        const composer = page.locator(".agent-chat__composer-combobox textarea");
+        const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
         await composer.fill("Keep this chat draft");
         const chat = page.locator(".sidebar-region__primary");
         const dashboard = page.locator('[data-panel-slot="dashboard"]');

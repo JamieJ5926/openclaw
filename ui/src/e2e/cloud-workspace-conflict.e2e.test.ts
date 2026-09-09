@@ -170,7 +170,7 @@ suite.define(() => {
         await capture(page, "01-live-conflict.png");
 
         await page.setViewportSize({ width: 390, height: 844 });
-        const composer = page.locator(".agent-chat__composer-shell");
+        const composer = page.locator("openclaw-chat-pane .agent-chat__composer-shell");
         const title = notice.locator(".chat-composer-neighbor-card__copy strong");
         const summary = notice.locator(".chat-composer-neighbor-card__copy > span");
         const dismiss = notice.getByRole("button", { name: "Dismiss workspace conflict notice" });

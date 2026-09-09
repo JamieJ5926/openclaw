@@ -34,7 +34,7 @@ it("replaces a silent suspended socket when its tab returns to the foreground", 
     await page.goto(`${server.baseUrl}chat?wake=1#latest`);
     await waitForControlUiGatewayReady(page);
     await expect.poll(() => gateway.getSocketCount()).toBe(1);
-    const composer = page.locator(".agent-chat__composer-combobox textarea");
+    const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
     await composer.fill("keep this draft across Safari suspension");
     const expectedUrl = page.url();
     if (proofDir) {

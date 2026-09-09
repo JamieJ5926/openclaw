@@ -575,7 +575,7 @@ suite.define(() => {
           "ui-fixture/failing-composer",
         ]) {
           await selectView(page, "Composer", replacement);
-          const composer = page.locator(".agent-chat__composer-shell");
+          const composer = page.locator("openclaw-chat-pane .agent-chat__composer-shell");
           await composer.waitFor();
           expect(
             await composer.evaluate((element) =>
@@ -623,7 +623,9 @@ suite.define(() => {
         await composerSelect.selectOption("");
         await page.getByRole("button", { name: "Close", exact: true }).last().click();
         await expect
-          .poll(() => page.locator(".agent-chat__composer-combobox textarea").inputValue())
+          .poll(() =>
+            page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea").inputValue(),
+          )
           .toBe("Send through the canonical composer");
         expect(await page.getByLabel("Fixture draft", { exact: true }).count()).toBe(0);
         await selectView(page, "Composer", "ui-fixture/composer");

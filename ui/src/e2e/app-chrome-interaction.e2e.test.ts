@@ -298,7 +298,7 @@ suite.define(() => {
 
           // The shadow-DOM lane: a Web Awesome ::part() menu picks up the same
           // profile through the grouped rule in base.css.
-          const composer = page.locator(".agent-chat__input");
+          const composer = page.locator("openclaw-chat-pane .agent-chat__input");
           await composer.getByRole("button", { name: "Add attachment" }).click();
           const capabilityMenu = composer.locator("wa-dropdown.agent-chat__capability-menu");
           await expect

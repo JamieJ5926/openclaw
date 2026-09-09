@@ -114,7 +114,7 @@ describeControlUiE2e("Control UI fenced code blocks", () => {
         "*assistant literal*\n",
       );
       await page
-        .locator(".agent-chat__composer-combobox textarea")
+        .locator("openclaw-chat-pane .agent-chat__composer-combobox textarea")
         .fill("Show an indented example");
       await page.getByRole("button", { name: "Send message" }).click();
       const request = await gateway.waitForRequest("chat.send");
@@ -160,7 +160,9 @@ describeControlUiE2e("Control UI fenced code blocks", () => {
 
     try {
       await page.goto(`${server.baseUrl}chat`);
-      await page.locator(".agent-chat__composer-combobox textarea").fill("show TypeScript");
+      await page
+        .locator("openclaw-chat-pane .agent-chat__composer-combobox textarea")
+        .fill("show TypeScript");
       await page.getByRole("button", { name: "Send message" }).click();
       const sendRequest = await gateway.waitForRequest("chat.send");
       const runId = requireString(
@@ -446,7 +448,7 @@ describeControlUiE2e("Control UI fenced code blocks", () => {
         // Virtualization must initialize replacement DOM in an otherwise quiet transcript.
         const thread = page.locator(".chat-thread");
         // Focused rows stay mounted offscreen; move focus out of the wrap control first.
-        await page.locator(".agent-chat__composer-combobox textarea").click();
+        await page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea").click();
         await thread.hover();
         await page.mouse.wheel(0, -100_000);
         await expect.poll(() => thread.evaluate((element) => element.scrollTop)).toBe(0);

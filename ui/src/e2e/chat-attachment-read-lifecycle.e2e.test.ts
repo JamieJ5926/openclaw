@@ -374,7 +374,7 @@ suite.define(() => {
       const text = "offline attachment draft";
       const contents = "offline attachment contents";
       await page.goto(controlUiSessionUrl(suite.server.baseUrl, sessionKey));
-      const composer = page.locator(".agent-chat__composer-combobox textarea");
+      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
       await composer.waitFor();
 
       await gateway.setOnline(false);
@@ -545,7 +545,7 @@ suite.define(() => {
       });
 
       await page.goto(`${suite.server.baseUrl}chat`);
-      const composer = page.locator(".agent-chat__composer-combobox textarea");
+      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
       await composer.fill("Send both files");
       await page.locator(".agent-chat__file-input").setInputFiles([
         { name: "first.txt", mimeType: "text/plain", buffer: Buffer.alloc(200, 0x61) },
@@ -589,7 +589,7 @@ suite.define(() => {
       const gateway = await installMockGateway(page);
 
       await page.goto(`${suite.server.baseUrl}chat`);
-      const composer = page.locator(".agent-chat__composer-combobox textarea");
+      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
       const send = page.getByRole("button", { name: "Send message" });
       await composer.fill("Include the image that is still loading");
       await pastePng(composer);

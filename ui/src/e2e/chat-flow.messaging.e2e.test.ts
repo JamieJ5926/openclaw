@@ -40,7 +40,7 @@ suite.define(() => {
       sessionUrl.hash = "#pane";
 
       await page.goto(sessionUrl.href);
-      const composer = page.locator(".agent-chat__composer-combobox textarea");
+      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
       await expect.poll(() => composer.inputValue()).toBe(draft ?? "");
       await expect.poll(() => new URL(page.url()).search).toBe("?panel=details");
       await expect.poll(() => new URL(page.url()).hash).toBe("#pane");
@@ -62,7 +62,7 @@ suite.define(() => {
       await page.getByText("Ready for an end-to-end GUI check.").waitFor({ timeout: 10_000 });
 
       const prompt = "verify the control UI e2e harness";
-      await page.locator(".agent-chat__composer-combobox textarea").fill(prompt);
+      await page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea").fill(prompt);
       await page.getByRole("button", { name: "Send message" }).click();
 
       const sendRequest = await gateway.waitForRequest("chat.send");
@@ -80,7 +80,9 @@ suite.define(() => {
         .waitFor({ timeout: 10_000 });
 
       const spacedPairCommand = "/ pair qr";
-      await page.locator(".agent-chat__composer-combobox textarea").fill(spacedPairCommand);
+      await page
+        .locator("openclaw-chat-pane .agent-chat__composer-combobox textarea")
+        .fill(spacedPairCommand);
       await page.getByRole("button", { name: "Send message" }).click();
 
       const commandRequests = await waitForRequests(gateway, "chat.send", 2);
@@ -97,7 +99,7 @@ suite.define(() => {
       });
       const prompt = "Keep my browser-local prompt synchronized.";
       await page.goto(`${suite.server.baseUrl}chat`);
-      await page.locator(".agent-chat__composer-combobox textarea").fill(prompt);
+      await page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea").fill(prompt);
       await page.getByRole("button", { name: "Send message" }).click();
 
       const request = await gateway.waitForRequest("chat.send");
@@ -192,7 +194,9 @@ suite.define(() => {
         sessionKey: "agent:main:main",
       });
 
-      await page.locator(".agent-chat__composer-combobox textarea").fill(currentPrompt);
+      await page
+        .locator("openclaw-chat-pane .agent-chat__composer-combobox textarea")
+        .fill(currentPrompt);
       await page.getByRole("button", { name: "Send message" }).click();
       const sendRequest = await gateway.waitForRequest("chat.send");
       const currentRunId = requireString(
@@ -600,7 +604,7 @@ suite.define(() => {
         );
       await page.goto(`${suite.server.baseUrl}chat`);
       await gateway.deferNext("chat.send");
-      await page.locator(".agent-chat__composer-combobox textarea").fill(prompt);
+      await page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea").fill(prompt);
       await page.getByRole("button", { name: "Send message" }).click();
 
       const sendRequest = await gateway.waitForRequest("chat.send");
@@ -649,7 +653,7 @@ suite.define(() => {
     await withChatPage(async (page) => {
       const gateway = await installMockGateway(page, { historyMessages: [] });
       await page.goto(`${suite.server.baseUrl}chat`);
-      const composer = page.locator(".agent-chat__composer-combobox textarea");
+      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
       await composer.fill("reconcile the terminal event ordering");
       await page.getByRole("button", { name: "Send message" }).click();
       const send = await gateway.waitForRequest("chat.send");
@@ -764,7 +768,7 @@ suite.define(() => {
     await withChatPage(async (page) => {
       const gateway = await installMockGateway(page);
       await page.goto(`${suite.server.baseUrl}chat`);
-      const composer = page.locator(".agent-chat__composer-combobox textarea");
+      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
       await composer.waitFor({ state: "visible", timeout: 10_000 });
       await composer.fill("wait");
       await page.getByRole("button", { name: "Send message" }).click();
@@ -795,7 +799,7 @@ suite.define(() => {
         },
       });
       await page.goto(controlUiSessionUrl(suite.server.baseUrl, channelSessionKey));
-      const composer = page.locator(".agent-chat__composer-combobox textarea");
+      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
       await composer.waitFor({ state: "visible", timeout: 10_000 });
       await gateway.waitForRequest("sessions.list");
       const workingIndicator = page.locator(".chat-working-indicator");
@@ -872,7 +876,7 @@ suite.define(() => {
     await withChatPage(async (page) => {
       const gateway = await installMockGateway(page);
       await page.goto(`${suite.server.baseUrl}chat`);
-      const composer = page.locator(".agent-chat__composer-combobox textarea");
+      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
       await composer.waitFor({ state: "visible", timeout: 10_000 });
 
       await composer.fill("default enter send");
@@ -950,7 +954,7 @@ suite.define(() => {
       await page.getByRole("button", { name: "Stop generating" }).waitFor({ timeout: 10_000 });
 
       await page
-        .locator(".agent-chat__composer-combobox textarea")
+        .locator("openclaw-chat-pane .agent-chat__composer-combobox textarea")
         .fill("/steer use the smaller fix");
       await page.getByRole("button", { name: "Send message" }).click();
 
@@ -974,7 +978,7 @@ suite.define(() => {
       await page.goto(`${suite.server.baseUrl}chat`);
 
       const prompt = "send progress through the message tool and then finish";
-      await page.locator(".agent-chat__composer-combobox textarea").fill(prompt);
+      await page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea").fill(prompt);
       await page.getByRole("button", { name: "Send message" }).click();
 
       const sendRequest = await gateway.waitForRequest("chat.send");
@@ -1026,7 +1030,7 @@ suite.define(() => {
       await page.getByText("Ready for stale replay check.").waitFor({ timeout: 10_000 });
 
       const prompt = "submitted message";
-      const composer = page.locator(".agent-chat__composer-combobox textarea");
+      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
       await composer.fill(prompt);
       await page.getByRole("button", { name: "Send message" }).click();
       await gateway.waitForRequest("chat.send");

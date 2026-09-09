@@ -27,7 +27,7 @@ suite.define(() => {
 
         await page.goto(`${suite.server.baseUrl}chat`);
         await gateway.waitForRequest("chat.startup");
-        const composer = page.locator(".agent-chat__composer-combobox textarea");
+        const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
         await composer.waitFor({ state: "visible" });
         await page.locator(".agent-chat__file-input").setInputFiles({
           name: "export-proof.txt",
@@ -83,7 +83,7 @@ suite.define(() => {
         state: "visible",
       });
 
-      const composer = page.locator(".agent-chat__composer-combobox textarea");
+      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
       await composer.fill("/export");
       const downloadPromise = page.waitForEvent("download");
       await page.getByRole("button", { name: "Send message" }).click();
@@ -142,7 +142,7 @@ suite.define(() => {
         });
         await page.goto(`${suite.server.baseUrl}chat`);
         await gateway.waitForRequest("chat.startup");
-        const composer = page.locator(".agent-chat__composer-combobox textarea");
+        const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
         await composer.waitFor({ state: "visible" });
         await expect.poll(() => composer.isEnabled()).toBe(true);
         await composer.fill("/viewport-");
@@ -267,7 +267,7 @@ suite.define(() => {
 
         await page.goto(`${suite.server.baseUrl}chat`);
         await gateway.waitForRequest("chat.startup");
-        const composer = page.locator(".agent-chat__composer-combobox textarea");
+        const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
         await composer.waitFor({ state: "visible" });
         await expect.poll(() => composer.isEnabled()).toBe(true);
         await composer.fill("/pair");

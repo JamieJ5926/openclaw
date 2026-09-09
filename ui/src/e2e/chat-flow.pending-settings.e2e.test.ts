@@ -71,7 +71,7 @@ suite.define(() => {
       await page.keyboard.press("Escape");
 
       const prompt = "send with the new reasoning and speed";
-      await page.locator(".agent-chat__composer-combobox textarea").fill(prompt);
+      await page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea").fill(prompt);
       await page.getByRole("button", { name: "Send message" }).click();
       await page.locator(".chat-queue").getByText("Applying chat settings").waitFor({
         timeout: 10_000,
@@ -123,7 +123,9 @@ suite.define(() => {
       await gateway.waitForRequest("sessions.patch");
       await waitForRequests(gateway, "sessions.list", listsBefore + 1, rosterMatch);
       await page.keyboard.press("Escape");
-      await page.locator(".agent-chat__composer-combobox textarea").fill("send after my settings");
+      await page
+        .locator("openclaw-chat-pane .agent-chat__composer-combobox textarea")
+        .fill("send after my settings");
       await page.getByRole("button", { name: "Send message" }).click();
       await page.locator(".chat-queue").getByText("Applying chat settings").waitFor();
       expect(await gateway.getRequests("chat.send")).toHaveLength(0);

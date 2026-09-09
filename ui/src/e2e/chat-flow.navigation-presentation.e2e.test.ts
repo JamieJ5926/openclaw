@@ -260,7 +260,7 @@ suite.define(() => {
       const regularHeaderPadding = await taskHeader.evaluate(
         (header) => getComputedStyle(header).paddingLeft,
       );
-      const composer = page.locator(".agent-chat__composer-combobox textarea");
+      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
       await composer.fill("Keep this draft while docking beside native controls");
       const originalComposer = await composer.elementHandle();
       await page.evaluate(() => {
@@ -589,7 +589,7 @@ suite.define(() => {
       await page.goto(`${suite.server.baseUrl}chat`);
       await page.getByText("Type whenever you are ready.").click();
 
-      const composer = page.locator(".agent-chat__composer-combobox textarea");
+      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
       await expect
         .poll(() => composer.evaluate((element) => element === document.activeElement))
         .toBe(false);
@@ -679,7 +679,7 @@ suite.define(() => {
       await page.goto(`${suite.server.baseUrl}chat`);
 
       await page.getByText("History renders before sessions finish.").waitFor({ timeout: 10_000 });
-      const composer = page.locator(".agent-chat__composer-combobox textarea");
+      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
       await composer.waitFor({ state: "visible", timeout: 10_000 });
 
       // The chat boot hydrates the sidebar session list; that request stays

@@ -21,7 +21,9 @@ suite.define(() => {
         sessionInfo: { model: "model-0", modelProvider: "example" },
       });
       await page.goto(`${suite.server.baseUrl}${route}`);
-      const composer = page.locator(".agent-chat__input").first();
+      const composer = page
+        .locator(route === "chat" ? "openclaw-chat-pane .agent-chat__input" : ".agent-chat__input")
+        .first();
       const picker = composer.locator(".chat-controls__model-picker");
       const trigger = picker.locator("[data-chat-model-select]");
       await expect
@@ -163,7 +165,7 @@ suite.define(() => {
           },
         });
         await page.goto(`${suite.server.baseUrl}chat`);
-        const composer = page.locator(".agent-chat__input").first();
+        const composer = page.locator("openclaw-chat-pane .agent-chat__input").first();
         const model = composer.locator('[data-chat-model-select="true"]');
         await expect.poll(() => model.getAttribute("aria-busy")).toBe("false");
         await model.click();
@@ -338,7 +340,11 @@ suite.define(() => {
           },
         });
         await page.goto(`${suite.server.baseUrl}${route}`);
-        const composer = page.locator(".agent-chat__input").first();
+        const composer = page
+          .locator(
+            route === "chat" ? "openclaw-chat-pane .agent-chat__input" : ".agent-chat__input",
+          )
+          .first();
         const model = composer.locator('[data-chat-model-select="true"]');
         const effort = composer.locator('[data-chat-thinking-select="true"]');
         await expect.poll(() => model.getAttribute("title")).toBe(longName);
@@ -588,7 +594,7 @@ suite.define(() => {
           },
         });
         await page.goto(`${suite.server.baseUrl}chat`);
-        const composer = page.locator(".agent-chat__input");
+        const composer = page.locator("openclaw-chat-pane .agent-chat__input");
         const model = composer.locator('[data-chat-model-select="true"]');
         await expect.poll(() => model.getAttribute("aria-busy")).toBe("false");
         const effort = composer.locator('[data-chat-thinking-select="true"]');
@@ -655,7 +661,11 @@ suite.define(() => {
           ],
         });
         await page.goto(`${suite.server.baseUrl}${route}`);
-        const composer = page.locator(".agent-chat__input").first();
+        const composer = page
+          .locator(
+            route === "chat" ? "openclaw-chat-pane .agent-chat__input" : ".agent-chat__input",
+          )
+          .first();
         const picker = composer.locator(".chat-controls__model-picker");
         const trigger = picker.locator('[data-chat-model-select="true"]');
         await expect.poll(() => picker.locator("[data-chat-model-option]").count()).toBe(2);

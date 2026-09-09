@@ -252,7 +252,7 @@ async function openStreamingTurn(
   gateway: Awaited<ReturnType<typeof installMockGateway>>,
   prompt: string,
 ): Promise<string> {
-  await page.locator(".agent-chat__composer-combobox textarea").fill(prompt);
+  await page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea").fill(prompt);
   await page.getByRole("button", { name: "Send message" }).click();
   const sendRequest = await gateway.waitForRequest("chat.send");
   const params = requireRecord(sendRequest.params);
@@ -607,7 +607,7 @@ suite.define(() => {
       await gateway.waitForRequest("chat.startup");
       await page.locator(".chat-thread-inner").getByText("LONG-TAIL-SENTINEL").waitFor();
 
-      const composer = page.locator(".agent-chat__composer-combobox textarea");
+      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
       const scopeKey = "chat:v3:agent:main:main\u0000agent:main";
       await composer.fill("seed");
       await page.getByRole("button", { name: "Send message" }).waitFor();

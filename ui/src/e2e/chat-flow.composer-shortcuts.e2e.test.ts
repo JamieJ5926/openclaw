@@ -49,7 +49,7 @@ suite.define(() => {
         await page.locator("[data-settings-send-shortcut]").selectOption("enter");
         await page.goto(`${suite.server.baseUrl}chat`);
 
-        const composer = page.locator(".agent-chat__composer-combobox textarea");
+        const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
         const initialText = "keep the shortcut run active";
         await composer.fill(initialText);
         await page.getByRole("button", { name: "Send message" }).click();

@@ -88,7 +88,9 @@ suite.define(() => {
       await rememberSession(page, key);
 
       await page.goto(suite.server.baseUrl);
-      await page.locator(".agent-chat__input textarea").waitFor({ state: "visible" });
+      await page
+        .locator("openclaw-chat-pane .agent-chat__input textarea")
+        .waitFor({ state: "visible" });
       expect((await gateway.waitForRequest("chat.startup")).params).toMatchObject({
         sessionKey: key,
       });
@@ -150,7 +152,9 @@ suite.define(() => {
 
         await currentSession.click();
         await expect.poll(() => new URL(page.url()).pathname).toBe("/chat/main");
-        await page.locator(".agent-chat__input textarea").waitFor({ state: "visible" });
+        await page
+          .locator("openclaw-chat-pane .agent-chat__input textarea")
+          .waitFor({ state: "visible" });
 
         await page.goto(`${suite.server.baseUrl}${attemptedPath.slice(1)}`);
         await page.getByRole("button", { name: "View sessions" }).click();

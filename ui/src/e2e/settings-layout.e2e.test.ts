@@ -232,7 +232,11 @@ suite.define(() => {
           await page.goto(`${suite.server.baseUrl}${pathname}`);
           const ready = isSettings
             ? page.getByRole("heading", { name: /^Configured providers\b/ })
-            : page.locator(".agent-chat__composer-combobox textarea");
+            : page.locator(
+                pathname === "chat"
+                  ? "openclaw-chat-pane .agent-chat__composer-combobox textarea"
+                  : ".agent-chat__composer-combobox textarea",
+              );
           await ready.waitFor();
           if (isSettings) {
             expect(settingsScripts.join("\n")).toContain(providerCopy);

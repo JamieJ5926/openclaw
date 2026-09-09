@@ -159,7 +159,7 @@ suite.define(() => {
             return { draft: state.chatMessage, queued: state.chatQueue.map((item) => item.text) };
           });
           const composerDisabled = await page
-            .locator(".agent-chat__composer-combobox textarea")
+            .locator("openclaw-chat-pane .agent-chat__composer-combobox textarea")
             .isDisabled();
           await gateway.setOnline(true);
           await failedGroup.waitFor({ state: "visible" });
@@ -172,9 +172,11 @@ suite.define(() => {
             offline: { draft: "later ordinary turn", queued: [] },
             sends: [],
           });
-          expect(await page.locator(".agent-chat__composer-combobox textarea").inputValue()).toBe(
-            "later ordinary turn",
-          );
+          expect(
+            await page
+              .locator("openclaw-chat-pane .agent-chat__composer-combobox textarea")
+              .inputValue(),
+          ).toBe("later ordinary turn");
           expect(await gateway.getRequests("sessions.dispatch")).toHaveLength(1);
         } else {
           if (coldScope) {
@@ -200,7 +202,7 @@ suite.define(() => {
               return { draft: state.chatMessage, queued: state.chatQueue.map((item) => item.text) };
             });
             const composerDisabled = await page
-              .locator(".agent-chat__composer-combobox textarea")
+              .locator("openclaw-chat-pane .agent-chat__composer-combobox textarea")
               .isDisabled();
             await pollLocatorText(pane.locator(".agent-chat__composer-status-band")).toContain(
               "Finishing connection recovery.",
@@ -243,9 +245,11 @@ suite.define(() => {
         });
         expect(await gateway.getRequests("sessions.create")).toHaveLength(disconnect ? 1 : 0);
         if (disconnect || coldScope) {
-          expect(await page.locator(".agent-chat__composer-combobox textarea").inputValue()).toBe(
-            "later ordinary turn",
-          );
+          expect(
+            await page
+              .locator("openclaw-chat-pane .agent-chat__composer-combobox textarea")
+              .inputValue(),
+          ).toBe("later ordinary turn");
           expect(await gateway.getRequests("chat.send")).toHaveLength(0);
         }
       } finally {
@@ -284,7 +288,7 @@ suite.define(() => {
       try {
         await page.goto(`${suite.server.baseUrl}${controlUiSessionPath(sessionKey).slice(1)}`);
         const pane = page.locator(".chat-pane-cache__pane--active");
-        const composer = page.locator(".agent-chat__composer-combobox textarea");
+        const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
         await expect.poll(() => composer.isDisabled()).toBe(false);
         const owner = await page.evaluate(() => {
           const app = document.querySelector("openclaw-app") as HTMLElement & {

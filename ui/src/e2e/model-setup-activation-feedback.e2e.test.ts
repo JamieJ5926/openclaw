@@ -99,7 +99,7 @@ suite.define(() => {
         expect(await gateway.getRequests("openclaw.setup.detect")).toHaveLength(2);
         await page.getByRole("button", { name: "Back to app" }).click();
         await page.getByText("The existing chat is ready.", { exact: true }).waitFor();
-        const composer = page.locator(".agent-chat__composer-combobox textarea");
+        const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
         await expect.poll(() => composer.isEnabled()).toBe(true);
         await composer.fill("Continue after setup.");
         await page.getByRole("button", { name: "Send message", exact: true }).click();

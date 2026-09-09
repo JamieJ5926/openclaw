@@ -28,7 +28,7 @@ suite.define(() => {
       await page.goto(`${suite.server.baseUrl}chat`);
       await gateway.waitForRequest("chat.startup");
       await gateway.deferNext("chat.send");
-      const composer = page.locator(".agent-chat__composer-combobox textarea");
+      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
       await composer.fill("Inspect this synthetic workspace");
       await composer.press("Enter");
       const send = await gateway.waitForRequest("chat.send");

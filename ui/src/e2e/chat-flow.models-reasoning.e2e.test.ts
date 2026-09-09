@@ -334,7 +334,9 @@ suite.define(() => {
       await page.goto(`${suite.server.baseUrl}chat`);
 
       const command = "/model openai/gpt-5.6-luna --runtime codex continue with the selected model";
-      await page.locator(".agent-chat__composer-combobox textarea").fill(command);
+      await page
+        .locator("openclaw-chat-pane .agent-chat__composer-combobox textarea")
+        .fill(command);
       await page.getByRole("button", { name: "Send message" }).click();
 
       const sendRequest = await gateway.waitForRequest("chat.send");
@@ -912,7 +914,7 @@ suite.define(() => {
       });
 
       const prompt = `send while the ${setting.label} save is pending`;
-      await page.locator(".agent-chat__composer-combobox textarea").fill(prompt);
+      await page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea").fill(prompt);
       await page.getByRole("button", { name: "Send message" }).click();
 
       await page.locator(".chat-queue").getByText("Applying chat settings").waitFor({

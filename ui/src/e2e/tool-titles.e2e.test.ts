@@ -43,7 +43,9 @@ suite.define(() => {
         await page.locator(".chat-tool-msg-body", { hasText: "All tests passed." }).waitFor();
         expect(await page.locator(".chat-tool-msg-body").textContent()).toContain(command);
 
-        await page.locator(".agent-chat__composer-combobox textarea").fill("Check the workspace");
+        await page
+          .locator("openclaw-chat-pane .agent-chat__composer-combobox textarea")
+          .fill("Check the workspace");
         await page.getByRole("button", { name: "Send message" }).click();
         const send = await gateway.waitForRequest("chat.send");
         const params = requireRecord(send.params);

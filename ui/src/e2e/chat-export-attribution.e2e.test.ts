@@ -72,7 +72,9 @@ suite.define(() => {
 
           let markdown: string;
           if (action === "download") {
-            await page.locator(".agent-chat__composer-combobox textarea").fill("/export");
+            await page
+              .locator("openclaw-chat-pane .agent-chat__composer-combobox textarea")
+              .fill("/export");
             const downloadPromise = page.waitForEvent("download");
             await page.getByRole("button", { name: "Send message" }).click();
             const download = await downloadPromise;

@@ -46,7 +46,7 @@ suite.define(() => {
         },
       });
       await page.goto(new URL(controlUiSessionPath(alphaKey), suite.server.baseUrl).href);
-      const composer = page.locator(".agent-chat__composer-combobox textarea");
+      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
       const draft = "Review the release checklist.";
       await composer.fill(draft);
       await openChatSidePanelType(page, "Dashboard");
