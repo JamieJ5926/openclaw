@@ -690,6 +690,12 @@ function runtimeCarriers(exchange: CacheExchange) {
     : [];
 }
 
+function retainsRuntimeContext(model: PromptCacheModel): boolean {
+  // This matrix uses OpenAI Responses, whose owner replay policy is append-only.
+  // Anthropic retention follows the model's prefix-bound thinking contract.
+  return model.provider === "openai" || bindsClaudeThinkingPrefix({ id: model.id });
+}
+
 function verifyCarrierLifecycle(
   exchanges: CacheExchange[],
   retained: boolean,
@@ -835,7 +841,7 @@ export async function collectCacheFailureEvidence(
   messages: JsonRecord[],
   scenario: PromptCacheScenario,
 ) {
-  const retained = model.provider === "anthropic" && bindsClaudeThinkingPrefix({ id: model.id });
+  const retained = retainsRuntimeContext(model);
   let events: JsonRecord[] = [];
   let captureReadFailed = false;
   try {
@@ -913,8 +919,10 @@ export async function collectCacheFailureEvidence(
   const complete =
     !captureReadFailed &&
     events.length < CACHE_CAPTURE_EVENT_LIMIT &&
-    requests.length > 0 &&
+    requests.length === (scenario === "dependent-reads" ? 4 : 2) &&
+    assistants.length === requests.length &&
     decoded.length === requests.length &&
+    observations.every((row) => row.terminalComplete && row.accountingValid) &&
     paired &&
     rows.filter((row) => row.kind === "response").length + verifiedReadFailures.size ===
       requests.length &&
@@ -971,11 +979,9 @@ export function verifyCacheConversation(
   if (exchanges.length !== expectedCount || turnBoundary !== expectedCount - 1) {
     throw new Error("Unexpected request count; retries or extra model turns are not cache proof.");
   }
-  const retained = model.provider === "anthropic" && bindsClaudeThinkingPrefix({ id: model.id });
+  const retained = retainsRuntimeContext(model);
   const first = exchanges[0]!;
-  if (model.provider === "anthropic") {
-    verifyCarrierLifecycle(exchanges, retained, turnBoundary);
-  }
+  verifyCarrierLifecycle(exchanges, retained, turnBoundary);
   const staticPrefix = captureHash(
     withoutCacheMetadata({
       system: first.request.system,
