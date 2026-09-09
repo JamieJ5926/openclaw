@@ -9,6 +9,8 @@ import { t } from "../../i18n/index.ts";
 import { registerSettingsEnglish } from "../../i18n/locales/en-settings.ts";
 import { moveArrayEntry, type ArrayDropPosition } from "../../lib/array-order.ts";
 import { formatDurationHuman } from "../../lib/format.ts";
+import { showToast } from "../../lib/toast.ts";
+import { modelProviderErrorMessage } from "./config-mutation.ts";
 import type {
   ModelProviderCard,
   ModelProviderPendingLogout,
@@ -16,6 +18,23 @@ import type {
 } from "./data.ts";
 
 registerSettingsEnglish();
+
+export function showProfileActionError(error: unknown): void {
+  showToast({
+    placement: "bottom",
+    message: modelProviderErrorMessage(error),
+    icon: icons.alertTriangle,
+    durationMs: 12_000,
+  });
+}
+
+export function showProfileLogoutSuccess(): void {
+  showToast({
+    placement: "bottom",
+    message: t("modelProviders.logout.done"),
+    icon: icons.check,
+  });
+}
 
 type ProviderProfile = ModelProviderCard["profiles"][number];
 
