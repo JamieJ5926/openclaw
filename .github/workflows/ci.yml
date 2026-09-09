@@ -5166,6 +5166,8 @@ jobs:
             -only-testing:OpenClawWatchTests/WatchSpeechPlaybackTests
             -only-testing:OpenClawWatchTests/WatchRealtimeMediaTests
             -only-testing:OpenClawWatchTests/WatchGatewayConfigurationTests
+            -only-testing:OpenClawWatchTests/WatchDirectConversationTests
+            -only-testing:OpenClawWatchTests/WatchGatewayControllerTests
           )
           xcodebuild "${xcodebuild_args[@]}" "${test_args[@]}" build-for-testing
           app_path="$(

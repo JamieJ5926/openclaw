@@ -755,12 +755,14 @@ public final class GatewayTLSPinningSession: NSObject, WebSocketSessioning, URLS
     private let params: GatewayTLSParams
     private let allowsRedirects: Bool
     private let allowsStoredCredentials: Bool
+    private let configuration: URLSessionConfiguration?
     private let failureLock = NSLock()
     private var lastTLSFailure: GatewayTLSValidationFailure?
     private var pinningState: GatewayTLSPinningState
     private var expectedAuthority: GatewayTLSAuthority?
     private lazy var session: URLSession = {
-        let config = self.allowsStoredCredentials ? URLSessionConfiguration.default : .ephemeral
+        let config = self.configuration
+            ?? (self.allowsStoredCredentials ? URLSessionConfiguration.default : .ephemeral)
         if !self.allowsStoredCredentials {
             // Explicit per-request authority cannot inherit or persist another
             // account's cookies, HTTP credentials, or authenticated cache entries.
@@ -773,11 +775,23 @@ public final class GatewayTLSPinningSession: NSObject, WebSocketSessioning, URLS
         return URLSession(configuration: config, delegate: self, delegateQueue: nil)
     }()
 
-    public init(
+    public convenience init(
         params: GatewayTLSParams,
         allowsRedirects: Bool = true,
         allowsStoredCredentials: Bool = true)
     {
+        self.init(
+            configuration: nil, params: params,
+            allowsRedirects: allowsRedirects, allowsStoredCredentials: allowsStoredCredentials)
+    }
+
+    init(
+        configuration: URLSessionConfiguration?,
+        params: GatewayTLSParams,
+        allowsRedirects: Bool,
+        allowsStoredCredentials: Bool)
+    {
+        self.configuration = configuration?.copy() as? URLSessionConfiguration
         self.params = params
         self.allowsRedirects = allowsRedirects
         self.allowsStoredCredentials = allowsStoredCredentials
