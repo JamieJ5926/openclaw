@@ -311,6 +311,7 @@ it("emits ingress snapshots from the registered channel ingress monitor", async 
       await deliveryStarted;
     });
 
+    const heartbeatStartedAt = Date.now();
     startDiagnosticHeartbeat({}, { sampleLiveness: () => null });
     await vi.advanceTimersByTimeAsync(15_000);
     await waitForDiagnosticEventsDrained();
@@ -322,7 +323,7 @@ it("emits ingress snapshots from the registered channel ingress monitor", async 
         expect(ingressSnapshot).toMatchObject({
           type: "ingress.snapshot",
           schemaVersion: 1,
-          sampledAt: sampledAt + 15_000,
+          sampledAt: heartbeatStartedAt + 15_000,
           status: "known",
           isolationAvailable: false,
           stages: {
@@ -438,7 +439,7 @@ it("does not publish or unblock a restarted heartbeat from an obsolete async ing
 });
 
 it("retires interrupted diagnostic observations before re-enable without reviving their authority", async () => {
-  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
   setDiagnosticsEnabledForProcess(true);
   const events: DiagnosticEventPayload[] = [];
   const unsubscribe = onDiagnosticEvent((event) => events.push(event));

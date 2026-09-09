@@ -15,7 +15,7 @@ import type {
 import type { SlackMessageEvent } from "../types.js";
 import type { SlackEventScope } from "./event-scope.js";
 
-export type SlackIngressApiMethod =
+type SlackIngressApiMethod =
   | "auth.test"
   | "chat.postEphemeral"
   | "chat.postMessage"
