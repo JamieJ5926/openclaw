@@ -460,6 +460,7 @@ export class ChatSessionVirtualizerHost implements ReactiveControllerHost, ChatT
     announce: boolean,
     overlay: unknown = nothing,
     header: TranscriptHeader | null = null,
+    emptyContent?: TemplateResult,
   ): TemplateResult {
     const rowModelChanged =
       rows.length !== this.rowKeys.length ||
@@ -478,8 +479,11 @@ export class ChatSessionVirtualizerHost implements ReactiveControllerHost, ChatT
         } else {
           this.syncHeaderMargin();
         }
-        this.announcement.sync(announcement, announce);
         this.initialLayout.rendered();
+        if (emptyContent) {
+          return emptyContent;
+        }
+        this.announcement.sync(announcement, announce);
         return renderChatTranscriptLayout({
           rows,
           renderRow,
@@ -505,7 +509,7 @@ export class ChatSessionVirtualizerHost implements ReactiveControllerHost, ChatT
           : new Set(nextRowKeys);
         return [...appRows].filter((row) => !nextRenderedKeys.has(row.dataset.virtualRowKey ?? ""));
       },
-      // SAFETY: the gate returns renderValue's output, always the renderChatTranscriptLayout TemplateResult here.
+      // SAFETY: both renderValue branches return a TemplateResult.
     ) as TemplateResult;
   }
 

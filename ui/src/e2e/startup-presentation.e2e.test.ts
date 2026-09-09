@@ -772,21 +772,51 @@ suite.define(() => {
     },
   );
 
-  it.each(["empty", "empty compact", "failed"])(
+  it.each(["empty", "empty compact", "failed", "typing then empty", "typing then failed"])(
     "reveals the %s initial history outcome without virtual rows",
     async (outcome) => {
       const viewport =
         outcome === "empty compact" ? { width: 800, height: 520 } : { width: 1440, height: 900 };
       await suite.withPage({ viewport }, async ({ page }) => {
+        const transientTyping = outcome.startsWith("typing then");
         const gateway = await installMockGateway(page, {
           communityInvite: false,
           historyMessages: [],
           deferredMethods: ["chat.startup"],
+          ...(transientTyping
+            ? {
+                sessions: [
+                  createControlUiSessionRow("agent:main:main", "Shared conversation", 1, {
+                    sessionId: "session-main",
+                  }),
+                ],
+                presenceUsers: [
+                  { id: "self", name: "Self", self: true },
+                  { id: "other", name: "Other" },
+                ],
+              }
+            : {}),
         });
         await page.goto(`${suite.server.baseUrl}chat/main`);
         await waitForControlUiRoute(page, { routeId: "chat" });
         await gateway.waitForRequest("chat.startup");
-        if (outcome === "failed") {
+        if (transientTyping) {
+          const event = {
+            sessionKey: "agent:main:main",
+            sessionId: "session-main",
+            agentId: "main",
+            actor: { type: "human", id: "other", label: "Other" },
+            ts: Date.now(),
+          };
+          const typingRow = page.locator(
+            'openclaw-chat-pane [data-virtual-row-key="presence:typing"]',
+          );
+          await gateway.emitGatewayEvent("session.typing", { ...event, typing: true });
+          await typingRow.waitFor({ state: "attached" });
+          await gateway.emitGatewayEvent("session.typing", { ...event, typing: false });
+          await typingRow.waitFor({ state: "detached" });
+        }
+        if (outcome.endsWith("failed")) {
           await gateway.rejectDeferred("chat.startup", {
             code: "GATEWAY_UNAVAILABLE",
             message: "Chat history is temporarily unavailable.",

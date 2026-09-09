@@ -37,6 +37,7 @@ export type ChatTranscriptSession = {
     announce: boolean,
     overlay?: unknown,
     header?: TranscriptHeader | null,
+    emptyContent?: TemplateResult,
   ): TemplateResult;
   syncMessageRows(messageRowKeysById: ReadonlyMap<string, string>): void;
   /** Returns the sampled loaded message at or preceding the viewport midpoint. */

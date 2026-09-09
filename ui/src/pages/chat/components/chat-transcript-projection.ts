@@ -73,7 +73,11 @@ type ChatTranscriptProjection = {
   isEmpty: boolean;
   showLoadingSkeleton: boolean;
   searchOpen: boolean;
-  renderRows: (overlay?: unknown, header?: TranscriptHeader | null) => TemplateResult;
+  renderRows: (
+    overlay?: unknown,
+    header?: TranscriptHeader | null,
+    emptyContent?: TemplateResult,
+  ) => TemplateResult;
 };
 
 type ChatRenderItem = ReturnType<typeof coalesceAgentRunFrames>[number];
@@ -717,14 +721,19 @@ export function projectChatTranscript(
     isEmpty,
     showLoadingSkeleton,
     searchOpen: state.searchOpen,
-    renderRows: (overlay: unknown = nothing, header: TranscriptHeader | null = null) =>
+    renderRows: (
+      overlay: unknown = nothing,
+      header: TranscriptHeader | null = null,
+      emptyContent?: TemplateResult,
+    ) =>
       transcript.render(
-        transcriptRows,
+        emptyContent ? [] : transcriptRows,
         (row) => (row.kind === "item" ? renderItem(row.item) : row.content),
         latestTranscriptAnnouncement(collapsedItems),
         props.announceTranscript !== false && !state.searchOpen && !props.loading,
         overlay,
         header,
+        emptyContent,
       ),
   };
 }

@@ -59,7 +59,9 @@ function renderTranscriptShell(
         height: CHAT_HISTORY_BOUNDARY_HEIGHT_PX,
       }
     : null;
-  const transcriptContents =
+  // Empty and pending content still commits through the row owner so transient
+  // rows cannot outlive their DOM and block initial layout readiness.
+  const emptyContent =
     projection.showLoadingSkeleton || projection.isEmpty
       ? html`
           <div
@@ -82,7 +84,8 @@ function renderTranscriptShell(
             }
           </div>
         `
-      : projection.renderRows(historySentinel, historyHeader);
+      : undefined;
+  const transcriptContents = projection.renderRows(historySentinel, historyHeader, emptyContent);
   return html`
     <div
       class="chat-thread ${projection.isDirectThread ? "chat-thread--direct" : ""}"
