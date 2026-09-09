@@ -3,7 +3,6 @@ import type { Page } from "playwright";
 import { expect, it } from "vitest";
 import {
   chatSessionListResponse,
-  controlUiSessionUrl,
   createChatFlowE2eSuite,
   installMockGateway,
 } from "./chat-flow.test-support.ts";
@@ -40,10 +39,14 @@ suite.define(() => {
       methodResponses: { "sessions.list": chatSessionListResponse() },
     });
     try {
-      await page.goto(controlUiSessionUrl(suite.server.baseUrl, "agent:main:session-a"));
+      await page.goto(`${suite.server.baseUrl}new`);
+      await page.locator(".new-session-page__message").waitFor();
+      await page
+        .locator('[data-session-key="agent:main:session-a"] a.sidebar-recent-session__link')
+        .click();
       await gateway.waitForRequest("chat.startup");
       const loader = page.locator(
-        ".chat-pane-cache__pane--visible .chat-thread openclaw-panel-loading-skeleton",
+        ".chat-pane-cache__pane--visible .chat-thread .startup-transcript-skeleton",
       );
       await loader.waitFor({ state: "attached" });
       const frames = await loader.evaluate(async (node) => {
@@ -83,7 +86,7 @@ suite.define(() => {
               let previousVisible = false;
               const sample = () => {
                 const skeleton = document.querySelector(
-                  ".chat-pane-cache__pane--visible .chat-thread openclaw-panel-loading-skeleton",
+                  ".chat-pane-cache__pane--visible .chat-thread .startup-transcript-skeleton",
                 );
                 if (skeleton) {
                   const startTime = skeleton.getAnimations()[0]?.startTime;
@@ -148,9 +151,7 @@ suite.define(() => {
         .click();
       await previous.waitFor({ state: "visible" });
       expect(
-        await page
-          .locator(".chat-pane-cache__pane--visible openclaw-panel-loading-skeleton")
-          .count(),
+        await page.locator(".chat-pane-cache__pane--visible .startup-transcript-skeleton").count(),
       ).toBe(0);
     } finally {
       await suite.closeBrowserContext(context);
