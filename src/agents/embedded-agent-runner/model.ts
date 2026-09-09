@@ -118,13 +118,9 @@ export async function resolveModelAsync(
     options?.agentId,
   );
   const explicitPreparedRuntime = options?.preparedModelRuntime;
-  const emptyDiscoveryStores =
-    options?.skipAgentDiscovery && (!options.authStorage || !options.modelRegistry)
-      ? createEmptyAgentDiscoveryStores()
-      : undefined;
   const needsPreparedSnapshot =
     !explicitPreparedRuntime &&
-    !emptyDiscoveryStores &&
+    !options?.skipAgentDiscovery &&
     (!options?.authStorage || !options?.modelRegistry);
   const publishedSnapshot = needsPreparedSnapshot
     ? resolvePreparedAgentSnapshot(
@@ -153,10 +149,8 @@ export async function resolveModelAsync(
       options?.workspaceDir ?? preparedModelRuntime?.workspaceDir ?? derivedWorkspaceDir;
     let { authStorage, modelRegistry } = options ?? {};
     if (!authStorage || !modelRegistry) {
-      const stores =
-        emptyDiscoveryStores ??
-        preparedModelRuntime?.createStores() ??
-        createEmptyAgentDiscoveryStores();
+      // Captured stores remain authoritative when new discovery is skipped.
+      const stores = preparedModelRuntime?.createStores() ?? createEmptyAgentDiscoveryStores();
       authStorage ??= stores.authStorage;
       modelRegistry ??= options?.authStorage
         ? stores.modelRegistry.fork(authStorage)

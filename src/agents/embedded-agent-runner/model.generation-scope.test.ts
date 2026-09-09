@@ -1,9 +1,16 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { expectDefined } from "@openclaw/normalization-core";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
+import { materializeRuntimeConfig } from "../../config/materialize.js";
+import {
+  clearRuntimeConfigSnapshot,
+  setRuntimeConfigSnapshot,
+} from "../../config/runtime-snapshot.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { validateConfigObjectRaw } from "../../config/validation-core.js";
 import { clearPluginMetadataLifecycleCaches } from "../../plugins/plugin-metadata-lifecycle.js";
+import { createPluginMetadataSnapshotFixture } from "../../plugins/plugin-metadata.test-support.js";
 import { connectUserModelAccount } from "../../state/user-model-accounts.js";
 import { ensureProfileForEmail } from "../../state/user-profiles.js";
 import {
@@ -11,6 +18,8 @@ import {
   type OpenClawTestState,
 } from "../../test-utils/openclaw-test-state.js";
 import { ensureAuthProfileStoreWithoutExternalProfiles } from "../auth-profiles/store-runtime.js";
+import type { ModelCatalogEntry } from "../model-catalog.types.js";
+import type { PreparedModelRuntimeSnapshot } from "../prepared-model-runtime.js";
 import { AuthStorage, ModelRegistry } from "../sessions/index.js";
 import { resolveTieredModel } from "./model-resolution.js";
 import { guardModelFixtureAuth } from "./model.fixture.test-support.js";
@@ -19,6 +28,7 @@ import {
   publishCurrentModelGeneration,
   resetModelGenerationFixtureState,
 } from "./model.generation-scope.test-support.js";
+import { buildInlineProviderModels } from "./model.inline-provider.js";
 import { resolveModelAsync } from "./model.js";
 
 let state: OpenClawTestState;
@@ -103,8 +113,116 @@ describe("model runtime generation scope", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    clearRuntimeConfigSnapshot();
     resetModelGenerationFixtureState();
   });
+
+  it.each(["direct", "tiered"] as const)(
+    "keeps literal catalog capabilities during %s resolution with discovery skipped",
+    async (mode) => {
+      const baseUrl = "https://fixture.invalid/v1";
+      const api = "openai-responses";
+      const catalog = [
+        {
+          provider: "fixture",
+          id: "latest",
+          name: "Latest",
+          api,
+          baseUrl,
+          contextWindow: 64_000,
+          input: ["text", "image"],
+          reasoning: true,
+        },
+        {
+          provider: "fixture",
+          id: "middle",
+          name: "Middle",
+          api,
+          baseUrl,
+          contextWindow: 128_000,
+          input: ["text"],
+          reasoning: true,
+        },
+      ] satisfies ModelCatalogEntry[];
+      const metadataSnapshot = createPluginMetadataSnapshotFixture({
+        plugins: [
+          {
+            id: "fixture",
+            origin: "config",
+            providers: ["fixture"],
+            modelIdNormalization: {
+              providers: { fixture: { aliases: { latest: "middle", middle: "final" } } },
+            },
+            modelCatalog: { providers: { fixture: { api, baseUrl, models: catalog } } },
+          },
+        ],
+      });
+      const validated = validateConfigObjectRaw({
+        models: {
+          providers: { fixture: { api, baseUrl, models: [{ id: "latest", name: "Configured" }] } },
+        },
+      });
+      assert(validated.ok, JSON.stringify(validated));
+      const config = materializeRuntimeConfig(validated.config, {
+        env: {},
+        manifestRegistry: metadataSnapshot.manifestRegistry,
+      });
+      setRuntimeConfigSnapshot(config, validated.config);
+      const preparedModelRuntime: PreparedModelRuntimeSnapshot = {
+        catalogOwner: undefined,
+        agentDir: state.agentDir(),
+        workspaceDir: state.workspaceDir,
+        activeProjectKeys: [],
+        config,
+        observationConfig: config,
+        isCurrent: () => true,
+        authModes: {},
+        metadataSnapshot,
+        allowGatewaySubagentBinding: false,
+        modelCatalog: { entries: catalog, routeVariants: catalog },
+        configuredRuntimeModels: [],
+        inlineProviderModels: buildInlineProviderModels(config.models?.providers ?? {}),
+        createStores() {
+          const authStorage = AuthStorage.inMemory({});
+          return {
+            authStorage,
+            modelRegistry: ModelRegistry.create(authStorage, "captured:literal-models.json", {
+              config,
+              includePluginCatalogs: false,
+              pluginMetadataSnapshot: metadataSnapshot,
+              modelsJsonContents: JSON.stringify({
+                providers: { fixture: { api, baseUrl, models: catalog } },
+              }),
+            }),
+          };
+        },
+      };
+      const result =
+        mode === "direct"
+          ? await resolveModelAsync("fixture", "latest", state.agentDir(), config, {
+              preparedModelRuntime,
+              skipAgentDiscovery: true,
+              workspaceDir: state.workspaceDir,
+            })
+          : (
+              await resolveTieredModel({
+                provider: "fixture",
+                modelId: "latest",
+                agentDir: state.agentDir(),
+                config,
+                workspaceDir: state.workspaceDir,
+                preparedModelRuntime,
+              })
+            ).resolution;
+      expect(result.model).toMatchObject({
+        id: "latest",
+        provider: "fixture",
+        contextWindow: 64_000,
+        input: ["text", "image"],
+        reasoning: true,
+      });
+    },
+  );
 
   it.each([
     { selection: "explicit", profileId: "openai:default" },
@@ -249,11 +367,14 @@ describe("model runtime generation scope", () => {
       label: "stores",
     });
     const { preparedModelRuntime } = generation;
+    const createPreparedStores = preparedModelRuntime.createStores;
+    preparedModelRuntime.createStores = () => {
+      const prepared = createPreparedStores();
+      prepared.authStorage.setRuntimeApiKey(generation.provider, "prepared-runtime-key");
+      return prepared;
+    };
     const stores = preparedModelRuntime.createStores();
     stores.authStorage.setRuntimeApiKey(generation.provider, "fixture-runtime-key");
-    const preparedStores = vi.spyOn(preparedModelRuntime, "createStores");
-    const emptyAuth = vi.spyOn(AuthStorage, "inMemory");
-    const emptyRegistry = vi.spyOn(ModelRegistry, "inMemory");
 
     const result = await resolveModelAsync(
       generation.provider,
@@ -269,15 +390,11 @@ describe("model runtime generation scope", () => {
       },
     );
 
-    expect(preparedStores).not.toHaveBeenCalled();
-    const allocations = supplied.auth && supplied.registry ? 0 : 1;
-    expect(emptyAuth).toHaveBeenCalledTimes(allocations);
-    expect(emptyRegistry).toHaveBeenCalledTimes(allocations);
     expect(result.authStorage === stores.authStorage).toBe(supplied.auth);
     expect(result.modelRegistry === stores.modelRegistry).toBe(supplied.registry);
     const model = expectDefined(result.model, "resolved fixture model");
     expect(await result.modelRegistry.getApiKeyAndHeaders(model)).toMatchObject({
-      apiKey: supplied.auth || supplied.registry ? "fixture-runtime-key" : undefined,
+      apiKey: supplied.auth || supplied.registry ? "fixture-runtime-key" : "prepared-runtime-key",
     });
   });
 
