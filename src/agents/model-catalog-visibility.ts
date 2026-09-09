@@ -9,6 +9,7 @@ import type {
   ModelAuthAvailabilityEvaluation,
   ModelAuthAvailabilityRef,
 } from "./model-auth-availability.js";
+import { overlayCatalogMetadata } from "./model-catalog-metadata.js";
 import { compareModelCatalogEntries } from "./model-catalog-order.js";
 import {
   type ModelCatalogRoutePolicy,
@@ -17,10 +18,7 @@ import {
   resolveConfiguredModelCatalogOverrides,
 } from "./model-catalog-route.js";
 import type { ModelCatalogEntry } from "./model-catalog.js";
-import {
-  buildConfiguredModelCatalog,
-  dedupeModelCatalogEntries,
-} from "./model-selection-shared.js";
+import { dedupeModelCatalogEntries } from "./model-selection-shared.js";
 import {
   RUNTIME_MODEL_VISIBILITY_NORMALIZATION,
   createModelVisibilityPolicy,
@@ -143,7 +141,18 @@ export async function prepareLogicalVisibleModelCatalog(
   const retained = params.catalog.filter((entry) => retainedKeys.has(keyOf(entry)));
   const wildcard = policy.allowAny || policy.hasProviderWildcards;
   const configuredCatalog = wildcard
-    ? sortModelCatalogEntries(buildConfiguredModelCatalog({ cfg: params.cfg }))
+    ? sortModelCatalogEntries(
+        policy.configuredCatalog.map((entry) => {
+          const donor = routeVariantsByKey.get(keyOf(entry))?.[0];
+          // Sparse authored rows retain captured capabilities only on their own route.
+          return donor
+            ? {
+                ...overlayCatalogMetadata(donor, entry, { preserveBaseCompat: true }),
+                name: entry.name,
+              }
+            : entry;
+        }),
+      )
     : [];
   const candidates =
     params.view === "all"

@@ -26,7 +26,6 @@ import { logVerbose } from "../../globals.js";
 import { getSessionBindingService } from "../../infra/outbound/session-binding-service.js";
 import type { SessionBindingRecord } from "../../infra/outbound/session-binding-service.js";
 import {
-  buildRestartSuccessContinuation,
   clearRestartSentinel,
   formatDoctorNonInteractiveHint,
   type RestartSentinelPayload,
@@ -77,7 +76,7 @@ function buildRestartCommandSentinel(params: HandleCommandsParams): RestartSenti
     deliveryContext,
     threadId,
     message: "/restart",
-    continuation: buildRestartSuccessContinuation({ sessionKey }),
+    continuation: null,
     doctorHint: formatDoctorNonInteractiveHint(),
     stats: {
       mode: "gateway.restart",
@@ -542,9 +541,8 @@ export const handleRestartCommand: CommandHandler = defineGatewayControlCommand(
       let sentinelWritten = false;
       scheduleGatewaySigusr1Restart({
         reason: "/restart",
-        // Sibling session-routing guard: /restart writes a session-scoped sentinel
-        // with continuation, so the scheduler must own the pending slot under the
-        // same key to avoid cross-session continuation overwrite (#86742).
+        // The routed restart acknowledgement and scheduler must own the same
+        // pending session key to avoid cross-session overwrite (#86742).
         sessionKey: sentinelPayload?.sessionKey,
         emitHooks: sentinelPayload
           ? {

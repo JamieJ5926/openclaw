@@ -29,7 +29,7 @@ import { resetPreparedModelRuntimeSnapshotsForTest } from "../prepared-model-run
 import {
   completeWithPreparedSimpleCompletionModel,
   prepareSimpleCompletionModel,
-  prepareSimpleCompletionModelForAgent,
+  acquireSimpleCompletionModelForAgent,
 } from "../simple-completion-runtime.js";
 
 const roots = createSyncSuiteTempRootTracker("openclaw-completion-admission");
@@ -581,7 +581,7 @@ it.each([
                     agentDir,
                     modelRef: "completion-fixture/model-a",
                   };
-                  const pending = prepareSimpleCompletionModelForAgent(request);
+                  const pending = acquireSimpleCompletionModelForAgent(request);
                   request.modelRef = "completion-fixture/model-b";
                   return pending;
                 }
@@ -606,7 +606,7 @@ it.each([
                       modelId: "model-a",
                       ...(borrowed ? { preparedModelRuntime: borrowed.snapshot } : {}),
                     })
-                  : prepareSimpleCompletionModelForAgent({
+                  : acquireSimpleCompletionModelForAgent({
                       cfg,
                       agentId: "main",
                       agentDir,
@@ -614,20 +614,27 @@ it.each([
                     });
               };
               const prepared = await prepare();
-              if ("error" in prepared) {
-                throw new Error(prepared.error);
+              try {
+                if ("error" in prepared) {
+                  throw new Error(prepared.error);
+                }
+                const result = await completeWithPreparedSimpleCompletionModel({
+                  model: prepared.model,
+                  auth: prepared.auth,
+                  assertCurrent: "assertCurrent" in prepared ? prepared.assertCurrent : undefined,
+                  cfg,
+                  context: {
+                    messages: [
+                      { role: "user", content: "Reply with the fixture marker.", timestamp: 1 },
+                    ],
+                  },
+                });
+                expect(result.content).toEqual([{ type: "text", text: "completion-owner-ok" }]);
+              } finally {
+                if ("release" in prepared) {
+                  prepared.release();
+                }
               }
-              const result = await completeWithPreparedSimpleCompletionModel({
-                model: prepared.model,
-                auth: prepared.auth,
-                cfg,
-                context: {
-                  messages: [
-                    { role: "user", content: "Reply with the fixture marker.", timestamp: 1 },
-                  ],
-                },
-              });
-              expect(result.content).toEqual([{ type: "text", text: "completion-owner-ok" }]);
             }
             const owner = mode.startsWith("reloaded") ? "b" : "a";
             const model =

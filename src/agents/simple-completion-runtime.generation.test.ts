@@ -4,6 +4,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 import type { Model } from "../llm/types.js";
 import { createPluginMetadataSnapshotFixture } from "../plugins/plugin-metadata.test-support.js";
 import type { resolveModelAsync } from "./embedded-agent-runner/model.js";
+import type { PreparedModelRuntimeLeaseOptions } from "./prepared-model-runtime.types.js";
 import { AuthStorage, ModelRegistry } from "./sessions/index.js";
 
 const mocks = vi.hoisted(() => ({
@@ -50,6 +51,7 @@ vi.mock("./sessions/model-registry-runtime.js", () => ({
 }));
 
 import {
+  acquireSimpleCompletionModelForAgent,
   prepareSimpleCompletionModel,
   prepareSimpleCompletionModelFromRef,
 } from "./simple-completion-runtime.js";
@@ -228,4 +230,46 @@ it("validates the admitted selection before materialization or auth and releases
   expect(mocks.getApiKeyForModel).not.toHaveBeenCalled();
   expect(mocks.prepareProviderRuntimeAuth).not.toHaveBeenCalled();
   expect(release).toHaveBeenCalledOnce();
+});
+
+it("selects an explicit agent completion model from admitted metadata before materialization", async () => {
+  const modelResolver = createOllamaModelResolver();
+  const acquire = expectDefined(mocks.acquireRuntimeLease.getMockImplementation(), "lease fixture");
+  mocks.acquireRuntimeLease.mockImplementationOnce(
+    async (input, options: PreparedModelRuntimeLeaseOptions) => {
+      const deriveSelections = expectDefined(
+        options.deriveRuntimePluginSelections,
+        "selection owner",
+      );
+      expect(
+        deriveSelections({
+          config: input.config,
+          metadataSnapshot: createPluginMetadataSnapshotFixture(),
+        }),
+      ).toEqual([{ provider: "ollama", modelId: "qwen3:0.6b", agentId: "main" }]);
+      expect(modelResolver).not.toHaveBeenCalled();
+      return await acquire(input, options);
+    },
+  );
+  mocks.getApiKeyForModel.mockResolvedValue({
+    apiKey: "ollama-local",
+    source: "local marker",
+    mode: "api-key",
+  });
+
+  const result = await acquireSimpleCompletionModelForAgent({
+    cfg: {},
+    agentId: "main",
+    modelRef: "ollama/qwen3:0.6b",
+    modelResolver,
+  });
+
+  try {
+    expect(result).toMatchObject({ selection: { provider: "ollama", modelId: "qwen3:0.6b" } });
+    expect(modelResolver).toHaveBeenCalledOnce();
+  } finally {
+    if (!("error" in result)) {
+      result.release();
+    }
+  }
 });

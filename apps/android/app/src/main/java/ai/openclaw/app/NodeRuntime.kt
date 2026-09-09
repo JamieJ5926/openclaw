@@ -2508,7 +2508,7 @@ class NodeRuntime private constructor(
   private fun mainSessionBinding(sessionKey: String): MainSessionBinding =
     MainSessionBinding(
       key = sessionKey,
-      label = buildAndroidAppSessionLabel(prefs.displayName.value, identityStore.loadOrCreate().deviceId),
+      autoLabel = buildAndroidAppSessionLabel(prefs.displayName.value, identityStore.loadOrCreate().deviceId),
     )
 
   private fun updateMainSessionKey(sessionKey: String): Boolean =

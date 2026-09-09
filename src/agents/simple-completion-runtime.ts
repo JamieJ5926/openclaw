@@ -8,7 +8,6 @@ import { resolveAgentModelPrimaryValue } from "../config/model-input.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { bindModelLlmRuntime } from "../llm/model-runtime-binding.js";
-import type { Model } from "../llm/types.js";
 import type { PluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot.types.js";
 import {
   attachModelProviderRuntimePluginHandle,
@@ -60,6 +59,12 @@ import { protectPreparedProviderRuntimeAuth } from "./provider-runtime-auth-prot
 import { buildAgentRuntimeAuthPlan } from "./runtime-plan/auth.js";
 import { materializePreparedRuntimeModel } from "./runtime-plan/materialize-model.js";
 import { getModelRegistryRuntime } from "./sessions/model-registry-runtime.js";
+import type {
+  AgentSimpleCompletionSelection,
+  PreparedSimpleCompletionModel,
+  PreparedSimpleCompletionModelForAgent,
+  PrepareSimpleCompletionModelForAgentParams,
+} from "./simple-completion.types.js";
 import { resolveUtilityModelRefForAgent } from "./utility-model.js";
 
 type PreparedSimpleCompletionResolverContext = Readonly<{
@@ -93,35 +98,6 @@ function createPreparedSimpleCompletionResolverContext(params: {
 }
 
 type AllowedMissingApiKeyMode = ResolvedProviderAuth["mode"];
-
-export type PreparedSimpleCompletionModel =
-  | {
-      model: Model;
-      auth: ResolvedProviderAuth;
-      /** Non-reversible owner proof captured from the same auth snapshot. */
-      sourceAuthFingerprint?: string;
-    }
-  | {
-      error: string;
-      auth?: ResolvedProviderAuth;
-    };
-
-type AgentSimpleCompletionSelection = {
-  provider: string;
-  modelId: string;
-  /** Shipped SDK return field; new selections carry canonical identity in provider. */
-  runtimeProvider?: string;
-  profileId?: string;
-  agentDir: string;
-};
-
-type PreparedSimpleCompletionModelForAgent =
-  | (Extract<PreparedSimpleCompletionModel, { model: Model }> & {
-      selection: AgentSimpleCompletionSelection;
-    })
-  | (Extract<PreparedSimpleCompletionModel, { error: string }> & {
-      selection?: AgentSimpleCompletionSelection;
-    });
 
 type SimpleCompletionSelectionParams = {
   cfg: OpenClawConfig;
@@ -628,20 +604,8 @@ export async function acquireSimpleCompletionModelForAgent(
 
 /** Without agentId, select global model defaults while the default agent owns execution. */
 export async function prepareSimpleCompletionModelFromRef(
-  requestedParams: {
-    cfg: OpenClawConfig;
+  requestedParams: Omit<PrepareSimpleCompletionModelForAgentParams, "agentId"> & {
     agentId?: string;
-    agentDir?: string;
-    modelRef?: string;
-    useUtilityModel?: boolean;
-    preferredProfile?: string;
-    allowMissingApiKeyModes?: ReadonlyArray<AllowedMissingApiKeyMode>;
-    allowBundledStaticCatalogFallback?: boolean;
-    /** @deprecated no-op; kept for plugin-SDK source compatibility, remove at next SDK-breaking window. */
-    useAsyncModelResolution?: boolean;
-    skipAgentDiscovery?: boolean;
-    bindAuthOwner?: boolean;
-    modelResolver?: typeof resolveModelAsync;
   },
   validateSelection?: ValidateSimpleCompletionSelection,
 ): Promise<PreparedSimpleCompletionModelForAgent> {
@@ -652,13 +616,6 @@ export async function prepareSimpleCompletionModelFromRef(
   const { config: _config, assertCurrent: _assertCurrent, release, ...prepared } = acquired;
   release();
   return prepared;
-}
-
-/** Keep the shipped SDK entry agent-scoped. */
-export async function prepareSimpleCompletionModelForAgent(
-  params: Parameters<typeof prepareSimpleCompletionModelFromRef>[0] & { agentId: string },
-): Promise<PreparedSimpleCompletionModelForAgent> {
-  return await prepareSimpleCompletionModelFromRef(params);
 }
 
 export { completeWithPreparedSimpleCompletionModel } from "./simple-completion-execution.js";
