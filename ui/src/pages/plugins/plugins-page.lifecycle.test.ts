@@ -306,7 +306,7 @@ describe("PluginsPage lifecycle confirmation", () => {
       createContext(initialGateway.gateway, undefined, undefined, config),
       createPluginsRouteData(initialGateway.gateway),
     );
-    page.openInstallWizard(createWizardDetail());
+    page.installWizardController.open(createWizardDetail());
     page.installWizard = {
       ...page.installWizard!,
       pluginId: "community-thing",
@@ -315,7 +315,10 @@ describe("PluginsPage lifecycle confirmation", () => {
 
     provider.setContext(createContext(replacementGateway.gateway, undefined, undefined, config));
     await page.updateComplete;
-    page.patchInstallWizardConfig(["plugins", "entries", "community-thing"], true);
+    page.installWizardController.patchConfiguration(
+      ["plugins", "entries", "community-thing"],
+      true,
+    );
 
     expect(page.installWizard?.stage).toBe("error");
     expect(config.runtimeConfig.patchForm).not.toHaveBeenCalled();
@@ -340,16 +343,16 @@ describe("PluginsPage lifecycle confirmation", () => {
       createContext(gateway.gateway, undefined, undefined, config),
       createPluginsRouteData(gateway.gateway),
     );
-    page.openInstallWizard(createWizardDetail());
+    page.installWizardController.open(createWizardDetail());
     page.installWizard = {
       ...page.installWizard!,
       pluginId: "community-thing",
       stage: "configuring",
     };
 
-    const save = page.saveInstallWizardConfiguration();
+    const save = page.installWizardController.saveConfiguration();
     await queued.promise;
-    page.closeInstallWizard();
+    page.installWizardController.close();
     release.resolve();
     await save;
 

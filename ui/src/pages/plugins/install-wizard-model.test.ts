@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PluginCatalogItem, PluginDiscoveryDetailResult } from "../../lib/plugins/index.ts";
 import {
+  installedPluginForWizard,
   installRequestForDiscoveryDetail,
   installedPluginWizardStage,
 } from "./install-wizard-model.ts";
@@ -82,5 +83,28 @@ describe("plugin install wizard model", () => {
     expect(installedPluginWizardStage({ ...plugin, enabled: true, state: "enabled" })).toBe(
       "success",
     );
+  });
+
+  it("resolves the installed plugin from the wizard's package identity", () => {
+    const plugin = {
+      id: "matrix-runtime",
+      packageName: "matrix",
+      name: "Matrix",
+      installed: true,
+      enabled: false,
+      state: "needs-setup",
+      removable: true,
+    } satisfies PluginCatalogItem;
+    expect(
+      installedPluginForWizard(
+        { plugins: [plugin], diagnostics: [], mutationAllowed: true },
+        {
+          catalogId: "ch_bWF0cml4",
+          detail: detail(),
+          request: { source: "clawhub", packageName: "matrix" },
+          stage: "reconnecting",
+        },
+      ),
+    ).toBe(plugin);
   });
 });

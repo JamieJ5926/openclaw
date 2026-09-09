@@ -182,7 +182,9 @@ export function renderPluginsPage(model: PluginsPageViewModel) {
                         ),
                       installBlockedReason: model.mutationBlockedReason,
                       onInstall: () => {
-                        if (catalogDetail.result) actions.openInstallWizard(catalogDetail.result);
+                        if (catalogDetail.result) {
+                          actions.openInstallWizard(catalogDetail.result);
+                        }
                       },
                     })
                   : html`${renderInstalledPlugins({

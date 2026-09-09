@@ -2,6 +2,7 @@ import type {
   PluginCatalogItem,
   PluginDiscoveryDetailResult,
   PluginInstallRequest,
+  PluginListResult,
 } from "../../lib/plugins/index.ts";
 
 export type PluginInstallWizardStage =
@@ -44,4 +45,24 @@ export function installedPluginWizardStage(
     return "success";
   }
   return plugin.state === "needs-setup" ? "configuring" : "enabling";
+}
+
+export function installedPluginForWizard(
+  catalog: PluginListResult | null,
+  wizard: PluginInstallWizardState | null,
+): PluginCatalogItem | null {
+  if (!wizard) {
+    return null;
+  }
+  const packageName = wizard.request.source === "clawhub" ? wizard.request.packageName : undefined;
+  const officialId = wizard.request.source === "official" ? wizard.request.pluginId : undefined;
+  return (
+    catalog?.plugins.find(
+      (plugin) =>
+        plugin.installed &&
+        (plugin.id === wizard.pluginId ||
+          plugin.id === officialId ||
+          (packageName !== undefined && plugin.packageName === packageName)),
+    ) ?? null
+  );
 }
