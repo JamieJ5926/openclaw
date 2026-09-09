@@ -222,56 +222,11 @@ import UIKit
                     scopes: scopes,
                     capabilities: [GatewayServerCapability.profileBinding.rawValue]),
                 rpcHandler: { frame in
-                    guard let method = frame["method"] as? String else {
-                        Issue.record("Native voice fixture request is missing its method")
-                        return .failure(code: "INVALID_REQUEST", message: "Missing method")
-                    }
-                    #expect(frame["expectedProfileId"] as? String == session.owner.profileID)
-                    let params = frame["params"] as? [String: Any] ?? [:]
-                    switch method {
-                    case "users.self":
-                        return .success(["profile": ["id": session.owner.profileID]])
-                    case "chat.history":
-                        #expect(params["sessionKey"] as? String == session.sessionKey)
-                        #expect(params["agentId"] as? String == session.agentID)
-                        return .success([
-                            "sessionKey": session.sessionKey, "messages": [],
-                            "sessionInfo": ["key": session.sessionKey, "agentId": session.agentID],
-                        ])
-                    case "sessions.list":
-                        return .success(["ts": 0, "count": 0, "sessions": []])
-                    case "models.list":
-                        return .success(["models": []])
-                    case "health":
-                        return .success(["ok": true])
-                    case "sessions.messages.subscribe":
-                        return .success(["subscribed": true, "key": session.sessionKey])
-                    case "chat.metadata":
-                        return .success(["swarmEnabled": false])
-                    case "tasks.list":
-                        return .success(["tasks": []])
-                    case "talk.config":
-                        let includeSecrets = params["includeSecrets"] as? Bool == true
-                        configRequests.append(includeSecrets)
-                        if includeSecrets,
-                           !scopes.contains("operator.admin"), !scopes.contains("operator.talk.secrets")
-                        {
-                            return .failure(
-                                code: "FORBIDDEN",
-                                message: "missing scope: operator.talk.secrets",
-                                details: [
-                                    "code": "MISSING_SCOPE",
-                                    "missingScope": "operator.talk.secrets",
-                                    "requiredScopes": ["operator.read", "operator.talk.secrets"],
-                                ])
-                        }
-                        return .success(["config": ["talk": ["resolved": [
-                            "provider": "google", "config": [String: Any](),
-                        ]]]])
-                    default:
-                        Issue.record("Unexpected native voice fixture request: \(method)")
-                        return .failure(code: "INVALID_REQUEST", message: "Unexpected fixture method: \(method)")
-                    }
+                    Self.nativeVoiceRPCResponse(
+                        for: frame,
+                        session: session,
+                        scopes: scopes,
+                        configRequests: &configRequests)
                 })
             defer { fixture.stop() }
             let model = NodeAppModel(audioAdmissionInitiallyAllowed: false)
@@ -297,6 +252,7 @@ import UIKit
                     url: url,
                     credentials: .init(),
                     connectOptions: options,
+                    sessionBox: nil,
                     onConnected: {},
                     onDisconnected: { _ in },
                     onInvoke: { BridgeInvokeResponse(id: $0.id, ok: true) })
@@ -368,6 +324,65 @@ import UIKit
                 throw error
             }
             await gateway.disconnect()
+        }
+    }
+
+    @MainActor
+    private static func nativeVoiceRPCResponse(
+        for frame: [String: Any],
+        session: OpenClawNativeSessionRef,
+        scopes: [String],
+        configRequests: inout [Bool]) -> NativeGatewayWebSocketFixture.RPCResponse
+    {
+        guard let method = frame["method"] as? String else {
+            Issue.record("Native voice fixture request is missing its method")
+            return .failure(code: "INVALID_REQUEST", message: "Missing method")
+        }
+        #expect(frame["expectedProfileId"] as? String == session.owner.profileID)
+        let params = frame["params"] as? [String: Any] ?? [:]
+        switch method {
+        case "users.self":
+            return .success(["profile": ["id": session.owner.profileID]])
+        case "chat.history":
+            #expect(params["sessionKey"] as? String == session.sessionKey)
+            #expect(params["agentId"] as? String == session.agentID)
+            return .success([
+                "sessionKey": session.sessionKey, "messages": [],
+                "sessionInfo": ["key": session.sessionKey, "agentId": session.agentID],
+            ])
+        case "sessions.list":
+            return .success(["ts": 0, "count": 0, "sessions": []])
+        case "models.list":
+            return .success(["models": []])
+        case "health":
+            return .success(["ok": true])
+        case "sessions.messages.subscribe":
+            return .success(["subscribed": true, "key": session.sessionKey])
+        case "chat.metadata":
+            return .success(["swarmEnabled": false])
+        case "tasks.list":
+            return .success(["tasks": []])
+        case "talk.config":
+            let includeSecrets = params["includeSecrets"] as? Bool == true
+            configRequests.append(includeSecrets)
+            if includeSecrets,
+               !scopes.contains("operator.admin"), !scopes.contains("operator.talk.secrets")
+            {
+                return .failure(
+                    code: "FORBIDDEN",
+                    message: "missing scope: operator.talk.secrets",
+                    details: [
+                        "code": "MISSING_SCOPE",
+                        "missingScope": "operator.talk.secrets",
+                        "requiredScopes": ["operator.read", "operator.talk.secrets"],
+                    ])
+            }
+            return .success(["config": ["talk": ["resolved": [
+                "provider": "google", "config": [String: Any](),
+            ]]]])
+        default:
+            Issue.record("Unexpected native voice fixture request: \(method)")
+            return .failure(code: "INVALID_REQUEST", message: "Unexpected fixture method: \(method)")
         }
     }
 

@@ -317,6 +317,7 @@ struct SwiftUIRenderSmokeTests {
                     url: fixture.url(),
                     credentials: .init(),
                     connectOptions: options,
+                    sessionBox: nil,
                     onConnected: {},
                     onDisconnected: { _ in },
                     onInvoke: { BridgeInvokeResponse(id: $0.id, ok: true) })
