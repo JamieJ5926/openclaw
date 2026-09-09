@@ -224,10 +224,6 @@ class PluginsPage extends OpenClawLightDomElement {
         const completedSave = this.configAutoSaveStatus === "saving" && nextStatus === "saved";
         this.configAutoSaveStatus = nextStatus;
         this.requestUpdate();
-        if (this.installWizard?.stage === "configuring" && runtimeConfig.state.connected) {
-          void runtimeConfig.ensureLoaded();
-          void runtimeConfig.ensureSchemaLoaded();
-        }
         if (completedSave && this.pluginConfigEditPending) {
           this.pluginConfigEditPending = false;
           void this.refreshCatalog();
@@ -693,6 +689,10 @@ class PluginsPage extends OpenClawLightDomElement {
         reloadConfig: () => {
           this.pluginConfigEditPending = false;
           void this.context.runtimeConfig.refresh({ discardPendingChanges: true });
+        },
+        retryConfig: () => {
+          void this.context.runtimeConfig.retry();
+          void this.context.runtimeConfig.refreshSchema();
         },
         closeSettingsDetail: (parentRoute) => {
           this.detail = null;

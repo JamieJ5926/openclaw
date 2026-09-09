@@ -36,6 +36,7 @@ const updateScreenshots = process.env.OPENCLAW_UPDATE_E2E_SCREENSHOTS === "1";
 const artifactDir = path.resolve(process.cwd(), ".artifacts/control-ui-e2e/plugins");
 const desktopViewport = { height: 1000, width: 1440 };
 const pluginMethods = [
+  "gateway.restart.request",
   "plugins.list",
   "plugins.inspect",
   "plugins.search",
@@ -501,6 +502,7 @@ async function newContext(viewport = desktopViewport): Promise<BrowserContext> {
 
 function pluginMethodResponses() {
   return {
+    "gateway.restart.request": { ok: true, status: "scheduled" },
     "config.get": configSnapshot(false),
     "plugins.list": initialInventory,
     "plugins.inspect": {
