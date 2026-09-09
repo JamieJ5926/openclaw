@@ -44,6 +44,21 @@ always-on group chatter -> user request, or room event when configured
 
 ## Visible replies
 
+Messages explicitly addressed to another identified bot do not start an OpenClaw
+turn, even when `requireMention: false`. A native mention of OpenClaw in the same
+message still allows it to respond. Reply context, wake words, and room-wide
+broadcasts do not override another bot's address.
+
+This applies to Discord, Feishu/Lark, Google Chat, Microsoft Teams, Slack, and
+Telegram. Matrix recognizes other bot accounts configured in the same Gateway;
+WhatsApp recognizes the bot identities supplied by its transport. Google Chat
+needs a canonical `botUser` to distinguish its own bot from others. Channels
+without recipient bot identity keep their existing activation behavior.
+
+Existing `ignoreOtherMentions` options on Discord and Slack additionally filter
+mentions of people and roles. Bare commands with no recipient, such as `/edit`,
+remain subject to the room's normal activation rules.
+
 For normal group/channel requests, OpenClaw defaults to `messages.groupChat.visibleReplies: "automatic"`: the final assistant text posts to the room as the visible reply.
 
 Use `messages.groupChat.visibleReplies: "message_tool"` when a shared room should let the agent decide when to speak by calling `message(action=send)`. This works best with tool-reliable models (for example GPT-5.6 Sol). If the model misses the tool and returns substantive final text, OpenClaw keeps that text private instead of posting it to the room.

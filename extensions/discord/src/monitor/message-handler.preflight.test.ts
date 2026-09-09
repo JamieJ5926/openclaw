@@ -166,13 +166,13 @@ function createThreadClient(params: { threadId: string; parentId: string }): Dis
   } as unknown as DiscordClient;
 }
 
-function createDmClient(channelId: string): DiscordClient {
+function createDmClient(channelId: string, type: ChannelType = ChannelType.DM): DiscordClient {
   return {
     fetchChannel: async (id: string) => {
       if (id === channelId) {
         return {
           id: channelId,
-          type: ChannelType.DM,
+          type,
         };
       }
       return null;
@@ -1500,7 +1500,7 @@ describe("preflightDiscordMessage", () => {
     contents: [string, string];
     mentions: [boolean, boolean];
     patterns: string[];
-    accepted: boolean;
+    expectedIds: Array<string | null>;
     botId?: string;
     hydrate?: { content: string; native: boolean };
     expectedText?: string;
@@ -1509,31 +1509,31 @@ describe("preflightDiscordMessage", () => {
       contents: ["    openclaw", "    openclaw"],
       mentions: [true, true],
       patterns: ["openclaw"],
-      accepted: false,
+      expectedIds: [null],
     },
     {
       contents: ["<@openclaw-bot> take over", "continuation"],
       mentions: [true, false],
       patterns: [],
-      accepted: true,
+      expectedIds: ["m-batch-1"],
     },
     {
       contents: ["<@openclaw-bot> without native mention metadata", "reply ping"],
       mentions: [false, true],
       patterns: [],
-      accepted: false,
+      expectedIds: [null],
     },
     {
       contents: ["~~~\nexample", "openclaw"],
       mentions: [true, true],
       patterns: ["^openclaw$"],
-      accepted: true,
+      expectedIds: ["m-batch-1"],
     },
     {
       contents: ["prior context", "<@123456789012345678> missing metadata"],
       mentions: [false, false],
       patterns: [],
-      accepted: true,
+      expectedIds: ["m-batch-1"],
       botId: "123456789012345678",
       hydrate: { content: "<@123456789012345678> take over", native: true },
       expectedText: "prior context\n@OpenClaw take over",
@@ -1542,7 +1542,7 @@ describe("preflightDiscordMessage", () => {
       contents: ["prior context", "<@123456789012345678> missing content"],
       mentions: [false, false],
       patterns: ["^openclaw take over$"],
-      accepted: true,
+      expectedIds: ["m-batch-1"],
       botId: "123456789012345678",
       hydrate: { content: "openclaw take over", native: false },
       expectedText: "prior context\nopenclaw take over",
@@ -1553,7 +1553,7 @@ describe("preflightDiscordMessage", () => {
       contents,
       mentions,
       patterns,
-      accepted,
+      expectedIds,
       botId = "openclaw-bot",
       hydrate,
       expectedText,
@@ -1623,7 +1623,8 @@ describe("preflightDiscordMessage", () => {
         });
         return createGuildEvent({ channelId, guildId, author: message.author, message });
       });
-      const evaluated = createDeferred<DiscordPreflightResult | null>();
+      const evaluated = createDeferred<Array<DiscordPreflightResult | null>>();
+      const results: Array<DiscordPreflightResult | null> = [];
       const dispatcher = createDiscordMessageDispatcher({
         ...createPreflightArgs({
           cfg: {
@@ -1643,7 +1644,10 @@ describe("preflightDiscordMessage", () => {
         testing: {
           preflightDiscordMessage: async (params) => {
             const result = await preflightDiscordMessage(params);
-            evaluated.resolve(result);
+            results.push(result);
+            if (results.length === expectedIds.length) {
+              evaluated.resolve(results);
+            }
             return result;
           },
           processDiscordMessage: async () => {},
@@ -1654,14 +1658,10 @@ describe("preflightDiscordMessage", () => {
         await dispatcher(event, client);
       }
       await vi.advanceTimersByTimeAsync(20);
-      const result = await evaluated.promise;
-      if (accepted) {
-        expect(expectPreflightResult(result).message.id).toBe("m-batch-1");
-        if (expectedText) {
-          expect(expectPreflightResult(result).messageText).toBe(expectedText);
-        }
-      } else {
-        expect(result).toBeNull();
+      const evaluatedResults = await evaluated.promise;
+      expect(evaluatedResults.map((result) => result?.message.id ?? null)).toEqual(expectedIds);
+      if (expectedText) {
+        expect(evaluatedResults.find((result) => result !== null)?.messageText).toBe(expectedText);
       }
     },
   );
@@ -2380,6 +2380,8 @@ describe("preflightDiscordMessage", () => {
       id: "m-current-bot-reply",
       channelId,
       content: "following up",
+      type: MessageType.Reply,
+      mentionedUsers: [{ id: "openclaw-bot", bot: true }],
       author: { id: "user-1", bot: false, username: "Alice" },
       referencedMessage: createDiscordMessage({
         id: "m-current-bot",
@@ -2445,6 +2447,8 @@ describe("preflightDiscordMessage", () => {
       id: "m-webhook-bot-reply",
       channelId,
       content: "following up",
+      type: MessageType.Reply,
+      mentionedUsers: [{ id: "webhook-bot", bot: true }],
       author: { id: "user-1", bot: false, username: "Alice" },
       referencedMessage: createDiscordMessage({
         id: "m-webhook-bot-target",
@@ -2461,7 +2465,7 @@ describe("preflightDiscordMessage", () => {
     ).toBe("m-webhook-bot-reply");
   });
 
-  it("keeps replies to another bot when ignoreOtherMentions=false", async () => {
+  it("drops replies to another bot even when ignoreOtherMentions=false", async () => {
     const channelId = "channel-other-bot-reply-open";
     const guildId = "guild-other-bot-reply-open";
     const message = createDiscordMessage({
@@ -2485,8 +2489,136 @@ describe("preflightDiscordMessage", () => {
       guildEntries: { [guildId]: { requireMention: false, ignoreOtherMentions: false } },
     });
 
-    expect(expectPreflightResult(result).message.id).toBe("m-other-bot-reply-open");
+    expect(result).toBeNull();
   });
+
+  it.each([
+    {
+      name: "native other bot",
+      otherIsBot: true,
+      requireMention: false,
+      reply: false,
+      self: false,
+      accepted: false,
+    },
+    {
+      name: "native other bot over wake word",
+      otherIsBot: true,
+      requireMention: true,
+      reply: false,
+      self: false,
+      accepted: false,
+    },
+    {
+      name: "native other bot over everyone broadcast",
+      otherIsBot: true,
+      requireMention: true,
+      reply: false,
+      self: false,
+      everyone: true,
+      accepted: false,
+    },
+    {
+      name: "native other bot over reply notification",
+      otherIsBot: true,
+      requireMention: false,
+      reply: true,
+      self: false,
+      accepted: false,
+    },
+    {
+      name: "explicit self alongside other bot",
+      otherIsBot: true,
+      requireMention: true,
+      reply: false,
+      self: true,
+      accepted: true,
+    },
+    {
+      name: "explicit self in reply alongside other bot",
+      otherIsBot: true,
+      requireMention: true,
+      reply: true,
+      self: true,
+      accepted: true,
+    },
+    {
+      name: "human recipient in open room",
+      otherIsBot: false,
+      requireMention: false,
+      reply: false,
+      self: false,
+      accepted: true,
+    },
+  ])("resolves $name before implicit activation", async (testCase) => {
+    const channelId = "channel-native-address";
+    const guildId = "guild-native-address";
+    const botId = "openclaw-bot";
+    const message = createDiscordMessage({
+      id: "m-native-address",
+      channelId,
+      content: `${testCase.everyone ? "@everyone " : ""}${testCase.self ? `<@${botId}> ` : ""}<@other-recipient> helper`,
+      author: { id: "user-1", bot: false },
+      type: testCase.reply ? MessageType.Reply : MessageType.Default,
+      mentionedEveryone: testCase.everyone,
+      mentionedUsers: [
+        { id: "other-recipient", bot: testCase.otherIsBot },
+        ...(testCase.self || testCase.reply ? [{ id: botId, bot: true }] : []),
+      ],
+      ...(testCase.reply && {
+        referencedMessage: createDiscordMessage({
+          id: "m-current-bot",
+          channelId,
+          content: "earlier answer",
+          author: { id: botId, bot: true },
+        }),
+      }),
+    });
+    const result = await runGuildPreflight({
+      channelId,
+      guildId,
+      message,
+      discordConfig: {},
+      cfg: { ...DEFAULT_PREFLIGHT_CFG, messages: { groupChat: { mentionPatterns: ["helper"] } } },
+      guildEntries: { [guildId]: { requireMention: testCase.requireMention } },
+    });
+    if (testCase.accepted) {
+      expect(expectPreflightResult(result).message.id).toBe(message.id);
+    } else {
+      expect(result).toBeNull();
+    }
+  });
+
+  it.each([false, true])(
+    "keeps group DM bot addressing separate with self mention=%s",
+    async (self) => {
+      const channelId = "group-dm-native-address";
+      const message = createDiscordMessage({
+        id: "m-group-dm-native-address",
+        channelId,
+        content: self ? "<@openclaw-bot> <@other-bot> hello" : "<@other-bot> hello",
+        author: { id: "user-1", bot: false },
+        mentionedUsers: [
+          { id: "other-bot", bot: true },
+          ...(self ? [{ id: "openclaw-bot", bot: true }] : []),
+        ],
+      });
+      const client = createDmClient(channelId, ChannelType.GroupDM);
+      const result = await preflightDiscordMessage(
+        createPreflightArgs({
+          cfg: DEFAULT_PREFLIGHT_CFG,
+          discordConfig: {},
+          data: { channel_id: channelId, author: message.author, message } as DiscordMessageEvent,
+          client,
+        }),
+      );
+      if (self) {
+        expect(expectPreflightResult(result).message.id).toBe(message.id);
+      } else {
+        expect(result).toBeNull();
+      }
+    },
+  );
 
   it("records local image media for skipped mention-gated guild history", async () => {
     const channelId = "channel-history-image";

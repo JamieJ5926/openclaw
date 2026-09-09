@@ -62,7 +62,7 @@ export function createDiscordMessage(params: {
     bot: boolean;
     username?: string;
   };
-  mentionedUsers?: Array<{ id: string }>;
+  mentionedUsers?: Array<{ id: string; bot?: boolean }>;
   mentionedEveryone?: boolean;
   messageReference?: import("../internal/discord.js").Message["messageReference"];
   referencedMessage?: import("../internal/discord.js").Message;

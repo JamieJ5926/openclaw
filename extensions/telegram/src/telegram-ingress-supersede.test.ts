@@ -46,7 +46,12 @@ function messageUpdate(params: {
   isForum?: boolean;
   isDirectMessages?: boolean;
   directMessagesTopicId?: number;
-  entities?: Array<{ type: string; offset: number; length: number }>;
+  entities?: Array<{
+    type: string;
+    offset: number;
+    length: number;
+    user?: { id: number; is_bot: boolean; first_name: string };
+  }>;
 }) {
   return {
     update_id: params.updateId,
@@ -162,6 +167,139 @@ describe("telegram ingress supersede policy", () => {
         ),
       ),
     ).toBe(false);
+  });
+
+  it.each([
+    { name: "other bot reply", text: "stop", replyId: 700, expected: false },
+    { name: "own bot reply", text: "stop", replyId: 600, expected: true },
+    {
+      name: "album awaiting combined caption",
+      text: "",
+      replyId: 600,
+      mediaGroupId: "recipient-album",
+      expected: false,
+    },
+    {
+      name: "unresolved username before admission",
+      text: "/new @anotherbot",
+      replyId: 600,
+      entities: [{ type: "mention", offset: 5, length: 11 }],
+      expected: false,
+    },
+    {
+      name: "unknown own identity",
+      text: "stop",
+      replyId: 700,
+      noIdentity: true,
+      expected: false,
+    },
+    { name: "channel sender", text: "stop", replyId: 700, senderChat: true, expected: true },
+    { name: "private chat", text: "stop", replyId: 700, privateChat: true, expected: true },
+    {
+      name: "own qualified command",
+      text: "/stop@mybot",
+      replyId: 700,
+      entities: [{ type: "bot_command", offset: 0, length: 11 }],
+      expected: true,
+    },
+    {
+      name: "native self mention",
+      text: "/new @mybot",
+      replyId: 700,
+      entities: [{ type: "mention", offset: 5, length: 6 }],
+      expected: true,
+    },
+    {
+      name: "native self identity",
+      text: "/new Assistant",
+      replyId: 700,
+      entities: [
+        {
+          type: "text_mention",
+          offset: 5,
+          length: 9,
+          user: { id: 600, is_bot: true, first_name: "Assistant" },
+        },
+      ],
+      expected: true,
+    },
+    {
+      name: "self name in code",
+      text: "/new @mybot",
+      replyId: 700,
+      entities: [{ type: "code", offset: 5, length: 6 }],
+      expected: false,
+    },
+    {
+      name: "self name without native mention",
+      text: "/new @mybot",
+      replyId: 700,
+      expected: false,
+    },
+  ])("preserves recipient ownership before supersede: $name", async (testCase) => {
+    const update = messageUpdate({
+      updateId: 2,
+      text: testCase.text,
+      senderId: OWNER_ID,
+      chatId: testCase.privateChat ? Number(OWNER_ID) : -1001,
+      chatType: testCase.privateChat ? "private" : "supergroup",
+      entities: testCase.entities,
+    });
+    const addressedUpdate = {
+      ...update,
+      message: {
+        ...update.message,
+        ...(testCase.mediaGroupId ? { media_group_id: testCase.mediaGroupId } : {}),
+        reply_to_message: {
+          from: { id: testCase.replyId, is_bot: true },
+          ...(testCase.senderChat ? { sender_chat: { id: -1002, type: "channel" } } : {}),
+        },
+      },
+    };
+    const recipientAuth = {
+      ...auth,
+      cfg: {
+        channels: {
+          telegram: {
+            allowFrom: [OWNER_ID],
+            groupAllowFrom: [OWNER_ID],
+            groupPolicy: "open" as const,
+            dmPolicy: "allowlist" as const,
+          },
+        },
+      },
+      botUsername: "mybot",
+      ...(testCase.noIdentity ? {} : { botUserId: 600 }),
+    };
+    const predicate = createShouldSupersedeTelegramSpooledPending(recipientAuth);
+    for (const pending of [
+      messageUpdate({ updateId: 1, text: "prior", senderId: OWNER_ID }),
+      { update_id: 1, message_reaction: {} },
+    ]) {
+      expect(await predicate(record("2", addressedUpdate), claim("1", pending))).toBe(
+        testCase.expected,
+      );
+    }
+  });
+
+  it("preserves callback controls without treating the callback message as a new address", async () => {
+    const callback = {
+      update_id: 2,
+      callback_query: {
+        data: "/stop",
+        from: { id: Number(OWNER_ID) },
+        message: {
+          chat: { id: Number(OWNER_ID), type: "private" },
+          reply_to_message: { from: { id: 700, is_bot: true } },
+        },
+      },
+    };
+    expect(
+      await shouldSupersede(
+        record("2", callback),
+        claim("1", messageUpdate({ updateId: 1, text: "prior", senderId: OWNER_ID })),
+      ),
+    ).toBe(true);
   });
 
   it("does not supersede bare slash prefixes that are not recognized commands", async () => {

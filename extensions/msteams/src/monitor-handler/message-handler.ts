@@ -196,7 +196,8 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
     const mentionDecision = resolveInboundMentionDecision({
       facts: {
         canDetectMention: true,
-        wasMentioned: params.wasMentioned,
+        wasMentioned: params.explicitAddress === "self",
+        explicitAddress: params.explicitAddress,
         implicitMentionKinds: params.implicitMentionKinds,
       },
       policy: {
@@ -210,8 +211,9 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
 
     if (!isDirectMessage) {
       const mentioned = mentionDecision.effectiveWasMentioned;
-      if (requireMention && mentionDecision.shouldSkip) {
-        log.debug?.("skipping message (mention required)", {
+      if (mentionDecision.shouldSkip) {
+        log.debug?.("skipping message", {
+          reason: mentionDecision.skipReason,
           teamId,
           channelId,
           requireMention,
@@ -309,6 +311,10 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
       return `msteams:${appId}:${conversationId}:${senderId}`;
     },
     shouldDebounce: (entry) => {
+      // Keep another bot's request out of a batch that can activate this bot.
+      if (entry.explicitAddress === "other") {
+        return false;
+      }
       if (!entry.text.trim()) {
         return false;
       }
@@ -341,14 +347,16 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
                   .map((entry) => entry.rawText)
                   .filter(Boolean)
                   .join("\n");
-                const wasMentioned = entries.some((entry) => entry.wasMentioned);
+                const explicitAddress = entries.some((entry) => entry.explicitAddress === "self")
+                  ? "self"
+                  : undefined;
                 const implicitMentionKinds = entries.flatMap((entry) => entry.implicitMentionKinds);
                 await handleTeamsMessageNow({
                   context: last.context,
                   rawText: combinedRawText,
                   text: combinedText,
                   attachments: [],
-                  wasMentioned,
+                  explicitAddress,
                   implicitMentionKinds,
                   turnAdoptionLifecycle: admissionLifecycle,
                 });

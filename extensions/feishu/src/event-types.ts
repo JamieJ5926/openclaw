@@ -30,6 +30,7 @@ export type FeishuMessageEvent = {
         union_id?: string;
       };
       name: string;
+      mentioned_type?: string;
       tenant_key?: string;
     }>;
   };

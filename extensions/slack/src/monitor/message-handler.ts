@@ -12,7 +12,7 @@ import type { ResolvedSlackAccount } from "../accounts.js";
 import type { SlackSendIdentity } from "../send.js";
 import type { SlackMessageEvent } from "../types.js";
 import { hasSlackMessageTableBlock } from "./block-text.js";
-import { stripSlackMentionsForCommandDetection } from "./commands.js";
+import { hasSlackNativeMention, stripSlackMentionsForCommandDetection } from "./commands.js";
 import type { SlackMonitorContext } from "./context.js";
 import type { SlackEventScope } from "./event-scope.js";
 import type { SlackIngressTurnLifecycle } from "./ingress.js";
@@ -65,12 +65,18 @@ function isRetryableSlackInboundError(error: unknown): boolean {
   );
 }
 
-function shouldDebounceSlackMessage(message: SlackMessageEvent, cfg: SlackMonitorContext["cfg"]) {
+function shouldDebounceSlackMessage(
+  message: SlackMessageEvent,
+  cfg: SlackMonitorContext["cfg"],
+  botUserId: string,
+) {
   const text = message.text ?? "";
   const textForCommandDetection = stripSlackMentionsForCommandDetection(text);
   return shouldDebounceTextInbound({
     text: textForCommandDetection,
     cfg,
+    // Self mentions can collect plain continuations; foreign recipients stay separate.
+    allowDebounce: !hasSlackNativeMention(text, botUserId),
     hasMedia:
       Boolean(message.files && message.files.length > 0) || hasSlackMessageTableBlock(message),
   });
@@ -128,7 +134,7 @@ export function createSlackMessageHandler(params: {
     buildKey: (entry) =>
       buildSlackDebounceKey(entry.message, ctx.accountId, entry.opts.eventScope?.teamId),
     shouldDebounce: (entry) =>
-      !entry.opts.eventScope && shouldDebounceSlackMessage(entry.message, ctx.cfg),
+      !entry.opts.eventScope && shouldDebounceSlackMessage(entry.message, ctx.cfg, ctx.botUserId),
     onFlush: (entries, createFlush) =>
       createFlush({
         lifecycle: {
@@ -420,7 +426,9 @@ export function createSlackMessageHandler(params: {
     // Pending-key tracking and enqueue must agree even if flushing another key awaits.
     const debounceMs = resolveInboundDebounceMs({ cfg: readConfig(), channel: "slack" });
     const canDebounce =
-      !opts.eventScope && debounceMs > 0 && shouldDebounceSlackMessage(resolvedMessage, ctx.cfg);
+      !opts.eventScope &&
+      debounceMs > 0 &&
+      shouldDebounceSlackMessage(resolvedMessage, ctx.cfg, ctx.botUserId);
     if (!canDebounce && conversationKey) {
       const pendingKeys = pendingTopLevelDebounceKeys.get(conversationKey);
       if (pendingKeys && pendingKeys.size > 0) {

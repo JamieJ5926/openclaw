@@ -37,6 +37,7 @@ import {
   recordTelegramMessageProcessingResult,
 } from "./bot-processing-outcome.js";
 import { resolveMedia } from "./bot/delivery.resolve-media.js";
+import { prepareTelegramMessageAddress } from "./bot/explicit-address.js";
 import {
   buildTelegramThreadParams,
   getTelegramTextParts,
@@ -177,6 +178,11 @@ export function createTelegramInboundProcessing({
       return abortControlAuthorized;
     };
 
+    // Albums own one combined caption; their recipient is prepared after collection.
+    if (!msg.media_group_id) {
+      await prepareTelegramMessageAddress(ctx, (target) => bot.api.getChat(target));
+    }
+
     if (
       await handleTextFragment({
         ctx,
@@ -217,6 +223,15 @@ export function createTelegramInboundProcessing({
       })
     ) {
       return { kind: "buffered", buffer: "media-group" };
+    }
+
+    if (ctx.recipient?.shouldSkip) {
+      // Ingress has already recorded the message for room/reply context.
+      // Settle before downloads or error warnings can speak for another bot.
+      logger.info({ chatId, reason: "addressed-to-other" }, "skipping Telegram message");
+      recordTelegramMessageProcessingResult({ kind: "skipped" });
+      releaseDispatchDedupeClaims(dispatchDedupeClaims);
+      return { kind: "ignored" };
     }
 
     const mediaDisposition = await resolveUnaddressedGroupMediaDisposition({

@@ -79,18 +79,27 @@ function resolveGoogleChatGroupConfig(params: {
 function extractMentionInfo(annotations: GoogleChatAnnotation[], botUser?: string | null) {
   const mentionAnnotations = annotations.filter((entry) => entry.type === "USER_MENTION");
   const hasAnyMention = mentionAnnotations.length > 0;
-  const botTargets = new Set(["users/app", botUser?.trim()].filter(Boolean) as string[]);
+  const botId = normalizeGoogleChatUserId(botUser);
   const wasMentioned = mentionAnnotations.some((entry) => {
-    const userName = entry.userMention?.user?.name;
-    if (!userName) {
-      return false;
-    }
-    if (botTargets.has(userName)) {
-      return true;
-    }
-    return normalizeGoogleChatUserId(userName) === "app";
+    const userId = normalizeGoogleChatUserId(entry.userMention?.user?.name);
+    return userId === "app" || (Boolean(botId) && userId === botId);
   });
-  return { hasAnyMention, wasMentioned };
+  // The app alias cannot identify which numeric bot user belongs to this installation.
+  const addressedToOther =
+    botId &&
+    botId !== "app" &&
+    mentionAnnotations.some((entry) => {
+      const user = entry.userMention?.user;
+      return (
+        user?.type === "BOT" && Boolean(user.name) && normalizeGoogleChatUserId(user.name) !== botId
+      );
+    });
+  const explicitAddress: "self" | "other" | undefined = wasMentioned
+    ? "self"
+    : addressedToOther
+      ? "other"
+      : undefined;
+  return { hasAnyMention, wasMentioned, explicitAddress };
 }
 
 const warnedDeprecatedUsersEmailAllowFrom = new Set<string>();
@@ -230,6 +239,7 @@ export async function applyGoogleChatInboundAccessPolicy(params: {
       hasControlCommand: core.channel.text.hasControlCommand(rawBody, config),
       wasMentioned: mentionInfo.wasMentioned,
       hasAnyMention: mentionInfo.hasAnyMention,
+      explicitAddress: mentionInfo.explicitAddress,
     };
   })();
   const command = {
@@ -315,6 +325,7 @@ export async function applyGoogleChatInboundAccessPolicy(params: {
             canDetectMention: true,
             wasMentioned: groupActivation.wasMentioned,
             hasAnyMention: groupActivation.hasAnyMention,
+            explicitAddress: groupActivation.explicitAddress,
             implicitMentionKinds: [],
           },
         }),
@@ -355,7 +366,9 @@ export async function applyGoogleChatInboundAccessPolicy(params: {
   if (isGroup && resolvedAccess.activationAccess.ran) {
     effectiveWasMentioned = resolvedAccess.activationAccess.effectiveWasMentioned;
     if (resolvedAccess.activationAccess.shouldSkip) {
-      logVerbose(`drop group message (mention required, space=${spaceId})`);
+      logVerbose(
+        `drop group message (reason=${resolvedAccess.activationAccess.reasonCode}, space=${spaceId})`,
+      );
       return { ok: false };
     }
   }

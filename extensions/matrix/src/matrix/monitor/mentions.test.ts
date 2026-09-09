@@ -119,10 +119,11 @@ describe("resolveMentions", () => {
           text: body,
           mentionRegexes: [],
         };
-        const expected = { wasMentioned: true, hasExplicitMention: true };
-
-        expect(resolveMentions(params)).toEqual(expected);
-        expect(resolveMentions(params)).toEqual(expected);
+        expect(resolveMentions(params)).toEqual({
+          wasMentioned: true,
+          hasExplicitMention: true,
+          explicitAddress: "self",
+        });
       },
     );
 

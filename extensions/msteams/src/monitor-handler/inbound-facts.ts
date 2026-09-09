@@ -14,7 +14,7 @@ import {
   htmlToPlainText,
   normalizeMSTeamsConversationId,
   stripMSTeamsMentionTags,
-  wasMSTeamsBotMentioned,
+  resolveMSTeamsExplicitAddress,
 } from "../inbound.js";
 import type { MSTeamsIngressLifecycle } from "../msteams-ingress.js";
 import type { MSTeamsTurnContext } from "../sdk-types.js";
@@ -43,7 +43,7 @@ export type MSTeamsDebounceEntry = {
   rawText: string;
   text: string;
   attachments: MSTeamsAttachmentLike[];
-  wasMentioned: boolean;
+  explicitAddress?: "self" | "other";
   implicitMentionKinds: Array<"reply_to_bot">;
   turnAdoptionLifecycle?: MSTeamsIngressLifecycle;
 };
@@ -76,7 +76,7 @@ export async function prepareMSTeamsDebounceEntry(params: {
     rawText,
     text,
     attachments,
-    wasMentioned: wasMSTeamsBotMentioned(activity),
+    explicitAddress: resolveMSTeamsExplicitAddress(activity),
     implicitMentionKinds,
     turnAdoptionLifecycle: params.turnAdoptionLifecycle,
   };

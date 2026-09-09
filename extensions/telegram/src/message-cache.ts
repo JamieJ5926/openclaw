@@ -5,11 +5,7 @@ import { parseStrictPositiveInteger } from "openclaw/plugin-sdk/number-runtime";
 import type { MsgContext } from "openclaw/plugin-sdk/reply-runtime";
 import { logVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
-import {
-  resolveTelegramPrimaryMedia,
-  resolveTelegramRichMessageBody,
-  type TelegramMediaKind,
-} from "./bot/body-helpers.js";
+import { resolveTelegramPrimaryMedia, type TelegramMediaKind } from "./bot/body-helpers.js";
 import {
   buildSenderName,
   extractTelegramLocation,
@@ -17,6 +13,7 @@ import {
   normalizeForwardedContext,
   type TelegramThreadSpec,
 } from "./bot/helpers.js";
+import { resolveTelegramRichMessageBody } from "./bot/rich-message.js";
 import {
   isTelegramMessageCacheSourceMessage,
   parseTelegramResolvedMedia,

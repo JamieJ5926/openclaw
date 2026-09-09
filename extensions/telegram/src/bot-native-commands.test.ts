@@ -82,6 +82,50 @@ describe("registerTelegramNativeCommands", () => {
     pluginCommandHandler.mockClear();
   });
 
+  it.each(["fast", "recipient_probe"])(
+    "honors another bot's reply recipient before native %s execution",
+    async (command) => {
+      registerTestPluginCommand({ name: "recipient_probe", description: "Recipient probe" });
+      const { bot, commandHandlers, sendMessage } = createCommandBot();
+      const cfg: OpenClawConfig = {
+        channels: { telegram: { groupPolicy: "open", groupAllowFrom: ["200"] } },
+      };
+      registerTelegramNativeCommands(createNativeCommandTestParams(cfg, { bot }));
+      const handler = commandHandlers.get(command);
+      if (!handler) {
+        throw new Error(`missing command handler: ${command}`);
+      }
+      const context = createPrivateCommandContext();
+      const message = {
+        ...context.message,
+        chat: { id: -1001, type: "supergroup" },
+        text: `/${command}`,
+        entities: [{ type: "bot_command", offset: 0, length: command.length + 1 }],
+        reply_to_message: { from: { id: 700, is_bot: true, first_name: "Other" } },
+      };
+      const me = { id: 600, is_bot: true, first_name: "OpenClaw", username: "openclaw_bot" };
+      await handler({ ...context, me, message });
+      expect(pluginCommandHandler).not.toHaveBeenCalled();
+      expect(sendMessage).not.toHaveBeenCalled();
+
+      const text = `/${command}@openclaw_bot`;
+      await handler({
+        ...context,
+        me,
+        message: {
+          ...message,
+          text,
+          entities: [{ type: "bot_command", offset: 0, length: text.length }],
+        },
+      });
+      if (command === "recipient_probe") {
+        expect(pluginCommandHandler).toHaveBeenCalledOnce();
+      } else {
+        expect(sendMessage).toHaveBeenCalledOnce();
+      }
+    },
+  );
+
   it("scopes skill commands when account binding exists", () => {
     const cfg: OpenClawConfig = {
       agents: {

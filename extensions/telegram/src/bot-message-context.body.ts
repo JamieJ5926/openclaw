@@ -45,12 +45,9 @@ import {
   buildSenderName,
   extractTelegramLocation,
   getTelegramTextParts,
-  hasLeadingBotCommandAddressedToOtherBot,
   hasBotMentionInText,
   hasBotMention,
   resolveTelegramPrimaryMedia,
-  resolveTelegramRichMessagePlaceholder,
-  resolveTelegramRichMessageText,
 } from "./bot/body-helpers.js";
 import {
   buildTelegramGroupPeerId,
@@ -58,6 +55,10 @@ import {
   type TelegramThreadSpec,
 } from "./bot/helpers.js";
 import { renderTelegramTextEntities } from "./bot/inbound-text-entities.js";
+import {
+  resolveTelegramRichMessagePlaceholder,
+  resolveTelegramRichMessageText,
+} from "./bot/rich-message.js";
 import type { TelegramContext } from "./bot/types.js";
 import { isTelegramForumServiceMessage } from "./forum-service-message.js";
 import { resolveTelegramGroupIngestEnabled } from "./group-config-helpers.js";
@@ -195,15 +196,7 @@ export async function resolveTelegramInboundBody(params: {
     providerPolicy: providerMentionPatterns,
   });
   const messageTextParts = getTelegramTextParts(msg);
-  if (botUsername && hasLeadingBotCommandAddressedToOtherBot(msg, botUsername)) {
-    logInboundDrop({
-      log: logVerbose,
-      channel: "telegram",
-      reason: "command addressed to another bot",
-      target: senderId ?? "unknown",
-    });
-    return null;
-  }
+  const explicitAddress = primaryCtx.recipient?.explicitAddress;
   const allowForCommands = isGroup ? effectiveGroupAllow : effectiveDmAllow;
   const useAccessGroups = true;
   const hasControlCommandInMessage = hasControlCommand(messageTextParts.text, cfg, {
@@ -283,6 +276,7 @@ export async function resolveTelegramInboundBody(params: {
 
   let preflightTranscript: string | undefined;
   const needsPreflightTranscription =
+    explicitAddress !== "other" &&
     hasAudio &&
     materializedAudioIndex >= 0 &&
     !hasUserText &&
@@ -323,10 +317,12 @@ export async function resolveTelegramInboundBody(params: {
     rawBody || formattedStickerDescription || formatMediaPlaceholderText(nativeMediaFacts);
 
   const hasAnyMention = messageTextParts.entities.some((ent) => ent.type === "mention");
-  const explicitlyMentioned = botUsername
-    ? hasBotMention(msg, botUsername) ||
-      (richText ? hasBotMentionInText(richText, botUsername) : false)
-    : false;
+  const explicitlyMentioned =
+    explicitAddress === "self" ||
+    (botUsername
+      ? hasBotMention(msg, botUsername) ||
+        (richText ? hasBotMentionInText(richText, botUsername) : false)
+      : false);
   const computedWasMentioned = matchesMentionWithExplicit({
     text: messageTextParts.text || richText || "",
     mentionRegexes,
@@ -363,6 +359,7 @@ export async function resolveTelegramInboundBody(params: {
     facts: {
       canDetectMention,
       wasMentioned,
+      explicitAddress,
       hasAnyMention,
       implicitMentionKinds: isGroup ? implicitMentionKinds : [],
     },
@@ -389,8 +386,15 @@ export async function resolveTelegramInboundBody(params: {
     hasAbortRequest: isAbortRequestText(rawBody, { botUsername }),
     commandSource,
   });
-  if (isGroup && requireMention && canDetectMention && mentionDecision.shouldSkip) {
-    logger.info({ chatId, reason: "no-mention" }, "skipping group message");
+  if (mentionDecision.shouldSkip) {
+    logger.info(
+      {
+        chatId,
+        reason:
+          mentionDecision.skipReason === "addressed-to-other" ? "addressed-to-other" : "no-mention",
+      },
+      "skipping group message",
+    );
     recordTelegramGroupHistoryEntry({
       historyMap: groupHistories,
       historyKey,

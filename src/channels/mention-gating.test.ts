@@ -7,6 +7,41 @@ import {
 } from "./mention-gating.js";
 
 describe("resolveInboundMentionDecision", () => {
+  it.each([false, true])(
+    "keeps an explicit recipient ahead of activation with requireMention=%s",
+    (requireMention) => {
+      const policy = {
+        isGroup: true,
+        requireMention,
+        allowTextCommands: true,
+        hasControlCommand: true,
+        commandAuthorized: true,
+      };
+      const facts = {
+        canDetectMention: true,
+        wasMentioned: true,
+        implicitMentionKinds: ["reply_to_bot", "bot_thread_participant"] as const,
+      };
+      expect(
+        resolveInboundMentionDecision({ facts: { ...facts, explicitAddress: "other" }, policy }),
+      ).toEqual({
+        effectiveWasMentioned: false,
+        shouldSkip: true,
+        implicitMention: false,
+        matchedImplicitMentionKinds: [],
+        shouldBypassMention: false,
+        skipReason: "addressed-to-other",
+      });
+      expect(
+        resolveInboundMentionDecision({
+          facts: { ...facts, wasMentioned: false, explicitAddress: "self" },
+          policy,
+        }).shouldSkip,
+      ).toBe(false);
+      expect(resolveInboundMentionDecision({ facts, policy }).shouldSkip).toBe(false);
+    },
+  );
+
   it("allows matching implicit mention kinds by default", () => {
     const res = resolveInboundMentionDecision({
       facts: {

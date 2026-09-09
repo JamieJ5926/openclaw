@@ -54,7 +54,7 @@ import {
   resolveSlackEffectiveAllowFrom,
 } from "../auth.js";
 import { resolveSlackChannelConfig } from "../channel-config.js";
-import { stripSlackMentionsForCommandDetection } from "../commands.js";
+import { hasSlackNativeMention, stripSlackMentionsForCommandDetection } from "../commands.js";
 import {
   getSessionEntry,
   resolveChannelContextVisibilityMode,
@@ -92,7 +92,6 @@ import { resolveSlackTimestampMs } from "./timestamp.js";
 import type { PreparedSlackMessage } from "./types.js";
 
 const mentionRegexCache = new WeakMap<SlackMonitorContext, Map<string, RegExp[]>>();
-const SLACK_ANY_MENTION_RE = /<@[^>]+>|<!subteam\^[^>]+>/;
 const SLACK_USER_MENTION_RE = /<@([^>|]+)(?:\|[^>]+)?>/g;
 const SLACK_SUBTEAM_MENTION_RE = /<!subteam\^([^>|]+)(?:\|[^>]+)?>/g;
 const SLACK_SUBTEAM_MENTION_MARKER = "<!subteam^";
@@ -404,7 +403,7 @@ function collectSlackMentionMetadata(text: string): SlackMentionMetadata {
   return {
     mentionedUserIds: collectUniqueSlackMentionIds(text, SLACK_USER_MENTION_RE),
     mentionedSubteamIds: collectUniqueSlackMentionIds(text, SLACK_SUBTEAM_MENTION_RE),
-    hasAnyMention: SLACK_ANY_MENTION_RE.test(text),
+    hasAnyMention: hasSlackNativeMention(text),
     hasSubteamMention: text.includes(SLACK_SUBTEAM_MENTION_MARKER),
   };
 }
@@ -780,6 +779,25 @@ export async function prepareSlackMessage(params: {
       source: opts.source,
       eventScope: opts.eventScope,
     });
+  // Native Slack IDs do not encode bot identity. Reuse the user lookup cache;
+  // failed lookups stay unknown and cannot turn human mentions into bot addresses.
+  let mentionsOtherBot = false;
+  if (isRoomish && ctx.botUserId && !explicitlyMentioned && !channelConfig?.ignoreOtherMentions) {
+    for (const id of mentionedUserIds) {
+      if ((await ctx.resolveUserName(id, opts.eventScope)).isBot === true) {
+        mentionsOtherBot = true;
+        break;
+      }
+    }
+  }
+  const explicitAddress =
+    !isRoomish || !ctx.botUserId
+      ? undefined
+      : explicitlyMentioned
+        ? "self"
+        : (channelConfig?.ignoreOtherMentions && hasAnyMention) || mentionsOtherBot
+          ? "other"
+          : undefined;
   // Channels with `requireMention: false` and a non-`off` reply mode produce
   // a Slack-side thread on every top-level bot reply (because `replyToMode`
   // creates one). Seed thread routing for the root turn too, so the inbound
@@ -1123,6 +1141,7 @@ export async function prepareSlackMessage(params: {
         wasMentioned,
         hasAnyMention,
         implicitMentionKinds,
+        explicitAddress,
       },
       activation: {
         requireMention: shouldRequireMention,
@@ -1197,6 +1216,7 @@ export async function prepareSlackMessage(params: {
   const shouldPreflightAudioMention =
     isRoom &&
     !isBotMessage &&
+    explicitAddress !== "other" &&
     shouldRequireMention &&
     cfg.tools?.media?.audio?.enabled !== false &&
     messageIngress.activationAccess.shouldSkip &&
@@ -1283,6 +1303,7 @@ export async function prepareSlackMessage(params: {
       wasMentioned,
       hasAnyMention,
       implicitMentionKinds,
+      explicitAddress,
     },
     policy: {
       isGroup: isRoom,
@@ -1316,17 +1337,10 @@ export async function prepareSlackMessage(params: {
     return drop("mention-detection-unavailable");
   }
 
-  // Thread participation is broad on Slack; only an explicit bot mention escapes this gate.
-  // Native bot identity distinguishes bot pings from other Slack mentions.
-  const ignoreOtherMentions = channelConfig?.ignoreOtherMentions ?? false;
-  if (isRoom && ignoreOtherMentions && Boolean(ctx.botUserId) && hasAnyMention && !wasMentioned) {
-    await recordDroppedHistory("slack-other-mention");
-    return drop("other-mention");
-  }
-
-  if (isRoom && shouldRequireMention && mentionDecision.shouldSkip) {
-    await recordDroppedHistory("slack-no-mention");
-    return drop("missing-mention");
+  if (mentionDecision.shouldSkip) {
+    const addressedToOther = mentionDecision.skipReason === "addressed-to-other";
+    await recordDroppedHistory(addressedToOther ? "slack-other-mention" : "slack-no-mention");
+    return drop(addressedToOther ? "other-mention" : "missing-mention");
   }
 
   const chatType = resolveSlackChatType(conversation.resolvedChannelType);

@@ -698,6 +698,67 @@ describe("matrix monitor handler pairing account scope", () => {
     expect(enqueueSystemEvent).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      name: "configured sibling bot",
+      users: ["@ops:example.org"],
+      body: "@ops:example.org check the build",
+      dispatches: 0,
+    },
+    {
+      name: "both bots",
+      users: ["@ops:example.org", "@bot:example.org"],
+      body: "@ops:example.org @bot:example.org check the build",
+      dispatches: 1,
+    },
+    {
+      name: "unknown user",
+      users: ["@member:example.org"],
+      body: "@member:example.org check the build",
+      dispatches: 1,
+    },
+    {
+      name: "sibling bot with room broadcast",
+      users: ["@ops:example.org"],
+      body: "@room @ops:example.org check the build",
+      dispatches: 0,
+    },
+  ])(
+    "routes native mention of $name when requireMention is disabled",
+    async ({ users, body, dispatches }) => {
+      const { handler, runPrepared } = createMatrixHandlerTestHarness({
+        isDirectMessage: false,
+        configuredBotUserIds: new Set(["@ops:example.org"]),
+        roomsConfig: { "!room:example.org": { requireMention: false } },
+      });
+      await handler(
+        "!room:example.org",
+        createMatrixTextMessageEvent({
+          eventId: "$explicit-address",
+          body,
+          mentions: { user_ids: users, room: true },
+        }),
+      );
+      expect(runPrepared).toHaveBeenCalledTimes(dispatches);
+    },
+  );
+
+  it("preserves direct messages that mention another configured bot", async () => {
+    const { handler, runPrepared } = createMatrixHandlerTestHarness({
+      isDirectMessage: true,
+      configuredBotUserIds: new Set(["@ops:example.org"]),
+    });
+    await handler(
+      "!room:example.org",
+      createMatrixTextMessageEvent({
+        eventId: "$direct-other-bot",
+        body: "@ops:example.org check the build",
+        mentions: { user_ids: ["@ops:example.org"] },
+      }),
+    );
+    expect(runPrepared).toHaveBeenCalledTimes(1);
+  });
+
   it("accepts room messages from configured Matrix bot accounts when allowBots is true", async () => {
     const { handler, recordInboundSession, runPrepared } = createMatrixHandlerTestHarness({
       isDirectMessage: false,

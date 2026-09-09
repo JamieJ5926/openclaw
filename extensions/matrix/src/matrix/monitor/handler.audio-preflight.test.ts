@@ -323,6 +323,37 @@ describe("createMatrixRoomMessageHandler audio preflight", () => {
     );
   });
 
+  it("does not download or transcribe audio explicitly addressed to another configured bot", async () => {
+    downloadMatrixMediaMock.mockResolvedValue({
+      path: "/tmp/inbound/voice.ogg",
+      contentType: "audio/ogg",
+      placeholder: "[matrix audio attachment]",
+    });
+    transcribeFirstAudioMock.mockResolvedValue("bot can you check this");
+    const { handler, recordInboundSession } = createAudioPreflightHarness({
+      isDirectMessage: false,
+      historyLimit: 5,
+      mentionRegexes: [/\bbot\b/i],
+      configuredBotUserIds: new Set(["@ops:example.org"]),
+      roomsConfig: { "!room:example.org": { requireMention: false } },
+    });
+
+    await handler(
+      "!room:example.org",
+      createAudioEvent({
+        msgtype: "m.audio",
+        body: "@ops:example.org voice.ogg",
+        url: "mxc://example/voice",
+        info: { mimetype: "audio/ogg", size: 12345 },
+        "m.mentions": { user_ids: ["@ops:example.org"] },
+      }),
+    );
+
+    expect(downloadMatrixMediaMock).not.toHaveBeenCalled();
+    expect(transcribeFirstAudioMock).not.toHaveBeenCalled();
+    expect(recordInboundSession).not.toHaveBeenCalled();
+  });
+
   it("does not preflight-download gated audio when audio transcription is disabled", async () => {
     const { handler, recordInboundSession } = createAudioPreflightHarness({
       cfg: {

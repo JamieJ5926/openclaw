@@ -234,6 +234,7 @@ function activationMetadata(params: {
     ...(mentionFacts?.wasMentioned !== undefined
       ? { wasMentioned: mentionFacts.wasMentioned }
       : {}),
+    ...(mentionFacts?.explicitAddress ? { explicitAddress: mentionFacts.explicitAddress } : {}),
     ...(mentionFacts?.hasAnyMention !== undefined
       ? { hasAnyMention: mentionFacts.hasAnyMention }
       : {}),
@@ -285,22 +286,19 @@ function activationGate(params: {
       shouldBypassMention: input.shouldBypassMention,
     }),
   });
-  if (!activation || !mentionFacts) {
-    // Without activation policy or mention facts, sender/event authorization is enough.
+  if (!mentionFacts) {
+    // Without recipient facts, sender/event authorization is enough.
     return activationResult({
       shouldSkip: false,
-      effectiveWasMentioned:
-        mentionFacts &&
-        (mentionFacts.wasMentioned || Boolean(mentionFacts.implicitMentionKinds?.length)),
     });
   }
   const result = resolveInboundMentionDecision({
     facts: mentionFacts,
     policy: {
       isGroup: params.state.conversationKind !== "direct",
-      requireMention: activation.requireMention,
+      requireMention: activation?.requireMention ?? false,
       allowedImplicitMentionKinds,
-      allowTextCommands: activation.allowTextCommands,
+      allowTextCommands: activation?.allowTextCommands ?? false,
       hasControlCommand: params.policy.command?.hasControlCommand ?? false,
       commandAuthorized: params.commandGate.allowed,
     },

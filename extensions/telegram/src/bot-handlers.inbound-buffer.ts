@@ -113,8 +113,20 @@ export function createTelegramInboundBuffers({
   const resolveTelegramDebounceEntryMs = (entry: TelegramDebounceEntry): number =>
     entry.debounceLane === "forward" ? FORWARD_BURST_DEBOUNCE_MS : resolveDebounceMs();
   const shouldDebounceTelegramEntry = (entry: TelegramDebounceEntry): boolean => {
+    const { text, entities } = getTelegramTextParts(entry.msg);
+    // Self mentions can collect plain continuations; foreign recipients stay separate.
+    if (
+      entities.some(
+        (entity) =>
+          entity.type === "bot_command" ||
+          (entry.ctx.recipient?.explicitAddress !== "self" &&
+            (entity.type === "mention" || entity.type === "text_mention")),
+      )
+    ) {
+      return false;
+    }
     const hasDebounceableText = shouldDebounceTextInbound({
-      text: getTelegramTextParts(entry.msg).text,
+      text,
       cfg,
       commandOptions: { botUsername: entry.botUsername },
     });
@@ -204,8 +216,13 @@ export function createTelegramInboundBuffers({
             }),
             forward_origin: undefined,
           };
+          const syntheticContext = buildSyntheticContext(first.ctx, syntheticMessage);
+          // A later native self mention activates the batch without replacing its ingress context.
+          syntheticContext.recipient =
+            entries.find((entry) => entry.ctx.recipient?.explicitAddress === "self")?.ctx
+              .recipient ?? first.ctx.recipient;
           const result = await processMessageWithReplyChain({
-            ctx: buildSyntheticContext(first.ctx, syntheticMessage),
+            ctx: syntheticContext,
             msg: syntheticMessage,
             allMedia: combinedMedia,
             storeAllowFrom: first.storeAllowFrom,
@@ -305,6 +322,12 @@ export function createTelegramInboundBuffers({
         settleSpooledReplayParticipants(entry.spooledReplayParticipants, { kind: "skipped" });
         return;
       }
+      if (first.ctx.recipient?.shouldSkip) {
+        runtime.log?.("telegram: skipped text fragments addressed to another bot");
+        releaseDispatchDedupeClaims(entry.dispatchDedupeClaims);
+        settleSpooledReplayParticipants(entry.spooledReplayParticipants, { kind: "skipped" });
+        return;
+      }
       const combinedTextParts = joinTelegramTextParts(bufferedMessages, "");
       const combinedText = combinedTextParts.text;
       if (!combinedText.trim()) {
@@ -377,7 +400,14 @@ export function createTelegramInboundBuffers({
         const last = existing.messages.at(-1);
         const idGap = last ? params.msg.message_id - last.msg.message_id : Infinity;
         const timeGapMs = nowMs - (last?.receivedAtMs ?? nowMs);
-        const canAppend = idGap > 0 && idGap <= 1 && timeGapMs >= 0 && timeGapMs <= maxGapMs;
+        // Plain continuation text inherits the first fragment's recipient. An
+        // explicit recipient change starts a separate request, even inside the gap.
+        const sameRecipient =
+          !params.ctx.recipient?.explicitAddress ||
+          params.ctx.recipient.explicitAddress ===
+            existing.messages[0]?.ctx.recipient?.explicitAddress;
+        const canAppend =
+          sameRecipient && idGap > 0 && idGap <= 1 && timeGapMs >= 0 && timeGapMs <= maxGapMs;
         const nextTotalChars =
           existing.messages.reduce(
             (sum, bufferedMessage) => sum + (bufferedMessage.msg.text?.length ?? 0),
@@ -436,6 +466,7 @@ export function createTelegramInboundBuffers({
     } else if (
       text &&
       params.isAbortControlMessage &&
+      !params.ctx.recipient?.shouldSkip &&
       (await params.isAuthorizedAbortControlMessage())
     ) {
       const existing = textBuffer.get(key);

@@ -526,7 +526,6 @@ extensions/googlechat/src/actions.ts	1
 extensions/googlechat/src/approval-card-actions.ts	1
 extensions/googlechat/src/approval-handler.runtime.ts	1
 extensions/googlechat/src/google-auth.runtime.ts	7
-extensions/googlechat/src/monitor-access.ts	1
 extensions/googlechat/src/monitor-event.ts	2
 extensions/googlechat/src/monitor.ts	1
 extensions/googlechat/src/secret-contract.ts	3

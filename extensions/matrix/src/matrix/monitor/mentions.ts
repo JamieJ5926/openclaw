@@ -210,6 +210,7 @@ export function resolveMentions(params: {
   displayName?: string | null;
   text?: string;
   mentionRegexes: RegExp[];
+  configuredBotUserIds?: ReadonlySet<string>;
 }) {
   const mentions = params.content["m.mentions"];
   const mentionedUsers = Array.isArray(mentions?.user_ids)
@@ -245,5 +246,12 @@ export function resolveMentions(params: {
     mentionedInFormattedBody || metadataBackedUserMention || metadataBackedRoomMention;
 
   const wasMentioned = explicitMention || textMentioned || visibleRoomMention;
-  return { wasMentioned, hasExplicitMention: explicitMention };
+  // Only a visible user mention addresses self; a room broadcast cannot redirect another bot's turn.
+  const explicitAddress: "self" | "other" | undefined =
+    mentionedInFormattedBody || metadataBackedUserMention
+      ? "self"
+      : [...mentionedUsers].some((userId) => params.configuredBotUserIds?.has(userId))
+        ? "other"
+        : undefined;
+  return { wasMentioned, hasExplicitMention: explicitMention, explicitAddress };
 }

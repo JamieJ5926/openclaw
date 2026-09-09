@@ -9,7 +9,7 @@ import {
   FeishuIngressPermanentError,
   type FeishuIngressLifecycle,
 } from "./feishu-ingress.js";
-import { isMentionForwardRequest } from "./mention.js";
+import { hasFeishuOtherBotMention, isMentionForwardRequest } from "./mention.js";
 import { createSequentialQueue } from "./sequential-queue.js";
 import type { FeishuChatType } from "./types.js";
 
@@ -291,6 +291,10 @@ export function createFeishuMessageReceiveHandler({
         return `feishu:${accountId}:${chatId}:${threadKey}:${senderId}`;
       },
       shouldDebounce: ({ event }) => {
+        // Preserve each addressed recipient before merged mentions discard non-self accounts.
+        if (hasFeishuOtherBotMention(event, getBotOpenId(accountId))) {
+          return false;
+        }
         if (event.message.message_type !== "text") {
           return false;
         }

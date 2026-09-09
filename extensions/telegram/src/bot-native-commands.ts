@@ -30,6 +30,7 @@ import {
 } from "./bot-native-command-menu.js";
 import type { TelegramUpdateKeyContext } from "./bot-updates.js";
 import type { TelegramBotOptions } from "./bot.types.js";
+import { prepareTelegramMessageAddress } from "./bot/explicit-address.js";
 import {
   normalizeTelegramCommandName,
   resolveTelegramCustomCommands,
@@ -273,6 +274,13 @@ export const registerTelegramNativeCommands = ({
         if (shouldSkipUpdate(ctx) || !ctx.message) {
           return;
         }
+        const recipient = await prepareTelegramMessageAddress(
+          { message: ctx.message, me: ctx.me },
+          (target) => bot.api.getChat(target),
+        );
+        if (recipient.shouldSkip) {
+          return;
+        }
         await handleNativeCommand(
           ctx.me,
           ctx.message,
@@ -291,6 +299,13 @@ export const registerTelegramNativeCommands = ({
   for (const pluginCommand of pluginCatalog.selectedCommands) {
     bot.command(pluginCommand.command, async (ctx: TelegramNativeCommandContext) => {
       if (shouldSkipUpdate(ctx) || !ctx.message) {
+        return;
+      }
+      const recipient = await prepareTelegramMessageAddress(
+        { message: ctx.message, me: ctx.me },
+        (target) => bot.api.getChat(target),
+      );
+      if (recipient.shouldSkip) {
         return;
       }
       const { executeTelegramPluginCommand } = await loadTelegramPluginCommandExecutor();

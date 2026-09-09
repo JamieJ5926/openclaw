@@ -5,7 +5,7 @@ import {
   normalizeMSTeamsConversationId,
   parseMSTeamsActivityTimestamp,
   stripMSTeamsMentionTags,
-  wasMSTeamsBotMentioned,
+  resolveMSTeamsExplicitAddress,
 } from "./inbound.js";
 
 describe("msteams inbound", () => {
@@ -49,23 +49,23 @@ describe("msteams inbound", () => {
     });
   });
 
-  describe("wasMSTeamsBotMentioned", () => {
-    it("returns true when a mention entity matches recipient.id", () => {
+  describe("resolveMSTeamsExplicitAddress", () => {
+    it("identifies self when a mention entity matches recipient.id", () => {
       expect(
-        wasMSTeamsBotMentioned({
+        resolveMSTeamsExplicitAddress({
           recipient: { id: "bot" },
           entities: [{ type: "mention", mentioned: { id: "bot" } }],
         }),
-      ).toBe(true);
+      ).toBe("self");
     });
 
-    it("returns false when there is no matching mention", () => {
+    it("leaves an unknown mention target unclassified", () => {
       expect(
-        wasMSTeamsBotMentioned({
+        resolveMSTeamsExplicitAddress({
           recipient: { id: "bot" },
           entities: [{ type: "mention", mentioned: { id: "other" } }],
         }),
-      ).toBe(false);
+      ).toBeUndefined();
     });
   });
 

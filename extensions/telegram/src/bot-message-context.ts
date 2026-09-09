@@ -448,7 +448,7 @@ export const buildTelegramMessageContext = async ({
     baseRequireMention,
   );
   const requireMention =
-    isGroup && bindingMode.kind === "plugin-owned-runtime" ? false : groupRequireMention;
+    isGroup && bindingMode.kind !== "plugin-owned-runtime" ? groupRequireMention : false;
 
   const recordChannelActivity =
     runtime?.recordChannelActivity ??

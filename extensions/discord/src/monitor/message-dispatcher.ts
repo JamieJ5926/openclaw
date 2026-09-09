@@ -8,7 +8,7 @@ import { fanInChannelIngressLifecycles } from "openclaw/plugin-sdk/channel-ingre
 import { createLazyRuntimeModule } from "openclaw/plugin-sdk/lazy-runtime";
 import { createRuntimeConfigReader } from "openclaw/plugin-sdk/runtime-config-snapshot";
 import { danger } from "openclaw/plugin-sdk/runtime-env";
-import type { Client } from "../internal/discord.js";
+import { MessageType, type Client } from "../internal/discord.js";
 import { buildDiscordInboundJob } from "./inbound-job.js";
 import type {
   createDiscordIngressMonitor,
@@ -21,15 +21,21 @@ import { createDiscordAvatarResolver } from "./message-avatar.js";
 import { resolveDiscordMessageChannelId } from "./message-channel-info.js";
 import {
   hasDiscordMessageStickers,
+  resolveDiscordReferencedReplyMessage,
   resolveDiscordReferencedReplyMessageId,
 } from "./message-forwarded.js";
 import { applyImplicitReplyBatchGate } from "./message-handler.batch-gate.js";
+import { hasRawDiscordUserMention } from "./message-handler.preflight-helpers.js";
 import type { DiscordMessagePreflightParams } from "./message-handler.preflight.types.js";
 import {
   createDiscordMessageRunQueue,
   type DiscordMessageRunQueueTestingHooks,
 } from "./message-run-queue.js";
-import { resolveDiscordMessageText } from "./message-text.js";
+import {
+  resolveDiscordMessageMentionDocuments,
+  resolveDiscordMessageText,
+} from "./message-text.js";
+import { resolveDiscordWebhookId } from "./sender-identity.js";
 import type { DiscordMonitorStatusSink } from "./status.js";
 
 type PreflightDiscordMessage =
@@ -136,9 +142,28 @@ export function createDiscordMessageDispatcher(
         return false;
       }
       const baseText = resolveDiscordMessageText(message, { includeForwarded: false });
+      const hasOtherRawUserMention = resolveDiscordMessageMentionDocuments(message).some((text) =>
+        Array.from(text.matchAll(/<@!?([^>]+)>/g)).some(
+          ([, userId]) => userId !== params.botUserId && hasRawDiscordUserMention(text, userId),
+        ),
+      );
+      const referencedReply = resolveDiscordReferencedReplyMessage(message);
+      const replyTargetsOtherBot =
+        referencedReply?.author?.bot === true &&
+        referencedReply.author.id !== params.botUserId &&
+        !resolveDiscordWebhookId(referencedReply);
       return shouldDebounceTextInbound({
         text: baseText,
         cfg: params.cfg,
+        // Self mentions can collect plain continuations; foreign recipients stay separate.
+        allowDebounce: !(
+          (message.type !== MessageType.Reply &&
+            message.mentionedUsers?.some((user) => user.id !== params.botUserId)) ||
+          message.mentionedRoles?.length ||
+          message.mentionedEveryone ||
+          hasOtherRawUserMention ||
+          replyTargetsOtherBot
+        ),
         hasMedia:
           (message.attachments && message.attachments.length > 0) ||
           hasDiscordMessageStickers(message),

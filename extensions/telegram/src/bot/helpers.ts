@@ -41,12 +41,12 @@ import {
   joinTelegramTextParts,
   normalizeForwardedContext,
   resolveTelegramPrimaryMedia,
-  resolveTelegramRichMessageBody,
   resolveTelegramTextContent,
   type TelegramForwardedContext,
   type TelegramMediaKind,
   type TelegramTextEntity,
 } from "./body-helpers.js";
+import { resolveTelegramRichMessageBody } from "./rich-message.js";
 import type { TelegramGetChat, TelegramStreamMode } from "./types.js";
 
 export type {

@@ -1,6 +1,7 @@
 // Telegram type declarations define plugin contracts.
 import type { Context } from "grammy";
 import type { ChatFullInfo, Message, Update, UserFromGetMe } from "grammy/types";
+import type { InboundMentionFacts } from "openclaw/plugin-sdk/channel-inbound";
 
 /** App-specific stream mode for Telegram stream previews. */
 export type TelegramStreamMode = "off" | "partial" | "block" | "progress";
@@ -8,6 +9,7 @@ export type TelegramStreamMode = "off" | "partial" | "block" | "progress";
 type TelegramGetFile = Context["getFile"];
 export type TelegramChatDetails = {
   id?: number | string;
+  type?: ChatFullInfo["type"];
   available_reactions?: ChatFullInfo["available_reactions"] | null;
   is_forum?: boolean;
 };
@@ -23,6 +25,10 @@ export type TelegramContext = {
   update?: Update;
   me?: UserFromGetMe;
   getFile: TelegramGetFile;
+  recipient?: {
+    explicitAddress: InboundMentionFacts["explicitAddress"];
+    shouldSkip: boolean;
+  };
 };
 
 /** Telegram sticker metadata for context enrichment and caching. */

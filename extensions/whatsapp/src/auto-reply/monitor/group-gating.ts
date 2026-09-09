@@ -248,7 +248,8 @@ export async function applyGroupGating(params: ApplyGroupGatingParams) {
   const mentionDecision = resolveInboundMentionDecision({
     facts: {
       canDetectMention: true,
-      wasMentioned,
+      wasMentioned: wasMentioned || shouldBypassMention,
+      explicitAddress: mentionDebug.explicitAddress,
       implicitMentionKinds,
     },
     policy: {
@@ -259,11 +260,17 @@ export async function applyGroupGating(params: ApplyGroupGatingParams) {
       commandAuthorized: false,
     },
   });
-  const effectiveWasMentioned = mentionDecision.effectiveWasMentioned || shouldBypassMention;
+  const effectiveWasMentioned = mentionDecision.effectiveWasMentioned;
   // Carry the session activation and mention result together. Dispatch needs
   // both facts to distinguish an always-on group from a blocked unmentioned turn.
   params.msg.groupMention = { wasMentioned: effectiveWasMentioned, requireMention };
-  if (!shouldBypassMention && requireMention && mentionDecision.shouldSkip) {
+  if (mentionDecision.shouldSkip) {
+    if (mentionDecision.skipReason === "addressed-to-other") {
+      return skipGroupMessageAndStoreHistory(
+        params,
+        `Group message addressed to another bot in ${conversationId}`,
+      );
+    }
     if (params.deferMissingMention === true) {
       params.logVerbose(
         `Deferring group mention skip until audio preflight completes in ${conversationId}`,

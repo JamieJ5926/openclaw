@@ -63,7 +63,7 @@ type SlackChannelCacheEntry = {
   metadataLoaded: boolean;
 };
 
-type SlackUserInfo = { name?: string; imageUrl?: string; error?: unknown };
+type SlackUserInfo = { name?: string; imageUrl?: string; isBot?: boolean; error?: unknown };
 type BuildChannelInboundContext =
   typeof import("openclaw/plugin-sdk/channel-inbound").buildChannelInboundEventContext;
 const SLACK_CHANNEL_CACHE_MAX_ENTRIES = 1024;
@@ -227,7 +227,7 @@ export function createSlackMonitorContext(params: {
   const channelHistories = new Map<string, HistoryEntry[]>();
   const logger = getChildLogger({ module: "slack-auto-reply" });
   const channelCache = new Map<string, SlackChannelCacheEntry>();
-  const userCache = new Map<string, { name?: string; imageUrl?: string }>();
+  const userCache = new Map<string, SlackUserInfo>();
   const avatarCache = new Map<string, string>();
   const pendingAvatars = new Set<string>();
   // Rate-limit active denials while retaining periodic evidence; bound keys against config churn.
@@ -364,7 +364,7 @@ export function createSlackMonitorContext(params: {
         normalizeOptionalString(profile?.image_192) ??
         normalizeOptionalString(profile?.image_512) ??
         normalizeOptionalString(profile?.image_72);
-      const entry = { name, imageUrl };
+      const entry = { name, imageUrl, isBot: info.user?.is_bot };
       writeLruMapEntry(userCache, cacheKey, entry, SLACK_USER_CACHE_MAX_ENTRIES);
       return entry;
     } catch (error) {

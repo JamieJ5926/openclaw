@@ -156,8 +156,27 @@ export async function resolveMatrixIngressContent(config: {
     resolveAgentRoute: core.channel.routing.resolveAgentRoute,
   });
   const hasExplicitSessionBinding = _configuredBinding !== null || _runtimeBindingId !== null;
+  const agentMentionRegexes = core.channel.mentions.buildMentionRegexes(cfg, _route.agentId, {
+    provider: "matrix",
+    conversationId: roomId,
+    providerPolicy: accountConfig?.mentionPatterns,
+  });
+  const selfDisplayName = content.formatted_body
+    ? await getMemberDisplayName(roomId, selfUserId).catch(() => undefined)
+    : undefined;
+  const mentionParams = {
+    content,
+    userId: selfUserId,
+    displayName: selfDisplayName,
+    mentionRegexes: agentMentionRegexes,
+    configuredBotUserIds: isRoom ? handler.configuredBotUserIds : undefined,
+  };
+  // Resolve the native recipient before sending audio to a transcription provider.
+  const nativeMentions = resolveMentions({ ...mentionParams, text: mentionPrecheckText });
+  const { explicitAddress } = nativeMentions;
   const preflightAudioMediaUrl = mediaUrl?.startsWith("mxc://") ? mediaUrl : undefined;
   const shouldRunMatrixAudioPreflight =
+    (!isRoom || explicitAddress !== "other") &&
     isMatrixAudioContent({
       msgtype: typeof content.msgtype === "string" ? content.msgtype : undefined,
       mimetype: mediaContent.contentType,
@@ -231,24 +250,12 @@ export async function resolveMatrixIngressContent(config: {
       });
     }
   }
-  const agentMentionRegexes = core.channel.mentions.buildMentionRegexes(cfg, _route.agentId, {
-    provider: "matrix",
-    conversationId: roomId,
-    providerPolicy: accountConfig?.mentionPatterns,
-  });
-  const selfDisplayName = content.formatted_body
-    ? await getMemberDisplayName(roomId, selfUserId).catch(() => undefined)
-    : undefined;
-  const mentionPrecheckTextWithTranscript = preflightAudioTranscript
-    ? [mentionPrecheckText, preflightAudioTranscript].filter(Boolean).join("\n").trim()
-    : mentionPrecheckText;
-  const { wasMentioned, hasExplicitMention } = resolveMentions({
-    content,
-    userId: selfUserId,
-    displayName: selfDisplayName,
-    text: mentionPrecheckTextWithTranscript,
-    mentionRegexes: agentMentionRegexes,
-  });
+  const { wasMentioned, hasExplicitMention } = preflightAudioTranscript
+    ? resolveMentions({
+        ...mentionParams,
+        text: [mentionPrecheckText, preflightAudioTranscript].filter(Boolean).join("\n").trim(),
+      })
+    : nativeMentions;
   if (isConfiguredBotSender && allowBotsMode === "mentions" && !isDirectMessage && !wasMentioned) {
     logVerboseMessage(
       `matrix: drop configured bot sender=${senderId} (allowBots=mentions, missing mention, ${roomMatchMeta})`,
@@ -301,6 +308,7 @@ export async function resolveMatrixIngressContent(config: {
       // when no custom mention regex is configured.
       canDetectMention: true,
       wasMentioned,
+      explicitAddress,
       hasAnyMention: hasExplicitMention,
     },
     policy: {
@@ -336,7 +344,7 @@ export async function resolveMatrixIngressContent(config: {
         roomHistoryTracker.recordPending(roomId, pendingEntry, historyThreadId);
       }
     }
-    logger.info("skipping room message", { roomId, reason: "no-mention" });
+    logger.info("skipping room message", { roomId, reason: mentionDecision.skipReason });
     await commitInboundEventIfClaimed();
     return undefined;
   }

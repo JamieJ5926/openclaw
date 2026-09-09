@@ -67,9 +67,16 @@ it("updates Slack delay and flushes newly buffered top-level keys before immedia
     abortSignal: abort.signal,
   });
   let sequence = 0;
-  const enqueue = (text: string, channel = "D1") =>
+  const enqueue = (text: string, channel = "D1", threadTs?: string) =>
     handler(
-      { type: "message", channel, user: "USER", ts: `123.${++sequence}`, text },
+      {
+        type: "message",
+        channel,
+        user: "USER",
+        ts: `123.${++sequence}`,
+        text,
+        thread_ts: threadTs,
+      },
       { source: "message" },
     );
   const publish = (debounceMs: number) => {
@@ -91,6 +98,14 @@ it("updates Slack delay and flushes newly buffered top-level keys before immedia
     publish(0);
     await enqueue("after disable", "C1");
     expect(bodies()).toEqual(["immediate", "first\nsecond", "pending top level", "after disable"]);
+    publish(25);
+    await enqueue("<@BOT> first recipient", "C1", "122.000");
+    await enqueue("plain continuation", "C1", "122.000");
+    await vi.advanceTimersByTimeAsync(25);
+    expect(bodies().at(-1)).toBe("<@BOT> first recipient\nplain continuation");
+    await enqueue("<@BOT> first recipient", "C1", "122.000");
+    await enqueue("<@OTHER> second recipient", "C1", "122.000");
+    expect(bodies().slice(-2)).toEqual(["<@BOT> first recipient", "<@OTHER> second recipient"]);
   } finally {
     abort.abort();
     await vi.runOnlyPendingTimersAsync();

@@ -1,6 +1,8 @@
 // Telegram tests cover bot message context.body plugin behavior.
 import { describe, expect, it, vi } from "vitest";
 import { normalizeAllowFrom } from "./bot-access.js";
+import { prepareTelegramMessageAddress } from "./bot/explicit-address.js";
+import type { TelegramGetChat } from "./bot/types.js";
 
 const {
   resolveStickerVisionSupportRuntimeMock,
@@ -31,7 +33,7 @@ vi.mock("openclaw/plugin-sdk/hook-runtime", async () => {
 });
 
 const { resolveTelegramInboundBody } = await import("./bot-message-context.body.js");
-type BodyParams = Parameters<typeof resolveTelegramInboundBody>[0];
+type BodyParams = Parameters<typeof resolveTelegramInboundBody>[0] & { getChat: TelegramGetChat };
 type BodyResult = Awaited<ReturnType<typeof resolveTelegramInboundBody>>;
 type Message = Record<string, unknown>;
 type LogInfo = (obj: Record<string, unknown>, msg: string) => void;
@@ -138,7 +140,8 @@ function forumMessage(messageId: number, extra: Message = {}) {
 
 async function resolveBody(overrides: Partial<BodyParams> = {}) {
   const chatId = overrides.chatId ?? 42;
-  return resolveTelegramInboundBody({
+  const params = {
+    getChat: async () => ({ id: 8, type: "private" }),
     cfg: telegramConfig(),
     primaryCtx: { me: { id: 7, username: "bot" } } as never,
     msg: privateMessage({ chat: { id: chatId, type: "private", first_name: "Pat" } }),
@@ -155,7 +158,10 @@ async function resolveBody(overrides: Partial<BodyParams> = {}) {
     historyLimit: 0,
     logger: createLogger(),
     ...overrides,
-  } as BodyParams);
+  } as BodyParams;
+  params.primaryCtx = { ...params.primaryCtx, message: params.msg };
+  await prepareTelegramMessageAddress(params.primaryCtx, params.getChat);
+  return resolveTelegramInboundBody(params);
 }
 
 const resolvePrivate = (message: Message, overrides: Partial<BodyParams> = {}) =>
@@ -347,6 +353,108 @@ describe("resolveTelegramInboundBody", () => {
     },
   );
 
+  const otherRichMention = { type: "mention", username: "other_bot", text: "Reviewer" };
+  const otherRichTextMention = {
+    type: "text_mention",
+    user: { id: 8, is_bot: true, first_name: "Reviewer" },
+    text: "Reviewer",
+  };
+  const selfRichTextMention = {
+    type: "text_mention",
+    user: { id: 7, is_bot: true, first_name: "Assistant" },
+    text: "Assistant",
+  };
+  const ownRichCommand = { type: "bot_command", bot_command: "/status@bot", text: "/status@bot" };
+  const otherRichCommand = {
+    type: "bot_command",
+    bot_command: "/status@other_bot",
+    text: "/status@other_bot",
+  };
+  it.each([
+    {
+      name: "leading foreign command before self mention",
+      blocks: [{ type: "paragraph", text: [otherRichCommand, " ", selfRichTextMention] }],
+      requireMention: false,
+      accepted: false,
+    },
+    {
+      name: "leading self command before foreign command",
+      blocks: [{ type: "paragraph", text: [ownRichCommand, " ", otherRichCommand] }],
+      requireMention: true,
+      accepted: true,
+    },
+    {
+      name: "code prefix before foreign command and self mention",
+      blocks: [
+        { type: "pre", text: "example" },
+        { type: "paragraph", text: [otherRichCommand, " ", selfRichTextMention] },
+      ],
+      requireMention: true,
+      accepted: true,
+    },
+    {
+      name: "other username",
+      blocks: [{ type: "paragraph", text: otherRichMention }],
+      requireMention: false,
+      accepted: false,
+    },
+    {
+      name: "other native bot",
+      blocks: [{ type: "paragraph", text: otherRichTextMention }],
+      requireMention: false,
+      accepted: false,
+    },
+    {
+      name: "self native bot",
+      blocks: [{ type: "paragraph", text: selfRichTextMention }],
+      requireMention: true,
+      accepted: true,
+    },
+    {
+      name: "mixed recipients",
+      blocks: [{ type: "paragraph", text: [otherRichMention, " ", selfRichTextMention] }],
+      requireMention: true,
+      accepted: true,
+    },
+    {
+      name: "nested caption recipient",
+      blocks: [{ type: "photo", caption: { text: otherRichTextMention } }],
+      requireMention: false,
+      accepted: false,
+    },
+    {
+      name: "inline code",
+      blocks: [{ type: "paragraph", text: { type: "code", text: otherRichMention } }],
+      requireMention: false,
+      accepted: true,
+    },
+    {
+      name: "preformatted block",
+      blocks: [{ type: "pre", text: otherRichTextMention }],
+      requireMention: false,
+      accepted: true,
+    },
+    {
+      name: "empty mention label",
+      blocks: [
+        { type: "paragraph", text: [{ ...otherRichTextMention, text: "" }, "ordinary text"] },
+      ],
+      requireMention: false,
+      accepted: true,
+    },
+  ])("routes visible rich recipients: $name", async ({ blocks, requireMention, accepted }) => {
+    const result = await resolveGroup({
+      logger: createLogger(),
+      message: richMessage({ blocks }),
+      overrides: { requireMention },
+    });
+    if (accepted) {
+      expect(result).not.toBeNull();
+    } else {
+      expect(result).toBeNull();
+    }
+  });
+
   privateBodyTest(
     "renders Telegram text entities before building the agent body",
     {
@@ -503,6 +611,24 @@ describe("resolveTelegramInboundBody", () => {
     expect(result).toBeNull();
   });
 
+  it.each([false, true])(
+    "ignores another bot's explicit mention with requireMention=%s even in a reply to this bot",
+    async (requireMention) => {
+      const result = await resolveGroup({
+        logger: createLogger(),
+        patterns: [".*"],
+        message: {
+          text: "@other_bot inspect this",
+          entities: [{ type: "mention", offset: 0, length: "@other_bot".length }],
+          reply_to_message: privateMessage({ from: { id: 7, is_bot: true, first_name: "Bot" } }),
+        },
+        overrides: { requireMention },
+      });
+
+      expect(result).toBeNull();
+    },
+  );
+
   it("keeps this bot's leading command when a later command targets another bot", async () => {
     const logger = createLogger();
     const ownCommand = "/inspect@bot";
@@ -529,6 +655,117 @@ describe("resolveTelegramInboundBody", () => {
 
     expect(result?.rawBody).toBe(text);
   });
+
+  it.each([
+    {
+      text: "  /inspect@other_bot",
+      entities: [{ type: "bot_command", offset: 2, length: 18 }],
+      accepted: false,
+    },
+    {
+      text: "@other_bot @bot inspect",
+      entities: [
+        { type: "mention", offset: 0, length: 10 },
+        { type: "mention", offset: 11, length: 4 },
+      ],
+      accepted: true,
+    },
+    {
+      text: "/inspect@other_bot @bot",
+      entities: [
+        { type: "bot_command", offset: 0, length: 18 },
+        { type: "mention", offset: 19, length: 4 },
+      ],
+      accepted: false,
+    },
+    {
+      text: "@other_bot code @bot",
+      entities: [
+        { type: "mention", offset: 0, length: 10 },
+        { type: "code", offset: 15, length: 4 },
+      ],
+      accepted: false,
+    },
+    {
+      text: "Other inspect",
+      entities: [
+        {
+          type: "text_mention",
+          offset: 0,
+          length: 5,
+          user: { id: 8, is_bot: true, first_name: "Other" },
+        },
+      ],
+      accepted: false,
+    },
+  ])("routes native recipients in $text", async ({ text, entities, accepted }) => {
+    const result = await resolveGroup({
+      logger: createLogger(),
+      message: { text, entities },
+      overrides: { requireMention: false },
+    });
+    expect(result !== null).toBe(accepted);
+  });
+
+  it("does not infer bot identity from an unresolved username or hide lookup failures", async () => {
+    const input = {
+      logger: createLogger(),
+      message: {
+        caption: "@friendly_bot inspect",
+        caption_entities: [{ type: "mention", offset: 0, length: 13 }],
+      },
+    };
+    const missingChat = Object.assign(new Error("Bad Request: chat not found"), {
+      error_code: 400,
+    });
+    const result = await resolveGroup({
+      ...input,
+      overrides: {
+        requireMention: false,
+        getChat: async () => {
+          throw missingChat;
+        },
+      },
+    });
+    expect(result?.rawBody).toBe(input.message.caption);
+    const failure = new Error("network unavailable");
+    await expect(
+      resolveGroup({
+        ...input,
+        overrides: {
+          requireMention: false,
+          getChat: async () => {
+            throw failure;
+          },
+        },
+      }),
+    ).rejects.toBe(failure);
+  });
+
+  it.each([
+    ["@alias_bot", "@other_bot"],
+    ["@other_bot", "@alias_bot"],
+  ])(
+    "recognizes this bot's resolved alias among other recipients: %s %s",
+    async (first, second) => {
+      const text = `${first} ${second} inspect`;
+      const result = await resolveGroup({
+        logger: createLogger(),
+        message: {
+          text,
+          entities: [
+            { type: "mention", offset: 0, length: first.length },
+            { type: "mention", offset: first.length + 1, length: second.length },
+          ],
+        },
+        overrides: {
+          requireMention: false,
+          getChat: async (target) => ({ id: target === "@alias_bot" ? 7 : 8, type: "private" }),
+        },
+      });
+      expect(result?.effectiveWasMentioned).toBe(true);
+    },
+  );
 
   it("does not transcribe group audio for unauthorized senders", async () => {
     transcribeFirstAudioMock.mockReset();

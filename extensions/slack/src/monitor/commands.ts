@@ -2,6 +2,12 @@
 import type { SlackSlashCommandConfig } from "openclaw/plugin-sdk/config-contracts";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 
+export function hasSlackNativeMention(text: string, excludingUserId?: string): boolean {
+  return Array.from(text.matchAll(/<@([^>|]+)(?:\|[^>]+)?>|<!subteam\^[^>]+>/g)).some(
+    ([, userId]) => !excludingUserId || userId !== excludingUserId,
+  );
+}
+
 /**
  * Strip Slack mentions (<@U123>, <@U123|name>) so command detection works on
  * normalized text. Use in both prepare and debounce gate for consistency.

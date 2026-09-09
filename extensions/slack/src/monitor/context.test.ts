@@ -375,7 +375,7 @@ describe("createSlackMonitorContext channel metadata cache", () => {
 
   it("keeps a recently re-resolved user while older entries are evicted", async () => {
     const usersInfo = vi.fn().mockImplementation(async ({ user }: { user: string }) => ({
-      user: { profile: { display_name: `name-${user}` } },
+      user: { is_bot: true, profile: { display_name: `name-${user}` } },
     }));
     const ctx = createTestContext({
       appClient: { users: { info: usersInfo } } as unknown as App["client"],
@@ -389,7 +389,10 @@ describe("createSlackMonitorContext channel metadata cache", () => {
     await ctx.resolveUserName("U0KEEP");
     await ctx.resolveUserName("U_NEW");
     const before = usersInfo.mock.calls.length;
-    await expect(ctx.resolveUserName("U0KEEP")).resolves.toEqual({ name: "name-U0KEEP" });
+    await expect(ctx.resolveUserName("U0KEEP")).resolves.toEqual({
+      name: "name-U0KEEP",
+      isBot: true,
+    });
     expect(usersInfo).toHaveBeenCalledTimes(before);
   });
 

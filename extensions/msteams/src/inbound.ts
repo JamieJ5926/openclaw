@@ -81,7 +81,7 @@ type MentionableActivity = {
   recipient?: { id?: string } | null;
   entities?: Array<{
     type?: string;
-    mentioned?: { id?: string };
+    mentioned?: { id?: string; type?: string; role?: string };
   }> | null;
 };
 
@@ -117,11 +117,20 @@ export function stripMSTeamsMentionTags(text: string): string {
   return text.replace(/<at[^>]*>.*?<\/at>/gi, "").trim();
 }
 
-export function wasMSTeamsBotMentioned(activity: MentionableActivity): boolean {
+export function resolveMSTeamsExplicitAddress(
+  activity: MentionableActivity,
+): "self" | "other" | undefined {
   const botId = activity.recipient?.id;
   if (!botId) {
-    return false;
+    return undefined;
   }
-  const entities = activity.entities ?? [];
-  return entities.some((e) => e.type === "mention" && e.mentioned?.id === botId);
+  const mentions = (activity.entities ?? []).filter((entry) => entry.type === "mention");
+  if (mentions.some((entry) => entry.mentioned?.id === botId)) {
+    return "self";
+  }
+  return mentions.some(
+    ({ mentioned }) => mentioned?.id && (mentioned.type === "bot" || mentioned.role === "bot"),
+  )
+    ? "other"
+    : undefined;
 }

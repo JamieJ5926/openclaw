@@ -647,6 +647,30 @@ describe("Feishu inbound debounce regressions", () => {
     ]);
   });
 
+  it("keeps another bot's recipient and body separate from a self-addressed batch", async () => {
+    setDedupPassThroughMocks();
+    const onMessage = await setupDebounceMonitor();
+    await enqueueDebouncedMessage(
+      onMessage,
+      createTextEvent({
+        messageId: "om_self",
+        text: "@_user_1 self request",
+        mentions: [createMention({ openId: "ou_bot", name: "Bot" })],
+      }),
+    );
+    const other = createTextEvent({
+      messageId: "om_other",
+      text: "@_user_1 other request",
+      mentions: [
+        { ...createMention({ openId: "ou_other", name: "Other Bot" }), mentioned_type: "bot" },
+      ],
+    });
+    await enqueueDebouncedMessage(onMessage, other);
+    await vi.advanceTimersByTimeAsync(25);
+    expect(handleFeishuMessageMock).toHaveBeenCalledTimes(2);
+    expect(handleFeishuMessageMock.mock.calls[1]?.[0].event).toEqual(other);
+  });
+
   it("releases pending text before a bare abort trigger instead of debouncing it", async () => {
     setDedupPassThroughMocks();
     const onMessage = await setupDebounceMonitor();

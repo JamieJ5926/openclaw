@@ -9,6 +9,8 @@ export type InboundImplicitMentionKind =
 export type InboundMentionFacts = {
   canDetectMention: boolean;
   wasMentioned: boolean;
+  /** Native recipient routing, resolved by the channel before implicit activation. */
+  explicitAddress?: "self" | "other";
   hasAnyMention?: boolean;
   implicitMentionKinds?: readonly InboundImplicitMentionKind[];
 };
@@ -41,6 +43,7 @@ export type InboundMentionDecision = {
   implicitMention: boolean;
   matchedImplicitMentionKinds: InboundImplicitMentionKind[];
   shouldBypassMention: boolean;
+  skipReason?: "addressed-to-other" | "mention-required";
 };
 
 export function implicitMentionKindWhen(
@@ -85,31 +88,6 @@ function resolveMatchedImplicitMentionKinds(params: {
   return matched;
 }
 
-function resolveMentionDecisionCore(params: {
-  requireMention: boolean;
-  canDetectMention: boolean;
-  wasMentioned: boolean;
-  implicitMentionKinds?: readonly InboundImplicitMentionKind[];
-  allowedImplicitMentionKinds?: readonly InboundImplicitMentionKind[];
-  shouldBypassMention: boolean;
-}): InboundMentionDecision {
-  const matchedImplicitMentionKinds = resolveMatchedImplicitMentionKinds({
-    implicitMentionKinds: params.implicitMentionKinds,
-    allowedImplicitMentionKinds: params.allowedImplicitMentionKinds,
-  });
-  const implicitMention = matchedImplicitMentionKinds.length > 0;
-  const effectiveWasMentioned =
-    params.wasMentioned || implicitMention || params.shouldBypassMention;
-  const shouldSkip = params.requireMention && params.canDetectMention && !effectiveWasMentioned;
-  return {
-    implicitMention,
-    matchedImplicitMentionKinds,
-    effectiveWasMentioned,
-    shouldBypassMention: params.shouldBypassMention,
-    shouldSkip,
-  };
-}
-
 function hasNestedMentionDecisionParams(
   params: ResolveInboundMentionDecisionParams,
 ): params is ResolveInboundMentionDecisionNestedParams {
@@ -125,6 +103,7 @@ function normalizeMentionDecisionParams(
   const {
     canDetectMention,
     wasMentioned,
+    explicitAddress,
     hasAnyMention,
     implicitMentionKinds,
     isGroup,
@@ -139,6 +118,7 @@ function normalizeMentionDecisionParams(
     facts: {
       canDetectMention,
       wasMentioned,
+      explicitAddress,
       hasAnyMention,
       implicitMentionKinds,
     },
@@ -158,25 +138,42 @@ export function resolveInboundMentionDecision(
   params: ResolveInboundMentionDecisionParams,
 ): InboundMentionDecision {
   const { facts, policy } = normalizeMentionDecisionParams(params);
+  // Recipient routing precedes activation: a reply, wake word, or command
+  // bypass cannot volunteer this bot for work explicitly assigned elsewhere.
+  const addressedToOther = facts.explicitAddress === "other";
+  const wasMentioned =
+    !addressedToOther && (facts.explicitAddress === "self" || facts.wasMentioned);
   const allowedImplicitMentionKinds =
     policy.allowedImplicitMentionKinds ??
     (policy.implicitMentions
       ? allowedImplicitMentionKindsFromConfig(policy.implicitMentions)
       : undefined);
   const shouldBypassMention =
+    !addressedToOther &&
     policy.isGroup &&
     policy.requireMention &&
-    !facts.wasMentioned &&
+    !wasMentioned &&
     !(facts.hasAnyMention ?? false) &&
     policy.allowTextCommands &&
     policy.commandAuthorized &&
     policy.hasControlCommand;
-  return resolveMentionDecisionCore({
-    requireMention: policy.requireMention,
-    canDetectMention: facts.canDetectMention,
-    wasMentioned: facts.wasMentioned,
-    implicitMentionKinds: facts.implicitMentionKinds,
+  const matchedImplicitMentionKinds = resolveMatchedImplicitMentionKinds({
+    implicitMentionKinds: addressedToOther ? [] : facts.implicitMentionKinds,
     allowedImplicitMentionKinds,
-    shouldBypassMention,
   });
+  const implicitMention = matchedImplicitMentionKinds.length > 0;
+  const effectiveWasMentioned = wasMentioned || implicitMention || shouldBypassMention;
+  const skipReason = addressedToOther
+    ? "addressed-to-other"
+    : policy.requireMention && facts.canDetectMention && !effectiveWasMentioned
+      ? "mention-required"
+      : undefined;
+  return {
+    implicitMention,
+    matchedImplicitMentionKinds,
+    effectiveWasMentioned,
+    shouldBypassMention,
+    shouldSkip: skipReason !== undefined,
+    ...(skipReason ? { skipReason } : {}),
+  };
 }

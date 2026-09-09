@@ -203,6 +203,40 @@ describe("Microsoft Teams drain claim ownership", () => {
     expect(second.abandonedCount()).toBe(0);
   });
 
+  it("keeps another bot's message out of a self-addressed batch and settles both claims", async () => {
+    const handler = createHandler({
+      channels: { msteams: { groupPolicy: "open", requireMention: false, historyLimit: 0 } },
+    });
+    const self = createLifecycle();
+    const other = createLifecycle();
+    await handler(
+      context(buildChannelActivity({ id: "self-message", text: "self request" })),
+      self,
+    );
+    await handler(
+      context(
+        buildChannelActivity({
+          id: "other-message",
+          text: "other request",
+          entities: [{ type: "mention", mentioned: { id: "other-bot", type: "bot" } }],
+        }),
+      ),
+      other,
+    );
+
+    await vi.waitFor(() => {
+      expect(self.adoptedCount()).toBe(1);
+      expect(other.adoptedCount()).toBe(1);
+    });
+    expect(
+      runtimeApiMockState.dispatchReplyWithBufferedBlockDispatcher,
+    ).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ ctx: expect.objectContaining({ BodyForAgent: "self request" }) }),
+    );
+    expect(self.abandonedCount()).toBe(0);
+    expect(other.abandonedCount()).toBe(0);
+  });
+
   it("dispatches HTML-only text through the immediate debounce flush without double stripping", async () => {
     const handler = createHandler({
       channels: { msteams: { dmPolicy: "open", allowFrom: ["*"] } },

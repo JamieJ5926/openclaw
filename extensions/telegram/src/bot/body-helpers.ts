@@ -1,14 +1,5 @@
 // Telegram helper module supports body helpers behavior.
-import type {
-  Chat,
-  Message,
-  MessageOrigin,
-  RichBlock,
-  RichBlockCaption,
-  RichMessageButton,
-  RichText,
-  User,
-} from "grammy/types";
+import type { Chat, Message, MessageOrigin, User } from "grammy/types";
 import type {
   ChannelInboundMediaInput,
   NormalizedLocation,
@@ -102,142 +93,10 @@ export function buildSenderLabel(msg: Message, senderId?: number | string) {
 
 export type TelegramTextEntity = NonNullable<Message["entities"]>[number];
 
-const TELEGRAM_RICH_MESSAGE_PLACEHOLDER = "[unsupported Telegram rich_message received]";
-
 type TelegramTextMessage = Pick<
   Message,
   "text" | "caption" | "entities" | "caption_entities" | "poll"
 > & { rich_message?: Message.RichMessageMessage["rich_message"] };
-
-function compactRichText(value: string): string {
-  return value
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .join("\n");
-}
-
-function joinRichText(parts: string[], separator: string): string {
-  return parts.map(compactRichText).filter(Boolean).join(separator);
-}
-
-function renderRichMessageButton(button: RichMessageButton): string {
-  return renderRichInlineText(button.text);
-}
-
-function renderRichInlineText(value: RichText | undefined): string {
-  if (value === undefined) {
-    return "";
-  }
-  if (typeof value === "string") {
-    return value;
-  }
-  if (Array.isArray(value)) {
-    return value.map(renderRichInlineText).filter(Boolean).join("");
-  }
-  switch (value.type) {
-    case "anchor":
-      return "";
-    case "button":
-      return renderRichMessageButton(value.button);
-    case "custom_emoji":
-      return value.alternative_text;
-    case "mathematical_expression":
-      return value.expression;
-    default:
-      return renderRichInlineText(value.text);
-  }
-}
-
-function renderRichCaption(caption: RichBlockCaption | undefined): string {
-  return caption
-    ? joinRichText(
-        [renderRichInlineText(caption.text), renderRichInlineText(caption.credit ?? "")],
-        "\n",
-      )
-    : "";
-}
-
-function renderRichBlock(block: RichBlock): string {
-  switch (block.type) {
-    case "paragraph":
-    case "heading":
-    case "pre":
-    case "footer":
-    case "thinking":
-      return renderRichInlineText(block.text);
-    case "expandable_blockquote":
-    case "pullquote":
-      return joinRichText(
-        [renderRichInlineText(block.text), renderRichInlineText(block.credit ?? "")],
-        "\n",
-      );
-    case "mathematical_expression":
-      return block.expression;
-    case "blockquote":
-      return joinRichText(
-        [renderRichInlineText(block.credit ?? ""), renderRichBlocks(block.blocks)],
-        "\n",
-      );
-    case "collage":
-    case "slideshow":
-      return joinRichText([renderRichCaption(block.caption), renderRichBlocks(block.blocks)], "\n");
-    case "details":
-      return joinRichText(
-        [renderRichInlineText(block.summary), renderRichBlocks(block.blocks)],
-        "\n",
-      );
-    case "list":
-      return joinRichText(
-        block.items.map((item) => joinRichText([item.label, renderRichBlocks(item.blocks)], "\n")),
-        "\n",
-      );
-    case "table":
-      return joinRichText(
-        [
-          renderRichInlineText(block.caption ?? ""),
-          ...block.cells.flatMap((row) => row.map((cell) => renderRichInlineText(cell.text ?? ""))),
-        ],
-        "\n",
-      );
-    case "animation":
-    case "audio":
-    case "document":
-    case "map":
-    case "photo":
-    case "video":
-    case "voice_note":
-      return renderRichCaption(block.caption);
-    case "buttons":
-      return joinRichText(block.buttons.map(renderRichMessageButton), "\n");
-    case "anchor":
-    case "divider":
-      return "";
-  }
-  block satisfies never;
-  return "";
-}
-
-function renderRichBlocks(blocks: readonly RichBlock[]): string {
-  return joinRichText(blocks.map(renderRichBlock), "\n");
-}
-
-export function resolveTelegramRichMessagePlaceholder(
-  msg: TelegramTextMessage,
-): string | undefined {
-  return msg.rich_message ? TELEGRAM_RICH_MESSAGE_PLACEHOLDER : undefined;
-}
-
-export function resolveTelegramRichMessageText(msg: TelegramTextMessage): string | undefined {
-  if (!msg.rich_message) {
-    return undefined;
-  }
-  return compactRichText(renderRichBlocks(msg.rich_message.blocks)) || undefined;
-}
-
-export function resolveTelegramRichMessageBody(msg: TelegramTextMessage): string | undefined {
-  return resolveTelegramRichMessageText(msg) ?? resolveTelegramRichMessagePlaceholder(msg);
-}
 
 export function isBinaryContent(text: string): boolean {
   for (let i = 0; i < text.length; i++) {
@@ -363,26 +222,6 @@ export function hasBotMention(msg: Message, botUsername: string) {
     }
   }
   return false;
-}
-
-export function hasLeadingBotCommandAddressedToOtherBot(
-  msg: Message,
-  botUsername: string,
-): boolean {
-  const { text, entities } = getTelegramTextParts(msg);
-  const normalizedBotUsername = normalizeLowercaseStringOrEmpty(botUsername).replace(/^@/u, "");
-  if (!normalizedBotUsername) {
-    return false;
-  }
-  const leadingCommand = entities.find(
-    (entity) => entity.type === "bot_command" && entity.offset === 0,
-  );
-  if (!leadingCommand) {
-    return false;
-  }
-  const command = text.slice(0, leadingCommand.length);
-  const target = command.match(/^\/[^@\s]+@([a-z0-9_]+)$/iu)?.[1];
-  return Boolean(target && target.toLowerCase() !== normalizedBotUsername);
 }
 
 export function hasBotMentionInText(text: string, botUsername: string): boolean {

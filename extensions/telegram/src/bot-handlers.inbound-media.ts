@@ -30,6 +30,7 @@ import type {
 import type { TelegramSpooledReplayDeferredParticipant } from "./bot-processing-outcome.js";
 import { MEDIA_GROUP_TIMEOUT_MS, type MediaGroupEntry } from "./bot-updates.js";
 import { resolveMedia } from "./bot/delivery.resolve-media.js";
+import { prepareTelegramMessageAddress } from "./bot/explicit-address.js";
 import {
   buildTelegramGroupPeerId,
   buildTelegramThreadParams,
@@ -237,6 +238,7 @@ export function createTelegramInboundMedia({
       facts: {
         canDetectMention: Boolean(botUsername) || mentionRegexes.length > 0,
         wasMentioned,
+        explicitAddress: ctx.recipient?.explicitAddress,
         hasAnyMention,
         implicitMentionKinds,
       },
@@ -319,6 +321,16 @@ export function createTelegramInboundMedia({
           enumerable: true,
         });
         primary = { ctx: combinedContext, msg: combinedMessage };
+      }
+      await prepareTelegramMessageAddress(primary.ctx, (target) => bot.api.getChat(target));
+      if (primary.ctx.recipient?.shouldSkip) {
+        logger.info(
+          { chatId: entry.chatId, reason: "addressed-to-other" },
+          "skipping Telegram album",
+        );
+        releaseDispatchDedupeClaims(entry.dispatchDedupeClaims);
+        settleSpooledReplayParticipants(entry.spooledReplayParticipants, { kind: "skipped" });
+        return;
       }
       const mediaDisposition = await resolveUnaddressedGroupMediaDisposition({
         ...entry,

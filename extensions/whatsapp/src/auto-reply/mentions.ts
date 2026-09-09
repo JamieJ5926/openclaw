@@ -1,7 +1,9 @@
 // Whatsapp plugin module implements mentions behavior.
+import { isJidBot, isJidMetaAI } from "baileys";
 import {
   buildMentionRegexes,
   normalizeMentionText,
+  type InboundMentionFacts,
 } from "openclaw/plugin-sdk/channel-mention-gating";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import {
@@ -112,9 +114,20 @@ export function debugMention(
   msg: AdmittedWebInboundMessage,
   mentionCfg: MentionConfig,
   authDir?: string,
-): { wasMentioned: boolean; details: Record<string, unknown> } {
+): {
+  wasMentioned: boolean;
+  explicitAddress: InboundMentionFacts["explicitAddress"];
+  details: Record<string, unknown>;
+} {
   const mentionTargets = resolveMentionTargets(msg, authDir);
   const result = isBotMentionedFromTargets(msg, mentionCfg, mentionTargets);
+  const explicitAddress = mentionTargets.normalizedMentions.some((identity) =>
+    identitiesOverlap(mentionTargets.self, identity),
+  )
+    ? "self"
+    : msg.group?.mentions?.jids?.some((jid) => isJidMetaAI(jid) || isJidBot(jid))
+      ? "other"
+      : undefined;
   const admission = requireWhatsAppInboundAdmission(msg);
   const details = {
     from: admission.conversation.id,
@@ -129,7 +142,7 @@ export function debugMention(
     selfE164: msg.platform.self?.e164 ?? msg.platform.selfE164 ?? null,
     resolvedSelf: mentionTargets.self,
   };
-  return { wasMentioned: result, details };
+  return { wasMentioned: result, explicitAddress, details };
 }
 
 export function resolveOwnerList(mentionCfg: MentionConfig, selfE164?: string | null) {

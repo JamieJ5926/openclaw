@@ -288,6 +288,73 @@ describe("googlechat inbound access policy", () => {
     expect(result.ok).toBe(true);
   });
 
+  it.each([
+    {
+      name: "another app",
+      botUser: "users/self-bot",
+      users: [{ name: "users/other-bot", type: "BOT" }],
+      ok: false,
+    },
+    {
+      name: "both apps",
+      botUser: "users/self-bot",
+      users: [
+        { name: "users/other-bot", type: "BOT" },
+        { name: "users/self-bot", type: "BOT" },
+      ],
+      ok: true,
+    },
+    {
+      name: "the app alias",
+      botUser: "users/self-bot",
+      users: [{ name: "users/app", type: "BOT" }],
+      ok: true,
+    },
+    {
+      name: "a human",
+      botUser: "users/self-bot",
+      users: [{ name: "users/member", type: "HUMAN" }],
+      ok: true,
+    },
+    {
+      name: "an unknown user type",
+      botUser: "users/self-bot",
+      users: [{ name: "users/other-bot" }],
+      ok: true,
+    },
+    {
+      name: "an app without configured self identity",
+      botUser: undefined,
+      users: [{ name: "users/possible-self", type: "BOT" }],
+      ok: true,
+    },
+    {
+      name: "an app with only the self alias configured",
+      botUser: "users/app",
+      users: [{ name: "users/possible-self", type: "BOT" }],
+      ok: true,
+    },
+  ])(
+    "routes a group mention of $name with requireMention disabled",
+    async ({ botUser, users, ok }) => {
+      primeCommonDefaults();
+      allowInboundGroupTraffic();
+      const result = await applyInboundAccessPolicy({
+        account: {
+          accountId: "default",
+          config: {
+            botUser,
+            groups: { "spaces/AAA": { users: ["users/alice"], requireMention: false } },
+          },
+        } as never,
+        message: {
+          annotations: users.map((user) => ({ type: "USER_MENTION", userMention: { user } })),
+        },
+      });
+      expect(result.ok).toBe(ok);
+    },
+  );
+
   it("expands generic message sender access groups before DM access checks", async () => {
     primeCommonDefaults();
     const readAllowFromStore = vi.fn(async () => []);

@@ -68,6 +68,7 @@ import type { FeishuMessageEvent } from "./event-types.js";
 import type { FeishuIngressLifecycle } from "./feishu-ingress.js";
 import {
   extractMentionTargets,
+  hasFeishuOtherBotMention,
   isFeishuBroadcastMention,
   isMentionForwardRequest,
 } from "./mention.js";
@@ -201,6 +202,11 @@ export function parseFeishuMessageEvent(
     senderType: event.sender.sender_type === "bot" ? "bot" : "user",
     chatType: event.message.chat_type,
     mentionedBot,
+    explicitAddress: mentionedBot
+      ? "self"
+      : hasFeishuOtherBotMention(event, botOpenId)
+        ? "other"
+        : undefined,
     hasAnyMention,
     rootId: event.message.root_id || undefined,
     parentId: event.message.parent_id || undefined,
@@ -640,13 +646,16 @@ export async function handleFeishuMessage(params: {
       senderUserId,
       requireMention,
       mentionedBot: ctx.mentionedBot,
+      explicitAddress: ctx.explicitAddress,
     });
     if (groupSenderActivationIngress.senderAccess.decision !== "allow") {
       log(`feishu: sender ${ctx.senderOpenId} not in group ${ctx.chatId} sender allowlist`);
       return;
     }
     if (groupSenderActivationIngress.ingress.admission !== "dispatch") {
-      log(`feishu[${account.accountId}]: message in group ${ctx.chatId} did not mention bot`);
+      log(
+        `feishu[${account.accountId}]: message in group ${ctx.chatId} skipped (${groupSenderActivationIngress.activationAccess.reasonCode})`,
+      );
       // Record to pending history for non-broadcast groups only. For broadcast groups,
       // the mentioned handler's broadcast dispatch writes the turn directly into all
       // agent sessions — buffering here would cause duplicate replay when this account
@@ -1389,6 +1398,7 @@ export async function handleFeishuMessage(params: {
             senderUserId,
             requireMention,
             mentionedBot: ctx.mentionedBot,
+            explicitAddress: ctx.explicitAddress,
             contextBinding,
             threadId: ctx.rootId && isTopicSessionForThread ? ctx.rootId : undefined,
           })

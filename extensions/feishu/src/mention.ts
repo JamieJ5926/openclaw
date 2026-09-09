@@ -23,6 +23,20 @@ export function isFeishuBroadcastMention(mention: FeishuMentionLike): boolean {
   return mentionIds.some((id) => id?.trim().toLowerCase() === "all");
 }
 
+export function hasFeishuOtherBotMention(event: FeishuMessageEvent, botOpenId?: string): boolean {
+  const selfId = botOpenId?.trim();
+  return Boolean(
+    selfId &&
+    event.message.mentions?.some(
+      (mention) =>
+        mention.mentioned_type === "bot" &&
+        !isFeishuBroadcastMention(mention) &&
+        mention.id.open_id &&
+        mention.id.open_id !== selfId,
+    ),
+  );
+}
+
 /**
  * Extract mention targets from message event (excluding the bot itself)
  */

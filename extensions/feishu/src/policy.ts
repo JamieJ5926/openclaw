@@ -204,6 +204,7 @@ export async function resolveFeishuGroupSenderActivationIngressAccess(params: {
   senderUserId?: string | null;
   requireMention: boolean;
   mentionedBot: boolean;
+  explicitAddress?: "self" | "other";
   command?: { hasControlCommand: boolean };
   contextBinding?: ChannelIngressContextBinding;
   threadId?: string;
@@ -229,6 +230,7 @@ export async function resolveFeishuGroupSenderActivationIngressAccess(params: {
     mentionFacts: {
       canDetectMention: true,
       wasMentioned: params.mentionedBot,
+      explicitAddress: params.explicitAddress,
     },
     policy: {
       activation: {

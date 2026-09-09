@@ -92,7 +92,7 @@ export type TelegramSupersedeAuthContext = {
   accountId: string;
   /** Bot username for @bot command targeting (from getMe / botInfo). */
   botUsername?: string;
-  /** Test seam / preloaded pairing-store ids; defaults to live pairing store. */
+  botUserId?: number;
 };
 
 /**

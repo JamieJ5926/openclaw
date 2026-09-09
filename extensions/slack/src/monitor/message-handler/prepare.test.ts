@@ -2632,9 +2632,80 @@ Second paragraph should still reach the agent after Slack's preview cutoff.`;
     threadTs?: string;
     resolveUserGroup?: boolean;
     directMessage?: boolean;
+    groupDirectMessage?: boolean;
     unresolvedBot?: boolean;
     mentionPatterns?: string[];
+    otherIsBot?: boolean;
+    ignoreOtherMentions?: boolean;
+    requireMention?: boolean;
+    replyToBot?: boolean;
+    lookupFails?: boolean;
   }> = [
+    {
+      name: "drops a native other-bot mention in an open room",
+      text: "<@U456> hey",
+      accepted: false,
+      otherIsBot: true,
+      ignoreOtherMentions: false,
+      recordHistory: true,
+    },
+    {
+      name: "drops a native other-bot mention despite a wake word",
+      text: "<@U456> helper",
+      accepted: false,
+      otherIsBot: true,
+      ignoreOtherMentions: false,
+      requireMention: true,
+      mentionPatterns: ["helper"],
+    },
+    {
+      name: "drops a native other-bot mention despite replying to this bot",
+      text: "<@U456> hey",
+      accepted: false,
+      otherIsBot: true,
+      ignoreOtherMentions: false,
+      requireMention: true,
+      threadTs: "10.000",
+      replyToBot: true,
+    },
+    {
+      name: "keeps explicit self alongside another bot",
+      text: "<@B1> <@U456> hey",
+      accepted: true,
+      otherIsBot: true,
+      ignoreOtherMentions: false,
+      requireMention: true,
+    },
+    {
+      name: "keeps another human mention in an open room",
+      text: "<@U456> hey",
+      accepted: true,
+      otherIsBot: false,
+      ignoreOtherMentions: false,
+    },
+    {
+      name: "keeps an unresolved recipient when its lookup fails",
+      text: "<@U456> hey",
+      accepted: true,
+      lookupFails: true,
+      ignoreOtherMentions: false,
+    },
+    {
+      name: "keeps native other-bot mentions in direct messages",
+      text: "<@U456> hey",
+      accepted: true,
+      otherIsBot: true,
+      directMessage: true,
+      ignoreOtherMentions: false,
+    },
+    {
+      name: "drops native other-bot mentions in group direct messages",
+      text: "<@U456> hey",
+      accepted: false,
+      otherIsBot: true,
+      groupDirectMessage: true,
+      ignoreOtherMentions: false,
+    },
     {
       name: "drops channel message mentioning another user when ignoreOtherMentions=true",
       text: "<@U456> hey",
@@ -2698,9 +2769,13 @@ Second paragraph should still reach the agent after Slack's preview cutoff.`;
           usergroups: { users: { list: usergroupsUsersList } },
         } as unknown as App["client"],
       }),
-      defaultRequireMention: false,
-      channelsConfig: { "*": { ignoreOtherMentions: true } },
+      defaultRequireMention: testCase.requireMention ?? false,
+      channelsConfig: { "*": { ignoreOtherMentions: testCase.ignoreOtherMentions ?? true } },
     });
+    slackCtx.resolveUserName = async (id) =>
+      testCase.lookupFails && id === "U456"
+        ? { error: new Error("lookup unavailable") }
+        : { name: id, isBot: id === "U456" ? testCase.otherIsBot : false };
     if (testCase.recordHistory) {
       slackCtx.historyLimit = 5;
     }
@@ -2716,9 +2791,14 @@ Second paragraph should still reach the agent after Slack's preview cutoff.`;
       defaultAccount,
       createSlackMessage({
         channel: testCase.directMessage ? "D123" : "C123",
-        channel_type: testCase.directMessage ? "im" : "channel",
+        channel_type: testCase.directMessage
+          ? "im"
+          : testCase.groupDirectMessage
+            ? "mpim"
+            : "channel",
         text: testCase.text,
         ...(testCase.threadTs && { thread_ts: testCase.threadTs }),
+        ...(testCase.replyToBot && { parent_user_id: "B1" }),
       }),
     );
 

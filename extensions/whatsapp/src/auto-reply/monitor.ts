@@ -227,7 +227,12 @@ export async function monitorWebChannel(
           text: msg.payload.commandBody ?? msg.payload.body,
           cfg,
           hasMedia: Boolean(msg.payload.media?.path || msg.payload.media?.type),
-          allowDebounce: !(msg.payload.location || msg.quote?.id || msg.quote?.body),
+          allowDebounce: !(
+            msg.payload.location ||
+            msg.quote?.id ||
+            msg.quote?.body ||
+            msg.group?.mentions?.jids?.length
+          ),
         });
 
       let connection;

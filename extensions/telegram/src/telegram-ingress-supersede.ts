@@ -1,3 +1,4 @@
+import type { Message } from "grammy/types";
 import type {
   ChannelIngressQueueClaim,
   ChannelIngressQueueRecord,
@@ -11,6 +12,7 @@ import {
   isBtwRequestText,
 } from "openclaw/plugin-sdk/command-primitives-runtime";
 // Telegram plugin module owns pre-adoption supersede policy for durable ingress.
+import { resolveTelegramNativeMessageAddress } from "./bot/explicit-address.js";
 import { isTelegramReadOnlyControlLaneText } from "./sequential-key.js";
 import type { TelegramSpooledUpdatePayload } from "./telegram-ingress-spool.payload.js";
 import {
@@ -139,6 +141,37 @@ export function createShouldSupersedeTelegramSpooledPending(
   return async (newEvent, pendingEvent) => {
     const pendingUpdate = pendingEvent.payload.update;
     const newUpdate = newEvent.payload.update;
+    if (newUpdate && typeof newUpdate === "object") {
+      // SAFETY: The spool preserves Telegram update objects and their native message fields.
+      const update = newUpdate as {
+        message?: Message;
+        edited_message?: Message;
+        channel_post?: Message;
+        edited_channel_post?: Message;
+      };
+      const message =
+        update.message ??
+        update.edited_message ??
+        update.channel_post ??
+        update.edited_channel_post;
+      if (message) {
+        // A later album member can supply the caption that owns its recipient.
+        if (message.media_group_id) {
+          return false;
+        }
+        const { explicitAddress, usernames } = resolveTelegramNativeMessageAddress({
+          message,
+          botUsername: auth.botUsername,
+          botId: auth.botUserId,
+          isGroup: message.chat?.type === "group" || message.chat?.type === "supergroup",
+        });
+        // Supersede cancels claimed work before regular admission. Native foreign
+        // recipients must be rejected here too; unresolved usernames wait for admission.
+        if (explicitAddress === "other" || (explicitAddress !== "self" && usernames.size > 0)) {
+          return false;
+        }
+      }
+    }
     // Ambient pending supersede still requires an authorized sender — same as the
     // old fence (post-auth). Unauthorized strangers cannot cancel pre-adoption work.
     if (

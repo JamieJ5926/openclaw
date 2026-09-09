@@ -371,6 +371,7 @@ export type AccessGraphGate = {
     shouldSkip: boolean;
     canDetectMention?: boolean;
     wasMentioned?: boolean;
+    explicitAddress?: InboundMentionFacts["explicitAddress"];
     hasAnyMention?: boolean;
     implicitMentionKinds?: readonly InboundImplicitMentionKind[];
     effectiveWasMentioned?: boolean;

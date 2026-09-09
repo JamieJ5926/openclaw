@@ -481,8 +481,13 @@ export async function preflightDiscordMessage(
     author.bot === true && !sender.isPluralKit && allowBotsMode === "mentions";
   const mentionSources = hydratedSources.map(({ message: source, kind }) => {
     const documents = resolveDiscordMessageMentionDocuments(source);
+    const activeUserMentions = (source.mentionedUsers ?? []).filter(
+      (user) =>
+        source.type !== MessageType.Reply ||
+        documents.some((text) => hasRawDiscordUserMention(text, user.id)),
+    );
     const hasRawMention =
-      (kind === "unavailable" || (requiresActiveBotMention && source.type === MessageType.Reply)) &&
+      (kind === "unavailable" || source.type === MessageType.Reply) &&
       documents.some((text) => hasRawDiscordUserMention(text, botId));
     const explicitlyMentioned = Boolean(
       botId &&
@@ -494,6 +499,12 @@ export async function preflightDiscordMessage(
       explicitlyMentioned,
       activeNativeMention:
         explicitlyMentioned && (source.type !== MessageType.Reply || hasRawMention),
+      mentionsOtherBot: Boolean(
+        botId && activeUserMentions.some((user) => user.bot === true && user.id !== botId),
+      ),
+      hasOtherUserOrRoleMention:
+        activeUserMentions.some((user) => user.id !== botId) ||
+        (source.mentionedRoles?.length ?? 0) > 0,
     };
   });
   const explicitlyMentioned = mentionSources.some((source) => source.explicitlyMentioned);
@@ -502,9 +513,6 @@ export async function preflightDiscordMessage(
     ((message.mentionedUsers?.length ?? 0) > 0 ||
       (message.mentionedRoles?.length ?? 0) > 0 ||
       (message.mentionedEveryone && (!author.bot || sender.isPluralKit)));
-  const hasUserOrRoleMention =
-    !isDirectMessage &&
-    ((message.mentionedUsers?.length ?? 0) > 0 || (message.mentionedRoles?.length ?? 0) > 0);
 
   if (
     isGuildMessage &&
@@ -730,12 +738,37 @@ export async function preflightDiscordMessage(
   }
 
   const canDetectMention = Boolean(botId) || mentionRegexes.length > 0;
+  const ignoreOtherMentions =
+    channelConfig?.ignoreOtherMentions ?? guildInfo?.ignoreOtherMentions ?? false;
+  const referencedReply = resolveDiscordReferencedReplyMessage(message);
+  const referencedAuthor = referencedReply?.author;
+  const referencedWebhookId = referencedReply ? resolveDiscordWebhookId(referencedReply) : null;
+  const replyTargetsOtherBot =
+    Boolean(botId) &&
+    referencedAuthor?.bot === true &&
+    referencedAuthor.id !== botId &&
+    !referencedWebhookId;
+  const mentionsOtherBot = mentionSources.some((source) => source.mentionsOtherBot);
+  const ignoresOtherRecipient =
+    isGuildMessage &&
+    ignoreOtherMentions &&
+    mentionSources.some((source) => source.hasOtherUserOrRoleMention);
+  // Reply notifications can include our user ID without addressing us in the text.
+  // Only active native mentions may override another recipient's address.
+  const explicitlyAddressesSelf = mentionSources.some((source) => source.activeNativeMention);
   const mentionDecision = resolveInboundMentionDecision({
     facts: {
       canDetectMention,
       wasMentioned,
       hasAnyMention,
       implicitMentionKinds,
+      explicitAddress: isDirectMessage
+        ? undefined
+        : explicitlyAddressesSelf
+          ? "self"
+          : mentionsOtherBot || replyTargetsOtherBot || ignoresOtherRecipient
+            ? "other"
+            : undefined,
     },
     policy: {
       isGroup: isGuildMessage,
@@ -759,25 +792,18 @@ export async function preflightDiscordMessage(
   logDebug(
     `[discord-preflight] shouldRequireMention=${shouldRequireMention} baseRequireMention=${shouldRequireMentionByConfig} boundThreadSession=${isBoundThreadSession} mentionDecision.shouldSkip=${mentionDecision.shouldSkip} wasMentioned=${wasMentioned}`,
   );
-  if (isGuildMessage && shouldRequireMention) {
-    if (mentionDecision.shouldSkip) {
-      logDebug(`[discord-preflight] drop: no-mention`);
-      logVerbose(`discord: drop guild message (mention required, botId=${botId ?? "<missing>"})`);
-      logger.info(
-        {
-          channelId: messageChannelId,
-          reason: "no-mention",
-        },
-        "discord: skipping guild message",
-      );
-      await recordDiscordPendingHistoryEntry({
-        preflight: params,
-        historyKey: messageChannelId,
-        message,
-        entry: historyEntry,
-      });
-      return null;
-    }
+  if (mentionDecision.shouldSkip) {
+    const reason =
+      mentionDecision.skipReason === "addressed-to-other" ? "addressed-to-other" : "no-mention";
+    logDebug(`[discord-preflight] drop: ${reason}`);
+    logger.info({ channelId: messageChannelId, reason }, "discord: skipping message");
+    await recordDiscordPendingHistoryEntry({
+      preflight: params,
+      historyKey: messageChannelId,
+      message,
+      entry: historyEntry,
+    });
+    return null;
   }
 
   if (requiresActiveBotMention) {
@@ -791,36 +817,6 @@ export async function preflightDiscordMessage(
       return null;
     }
   }
-  const ignoreOtherMentions =
-    channelConfig?.ignoreOtherMentions ?? guildInfo?.ignoreOtherMentions ?? false;
-  const referencedReply = resolveDiscordReferencedReplyMessage(message);
-  const referencedWebhookId = referencedReply ? resolveDiscordWebhookId(referencedReply) : null;
-  const referencedAuthor = referencedReply?.author;
-  const replyTargetsOtherBot =
-    Boolean(botId) &&
-    Boolean(referencedAuthor?.bot) &&
-    referencedAuthor?.id !== botId &&
-    !referencedWebhookId;
-  if (
-    isGuildMessage &&
-    ignoreOtherMentions &&
-    (hasUserOrRoleMention || replyTargetsOtherBot) &&
-    !wasMentioned &&
-    !mentionDecision.implicitMention
-  ) {
-    logDebug(`[discord-preflight] drop: addressed-to-other`);
-    logVerbose(
-      `discord: drop guild message (addressed to another identity, ignoreOtherMentions=true, botId=${botId})`,
-    );
-    await recordDiscordPendingHistoryEntry({
-      preflight: params,
-      historyKey: messageChannelId,
-      message,
-      entry: historyEntry,
-    });
-    return null;
-  }
-
   const systemLocation = resolveDiscordSystemLocation({
     isDirectMessage,
     isGroupDm,

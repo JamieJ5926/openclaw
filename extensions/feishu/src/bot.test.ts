@@ -1789,6 +1789,59 @@ describe("handleFeishuMessage command authorization", () => {
     expect(mockDispatchReplyFromConfig).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    {
+      name: "another bot",
+      recipients: [{ openId: "ou-other", mentionedType: "bot" }],
+      dispatches: 0,
+    },
+    {
+      name: "both bots",
+      recipients: [
+        { openId: "ou-other", mentionedType: "bot" },
+        { openId: "ou-bot", mentionedType: "bot" },
+      ],
+      dispatches: 1,
+    },
+    {
+      name: "a human",
+      recipients: [{ openId: "ou-member", mentionedType: "user" }],
+      dispatches: 1,
+    },
+    {
+      name: "an unknown recipient",
+      recipients: [{ openId: "ou-unknown", mentionedType: undefined }],
+      dispatches: 1,
+    },
+  ])(
+    "routes a group mention of $name when requireMention is disabled",
+    async ({ name, recipients, dispatches }) => {
+      const event = createFeishuTestEvent({
+        messageId: `msg-explicit-address-${name}`,
+        chatId: "oc-group",
+        chatType: "group",
+        text: recipients.map((_, index) => `@_user_${index}`).join(" ") + " check the build",
+        message: {
+          mentions: recipients.map(({ openId, mentionedType }, index) => ({
+            key: `@_user_${index}`,
+            id: { open_id: openId },
+            name: "Recipient",
+            mentioned_type: mentionedType,
+          })),
+        },
+      });
+      await dispatchMessage({
+        cfg: createFeishuTestConfig({
+          groupPolicy: "open",
+          groups: { "oc-group": { requireMention: false } },
+        }),
+        event,
+        botOpenId: "ou-bot",
+      });
+      expect(mockDispatchReplyFromConfig).toHaveBeenCalledTimes(dispatches);
+    },
+  );
+
   it("verifies app-scoped bot mention ids before admitting bot-authored events", async () => {
     mockShouldComputeCommandAuthorized.mockReturnValue(false);
     const baseFeishuConfig = {
