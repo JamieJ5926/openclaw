@@ -198,6 +198,7 @@ afterEach(async () => {
   try {
     for (const browserVoiceSessionId of browserVoiceSessionIds) {
       await closeTalkClientGatewayControlSession({
+        agentId: "voice",
         voiceSessionId: browserVoiceSessionId,
         sessionKey: "main",
         connId: client.connId,

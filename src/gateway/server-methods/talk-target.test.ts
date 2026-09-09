@@ -18,6 +18,7 @@ import {
 } from "../../test-utils/openclaw-test-state.js";
 import { handleGatewayRequest } from "../server-methods.js";
 import { sharingPolicyClient } from "../session-sharing.test-utils.js";
+import * as gatewayControl from "../talk-client-gateway-control.js";
 import { closeTalkClientGatewayControlSession } from "../talk-client-gateway-control.js";
 import { cleanupTalkConnection } from "../talk-session-registry.js";
 import { createTalkClient } from "./talk-client-create.js";
@@ -83,7 +84,7 @@ let client: ReturnType<typeof sharingPolicyClient> & { connId: string };
 const createBrowserSession = vi.fn<
   NonNullable<RealtimeVoiceProviderPlugin["createBrowserSession"]>
 >(async () => browserSession);
-const createdCalls: Array<{ sessionKey: string; voiceSessionId: string }> = [];
+const createdCalls: Array<{ agentId: string; sessionKey: string; voiceSessionId: string }> = [];
 const cancelBrowserSession = vi.fn(async () => undefined);
 const context = {
   getRuntimeConfig: () => config,
@@ -113,7 +114,7 @@ async function dispatch(
       .map((agentId) => clientVoiceSessionTesting.readRecord(agentId, voiceSessionId))
       .find(Boolean);
     if (record) {
-      createdCalls.push({ sessionKey: record.sessionKey, voiceSessionId });
+      createdCalls.push({ agentId: record.agentId, sessionKey: record.sessionKey, voiceSessionId });
     }
   }
   return respond;
@@ -177,6 +178,91 @@ describe("Talk target preparation through Gateway authorization", () => {
       loadSessionEntry({ agentId: "voice", sessionKey: "agent:voice:selected" }),
     ).toBeUndefined();
   });
+
+  it.each([false, true])(
+    "rejects another agent's controlled close before teardown (owner access revoked=%s)",
+    async (revoked) => {
+      const ownerCreation = vi.spyOn(gatewayControl, "createTalkClientGatewayControlOwner");
+      for (const agentId of ["primary", "voice"]) {
+        expect(
+          await dispatch("talk.client.create", {
+            ...createParams,
+            agentId,
+            sessionKey: "selected",
+            voiceSessionId: "controlled-" + agentId,
+          }),
+        ).toHaveBeenCalledWith(true, expect.objectContaining(browserSession), undefined);
+      }
+      const owner = ownerCreation.mock.results[1]!.value;
+      const closeOwner = vi.spyOn(owner, "close");
+      const voiceScope = { agentId: "voice", sessionKey: "agent:voice:selected" };
+      const original = loadSessionEntry(voiceScope)!;
+      if (revoked) {
+        await replaceSessionEntry(voiceScope, {
+          ...original,
+          incognito: true,
+          createdActor: { type: "human", source: "profile", id: "another-person" },
+        });
+        expect(
+          await dispatch("talk.client.close", {
+            agentId: "voice",
+            sessionKey: "selected",
+            voiceSessionId: "controlled-voice",
+          }),
+        ).toHaveBeenCalledWith(
+          false,
+          undefined,
+          expect.objectContaining({ code: "INVALID_REQUEST" }),
+        );
+      }
+      const admittedClose = vi.fn<NonNullable<GatewayRequestHandlers[string]>>(async (request) => {
+        expect(request.sessionMutationAuthorization?.talkSessionTarget).toMatchObject({
+          agentId: "primary",
+          sessionKey: "selected",
+          canonicalKey: "agent:primary:selected",
+        });
+        await talkClientHandlers["talk.client.close"]!(request);
+      });
+      const respond = await dispatch(
+        "talk.client.close",
+        { agentId: "primary", sessionKey: "selected", voiceSessionId: "controlled-voice" },
+        { "talk.client.close": admittedClose },
+      );
+      expect(admittedClose).toHaveBeenCalledOnce();
+      expect
+        .soft(respond)
+        .toHaveBeenCalledWith(
+          false,
+          undefined,
+          expect.objectContaining({ code: "INVALID_REQUEST" }),
+        );
+      expect.soft(closeOwner).not.toHaveBeenCalled();
+      expect.soft(cancelBrowserSession).not.toHaveBeenCalled();
+      expect
+        .soft(clientVoiceSessionTesting.readRecord("voice", "controlled-voice")?.status)
+        .toBe("open");
+      expect(clientVoiceSessionTesting.readRecord("primary", "controlled-primary")?.status).toBe(
+        "open",
+      );
+      if (revoked) {
+        await replaceSessionEntry(voiceScope, original);
+      }
+      for (const agentId of ["primary", "voice"]) {
+        expect(
+          await dispatch("talk.client.close", {
+            agentId,
+            sessionKey: "selected",
+            voiceSessionId: "controlled-" + agentId,
+          }),
+        ).toHaveBeenCalledWith(true, { ok: true }, undefined);
+        expect(clientVoiceSessionTesting.readRecord(agentId, "controlled-" + agentId)?.status).toBe(
+          "closed",
+        );
+      }
+      expect(closeOwner).toHaveBeenCalledOnce();
+      expect(cancelBrowserSession).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it.each(["main", undefined])("uses the configured Talk owner for %s", async (sessionKey) => {
     const respond = await dispatch("talk.client.create", {

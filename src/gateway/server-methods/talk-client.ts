@@ -239,8 +239,14 @@ export const talkClientHandlers: GatewayRequestHandlers = {
       return;
     }
     try {
+      const config = context.getRuntimeConfig();
+      const { agentId } =
+        sessionMutationAuthorization?.talkSessionTarget ??
+        prepareTalkSessionTarget(config, params.sessionKey, params.agentId);
+      sessionMutationAuthorization?.assertCurrent();
       if (
         await closeTalkClientGatewayControlSession({
+          agentId,
           voiceSessionId: params.voiceSessionId,
           sessionKey: params.sessionKey,
           connId: normalizeOptionalString(client?.connId),
@@ -249,10 +255,6 @@ export const talkClientHandlers: GatewayRequestHandlers = {
         respond(true, { ok: true }, undefined);
         return;
       }
-      const config = context.getRuntimeConfig();
-      const { agentId } =
-        sessionMutationAuthorization?.talkSessionTarget ??
-        prepareTalkSessionTarget(config, params.sessionKey, params.agentId);
       sessionMutationAuthorization?.assertCurrent();
       const origin = resolveClientVoiceSessionOrigin({
         agentId,

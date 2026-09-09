@@ -427,6 +427,7 @@ describe("native Talk action ownership through public plugin registration", () =
               insertionsBeforeTransition = inserted.mock.calls.length;
               if (transition === "closed") {
                 closing = closeTalkClientGatewayControlSession({
+                  agentId: AGENT_ID,
                   voiceSessionId,
                   sessionKey: SESSION_KEY,
                   connId: CONNECTION_ID,

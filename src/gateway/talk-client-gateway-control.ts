@@ -634,6 +634,7 @@ export function createTalkClientGatewayControlOwner(params: {
 }
 
 export async function closeTalkClientGatewayControlSession(params: {
+  agentId: string;
   voiceSessionId: string;
   sessionKey: string;
   connId?: string;
@@ -646,7 +647,9 @@ export async function closeTalkClientGatewayControlSession(params: {
   }
   const owned = matching.filter(
     (owner) =>
-      owner.sessionTarget.sessionKey === params.sessionKey.trim() && owner.connId === params.connId,
+      owner.sessionTarget.agentId === params.agentId &&
+      owner.sessionTarget.sessionKey === params.sessionKey.trim() &&
+      owner.connId === params.connId,
   );
   if (owned.length === 0) {
     throw new Error("Gateway-controlled voice session is not owned by this client");

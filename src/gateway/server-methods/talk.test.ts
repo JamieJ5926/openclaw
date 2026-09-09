@@ -4066,6 +4066,7 @@ describe("talk.client.create handler", () => {
     });
 
     expect(mocks.closeTalkClientGatewayControlSession).toHaveBeenCalledWith({
+      agentId: "main",
       voiceSessionId: "voice-gateway",
       sessionKey: "main",
       connId: "conn-1",

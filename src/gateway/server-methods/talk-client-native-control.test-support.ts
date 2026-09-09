@@ -311,6 +311,7 @@ export async function withNativePlugin(
       } finally {
         for (const voiceSessionId of voiceSessionIds) {
           await closeTalkClientGatewayControlSession({
+            agentId: AGENT_ID,
             voiceSessionId,
             sessionKey: SESSION_KEY,
             connId: CONNECTION_ID,

@@ -247,6 +247,7 @@ describe("talk.client.transcript", () => {
     resetCommandLane("talk-admission-test");
     if (ownedVoiceSessionId) {
       await closeTalkClientGatewayControlSession({
+        agentId: "main",
         voiceSessionId: ownedVoiceSessionId,
         sessionKey,
         connId: "conn-close",

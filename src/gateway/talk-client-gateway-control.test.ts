@@ -235,6 +235,7 @@ describe("Talk client Gateway control owner", () => {
       }
 
       const closeParams = {
+        agentId: sessionTarget.agentId,
         voiceSessionId: "voice-gateway",
         sessionKey: sessionTarget.sessionKey,
         connId: "conn-gateway",
