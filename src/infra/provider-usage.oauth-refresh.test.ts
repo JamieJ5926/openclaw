@@ -67,7 +67,7 @@ vi.mock("../plugins/provider-runtime.js", async (importOriginal) => {
   };
 });
 
-it.each(["refresh", "config", "replaced", "removed", "bookkeeping"] as const)(
+it.each(["refresh", "config", "replaced", "removed", "bookkeeping", "sibling-refresh"] as const)(
   "keeps account usage bound to its live owner (%s)",
   async (change) => {
     // Catalog discovery stays synthetic; credential persistence and publication are real.
@@ -105,7 +105,16 @@ it.each(["refresh", "config", "replaced", "removed", "bookkeeping"] as const)(
     const state = await createOpenClawTestState({ label: "usage-owner" });
     const release = createDeferred();
     const started = createDeferred();
-    const transport = vi.fn<typeof fetch>(async () => new Response("{}"));
+    const transport = vi.fn<typeof fetch>(async (_input, init) => {
+      if (
+        change === "sibling-refresh" &&
+        new Headers(init?.headers).get("Authorization") === "Bearer synthetic-original"
+      ) {
+        started.resolve();
+        await release.promise;
+      }
+      return new Response("{}");
+    });
     let failed = true;
     try {
       await resetPreparedModelRuntimeHarness(state);
@@ -119,7 +128,7 @@ it.each(["refresh", "config", "replaced", "removed", "bookkeeping"] as const)(
             }
           : undefined;
       hooks.transport =
-        change !== "config" && change !== "refresh"
+        change !== "config" && change !== "refresh" && change !== "sibling-refresh"
           ? async () => {
               started.resolve();
               await release.promise;
@@ -153,6 +162,13 @@ it.each(["refresh", "config", "replaced", "removed", "bookkeeping"] as const)(
         };
         store.order = { anthropic: ["anthropic:other", profileId] };
       }
+      if (change === "sibling-refresh") {
+        Object.assign(
+          store.profiles,
+          createExpiredOauthStore({ profileId: "anthropic:sibling", provider: "anthropic" })
+            .profiles,
+        );
+      }
       saveAuthProfileStore(store, agentDir);
       replaceRuntimeAuthProfileStoreSnapshots([{ agentDir, store }]);
       const runtime = getPreparedModelRuntimeMocks();
@@ -178,9 +194,9 @@ it.each(["refresh", "config", "replaced", "removed", "bookkeeping"] as const)(
         getRuntimeConfig: () => config,
         loadGatewayModelCatalogSnapshot: loader,
       });
-      const read = async () => {
+      const read = async (selectedProfileId = profileId) => {
         const respond = vi.fn();
-        const params = { agentId: "default", profileId };
+        const params = { agentId: "default", profileId: selectedProfileId };
         await expectDefined(
           modelsAuthUsageHandlers["models.authUsage"],
           "usage handler",
@@ -197,7 +213,21 @@ it.each(["refresh", "config", "replaced", "removed", "bookkeeping"] as const)(
       const pending = read();
       if (change !== "refresh") {
         await started.promise;
-        if (change === "config") {
+        if (change === "sibling-refresh") {
+          const revision = getRuntimeAuthProfileStoreCredentialsRevision();
+          const sibling = await read("anthropic:sibling");
+          expect(sibling?.[0]).toBe(true);
+          expect(
+            loadPersistedAuthProfileStore(agentDir)?.profiles["anthropic:sibling"],
+          ).toMatchObject({
+            access: "refreshed-access",
+            refresh: "rotated-refresh",
+          });
+          expect(getRuntimeAuthProfileStoreCredentialsRevision()).toBeGreaterThan(revision);
+          expect(loadPersistedAuthProfileStore(agentDir)?.profiles[profileId]).toEqual(
+            store.profiles[profileId],
+          );
+        } else if (change === "config") {
           const revision = getRuntimeAuthProfileStoreCredentialsRevision();
           markPreparedModelRuntimeSnapshotsStale("config reload");
           expect(prepared.isCurrent()).toBe(false);
@@ -226,8 +256,9 @@ it.each(["refresh", "config", "replaced", "removed", "bookkeeping"] as const)(
         release.resolve();
       }
       const result = await pending;
-      const allowed = change === "refresh" || change === "bookkeeping";
-      expect(transport).toHaveBeenCalledTimes(allowed ? 1 : 0);
+      const allowed =
+        change === "refresh" || change === "bookkeeping" || change === "sibling-refresh";
+      expect(transport).toHaveBeenCalledTimes(change === "sibling-refresh" ? 2 : allowed ? 1 : 0);
       if (allowed) {
         expect(result).toEqual([
           true,

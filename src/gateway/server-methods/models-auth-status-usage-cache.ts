@@ -4,7 +4,9 @@ import type { AuthProfileCredential, AuthProfileStore } from "../../agents/auth-
 import { getRuntimeAuthProfileStoreCredentialsRevision } from "../../agents/auth-profiles/runtime-snapshots.js";
 import { fingerprintAuthProfileCredential } from "../../agents/execution-auth-binding.js";
 import { getPreparedModelRuntimeAuthStore } from "../../agents/prepared-model-runtime-auth.js";
+import type { PreparedModelRuntimeSnapshot } from "../../agents/prepared-model-runtime.types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { coerceSecretRef } from "../../config/types.secrets.js";
 import { loadProviderUsageSummary } from "../../infra/provider-usage.load.js";
 import { PROVIDER_USAGE_TIMEOUT_MS } from "../../infra/provider-usage.shared.js";
 import type {
@@ -166,50 +168,77 @@ function scheduleProviderUsageRefresh(params: {
   const isCacheCurrent = () =>
     publishGeneration === cacheGeneration &&
     usageRefreshByAgentId.get(params.cacheOwnerKey)?.ownerToken === ownerToken;
-  const isAuthCurrent = () =>
-    isOwnerCurrent?.() !== false &&
-    credentialsRevision === getRuntimeAuthProfileStoreCredentialsRevision();
+  let credential = params.authProfile
+    ? params.authStore?.profiles[params.authProfile.profileId]
+    : undefined;
+  let readOwner: (() => PreparedModelRuntimeSnapshot | undefined) | undefined;
+  const rebindOwner = (owner: PreparedModelRuntimeSnapshot | undefined) => {
+    if (
+      !owner?.isCurrent() ||
+      owner.config !== params.configRef ||
+      !params.authProfile ||
+      !credential ||
+      // A reference alone cannot prove that its externally resolved secret is unchanged.
+      (credential.type === "api_key" &&
+        (credential.keyRef ||
+          coerceSecretRef(credential.key, params.configRef.secrets?.defaults))) ||
+      (credential.type === "token" &&
+        (credential.tokenRef ||
+          coerceSecretRef(credential.token, params.configRef.secrets?.defaults))) ||
+      !isDeepStrictEqual(
+        getPreparedModelRuntimeAuthStore(owner)?.profiles[params.authProfile.profileId],
+        credential,
+      )
+    ) {
+      return false;
+    }
+    isOwnerCurrent = owner.isCurrent;
+    credentialsRevision = getRuntimeAuthProfileStoreCredentialsRevision();
+    return true;
+  };
+  const isAuthCurrent = () => {
+    if (credentialsRevision === getRuntimeAuthProfileStoreCredentialsRevision()) {
+      return isOwnerCurrent?.() !== false;
+    }
+    // Sibling OAuth settlement can retire the generation without changing this account.
+    // Every transport, publication, and cached read must use the current published owner.
+    return rebindOwner(readOwner?.());
+  };
   const isCurrent = () => isCacheCurrent() && (!params.authProfile || isAuthCurrent());
-  const load = () =>
-    loadProviderUsageSummary({
+  const load = async () => {
+    const runtime = params.authProfile
+      ? await import("../../agents/prepared-model-runtime.js")
+      : undefined;
+    const ownerInput = {
+      agentId: params.agentId,
+      agentDir: params.agentDir,
+      workspaceDir: params.workspaceDir,
+      config: params.configRef,
+    };
+    readOwner = runtime ? () => runtime.getPreparedModelRuntimeSnapshot(ownerInput) : undefined;
+    return loadProviderUsageSummary({
       providers: params.providerIds,
       ...(params.authProfile ? { authProfile: params.authProfile } : {}),
       ...(params.authProfile
         ? {
             isAuthProfileCurrent: isCurrent,
-            onAuthProfileResolved: async (credential: AuthProfileCredential) => {
+            onAuthProfileResolved: async (resolvedCredential: AuthProfileCredential) => {
+              credential = resolvedCredential;
               if (credentialsRevision === getRuntimeAuthProfileStoreCredentialsRevision()) {
                 return;
               }
-              if (!isCacheCurrent() || !params.authProfile) {
+              if (!isCacheCurrent() || !params.authProfile || !runtime) {
                 return;
               }
-              // OAuth settlement may replace its own prepared auth owner. Await that owner's
-              // publication and accept only the exact credential the resolver settled on.
-              const { prepareModelRuntimeSnapshot } =
-                await import("../../agents/prepared-model-runtime.js");
-              const owner = await prepareModelRuntimeSnapshot({
-                agentId: params.agentId,
-                agentDir: params.agentDir,
-                workspaceDir: params.workspaceDir,
-                config: params.configRef,
-              });
+              // Own OAuth settlement must finish publication before accepting its new credential.
+              const owner = await runtime.prepareModelRuntimeSnapshot(ownerInput);
+              if (!isCacheCurrent() || !rebindOwner(owner)) {
+                return;
+              }
               const profileId = params.authProfile.profileId;
-              if (
-                !isCacheCurrent() ||
-                !owner.isCurrent() ||
-                owner.config !== params.configRef ||
-                !isDeepStrictEqual(
-                  getPreparedModelRuntimeAuthStore(owner)?.profiles[profileId],
-                  credential,
-                )
-              ) {
-                return;
-              }
-              isOwnerCurrent = owner.isCurrent;
-              credentialsRevision = getRuntimeAuthProfileStoreCredentialsRevision();
               params.credentialKey =
-                fingerprintAuthProfileCredential({ profileId, credential }) ?? params.credentialKey;
+                fingerprintAuthProfileCredential({ profileId, credential: resolvedCredential }) ??
+                params.credentialKey;
               const refresh = usageRefreshByAgentId.get(params.cacheOwnerKey);
               if (refresh) {
                 refresh.credentialKey = params.credentialKey;
@@ -223,6 +252,7 @@ function scheduleProviderUsageRefresh(params: {
       config: params.configRef,
       timeoutMs: PROVIDER_USAGE_TIMEOUT_MS,
     });
+  };
   // Track publication and finalization after the stale-while-revalidate reply.
   const promise = trackAsyncWork(() =>
     load()
