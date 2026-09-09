@@ -8,6 +8,7 @@ import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import * as imageGenerationRuntime from "../../image-generation/runtime.js";
 import * as mediaStore from "../../media/store.js";
 import { createOpenClawTools } from "../openclaw-tools.js";
+import * as imageGenerationExecution from "./image-generate-tool.execution.js";
 import { createImageGenerateTool } from "./image-generate-tool.js";
 import * as pdfNativeProviders from "./pdf-native-providers.js";
 import {
@@ -162,22 +163,38 @@ describe.runIf(process.platform === "win32")("host-local media tool file URLs", 
           expect(pdfResult.content).toEqual([{ type: "text", text: "native summary" }]);
           expect(pdfResult.details).toMatchObject({ pdf: pdfPath, native: true });
 
-          vi.spyOn(imageGenerationRuntime, "listRuntimeImageGenerationProviders").mockReturnValue([
-            {
-              id: "fixture",
-              defaultModel: "edit",
-              models: ["edit"],
-              isConfigured: () => true,
-              capabilities: {
-                generate: { maxCount: 1 },
-                edit: { enabled: true, maxInputImages: 1 },
-                geometry: {},
+          let providerRunUsed = false;
+          const releaseProviders = vi.fn(async () => {});
+          // Keep provider discovery stubbed while the tool reads the real file URL.
+          const acquiredProviders: Awaited<
+            ReturnType<typeof imageGenerationExecution.acquireImageGenerationToolProviders>
+          > = {
+            providers: [
+              {
+                id: "fixture",
+                defaultModel: "edit",
+                models: ["edit"],
+                isConfigured: () => true,
+                capabilities: {
+                  generate: { maxCount: 1 },
+                  edit: { enabled: true, maxInputImages: 1 },
+                  geometry: {},
+                },
+                generateImage: vi.fn(async () => {
+                  throw new Error("runtime generateImage spy should own the call");
+                }),
               },
-              generateImage: vi.fn(async () => {
-                throw new Error("runtime generateImage spy should own the call");
-              }),
+            ],
+            assertOpen() {},
+            run: async <T>(run: () => T | Promise<T>): Promise<T> => {
+              providerRunUsed = true;
+              return await run();
             },
-          ]);
+            release: releaseProviders,
+          };
+          const acquireProviders = vi
+            .spyOn(imageGenerationExecution, "acquireImageGenerationToolProviders")
+            .mockResolvedValue(acquiredProviders);
           const generateImage = vi
             .spyOn(imageGenerationRuntime, "generateImage")
             .mockResolvedValue({
@@ -194,16 +211,17 @@ describe.runIf(process.platform === "win32")("host-local media tool file URLs", 
             contentType: "image/png",
           });
           recordStage("image-generation-factory:before");
+          const generationConfig: OpenClawConfig = {
+            agents: {
+              defaults: {
+                mediaModels: { image: { primary: "fixture/edit" } },
+              },
+            },
+          };
           const generationTool = createImageGenerateTool({
             agentDir,
             workspaceDir,
-            config: {
-              agents: {
-                defaults: {
-                  mediaModels: { image: { primary: "fixture/edit" } },
-                },
-              },
-            },
+            config: generationConfig,
           });
           recordStage("image-generation-factory:after");
           expect(generationTool?.name).toBe("image_generate");
@@ -216,11 +234,19 @@ describe.runIf(process.platform === "win32")("host-local media tool file URLs", 
             image: imageUrl,
           });
           recordStage("image-generation-execute:after");
+          expect(acquireProviders).toHaveBeenCalledOnce();
+          expect(acquireProviders).toHaveBeenCalledWith({
+            cfg: generationConfig,
+            prepared: undefined,
+          });
+          expect(generateImage).toHaveBeenCalledOnce();
           expect(generateImage.mock.calls[0]?.[0]).toEqual(
             expect.objectContaining({
               inputImages: [expect.objectContaining({ buffer: ONE_PIXEL_PNG })],
             }),
           );
+          expect(providerRunUsed).toBe(true);
+          expect(releaseProviders).toHaveBeenCalledOnce();
         } catch (error) {
           recordFailure(error);
         } finally {
