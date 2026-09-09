@@ -19,7 +19,7 @@ openclaw-app:has(.shell:not([data-startup-stage="ready"])) {
   animation: none;
 }
 
-.content:has(> .startup-chat-skeleton) {
+.shell[data-startup-managed] > .content--chat {
   position: relative;
 }
 

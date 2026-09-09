@@ -54,7 +54,7 @@ suite.define(() => {
 
         try {
           await page.goto(controlUiSessionUrl(suite.server.baseUrl, "agent:main:session-a"));
-          const header = page.locator(".chat-pane__header").first();
+          const header = page.locator("openclaw-chat-pane .chat-pane__header").first();
           await header.waitFor();
           await header.locator(".workspace-icon").waitFor();
 
@@ -174,7 +174,7 @@ suite.define(() => {
         const search = page.locator(".agent-chat__search-bar input");
         await search.waitFor();
         const [headerBox, searchBox] = await Promise.all([
-          page.locator(".chat-pane__header").first().boundingBox(),
+          page.locator("openclaw-chat-pane .chat-pane__header").first().boundingBox(),
           search.boundingBox(),
         ]);
         expect(headerBox).not.toBeNull();

@@ -520,7 +520,7 @@ export function renderApplicationShell(host: ShellViewHost) {
               >
                 ${navigationContent}
                 ${
-                  host.startupPresentation?.started && !settingsTakeover && !onboarding
+                  host.startupPresentation?.retainSkeletons && !settingsTakeover && !onboarding
                     ? renderStartupSidebarSkeleton(host.startupSnapshot)
                     : nothing
                 }
@@ -595,7 +595,7 @@ export function renderApplicationShell(host: ShellViewHost) {
         })}
         ${nativeEmbed ? navigationContent : nothing}
         ${
-          host.startupPresentation?.started && chatLikeRoute
+          host.startupPresentation?.retainSkeletons && chatLikeRoute
             ? renderStartupChatSkeleton(presentationSessionKey, startupName, uiSettings)
             : nothing
         }

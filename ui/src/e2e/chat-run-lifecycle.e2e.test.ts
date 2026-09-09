@@ -52,7 +52,7 @@ suite.define(() => {
     await gateway.waitForRequest("sessions.list", { match: rosterMatch });
     const startup = await gateway.waitForRequest("chat.startup");
     expect(startup.params).toMatchObject({ sessionKey });
-    await currentPage.locator(".agent-chat__input textarea").fill("Try again");
+    await currentPage.locator("openclaw-chat-pane .agent-chat__input textarea").fill("Try again");
     await currentPage.getByRole("button", { name: "Send message" }).click();
     expect(await gateway.getRequests("chat.send")).toHaveLength(0);
 
@@ -79,7 +79,7 @@ suite.define(() => {
     await currentPage.getByRole("button", { name: "Stop generating" }).waitFor();
     await gateway.emitChatFinal({ sessionKey, runId, text: "Recovery completed." });
     await currentPage
-      .locator(".chat-group.assistant")
+      .locator("openclaw-chat-pane .chat-group.assistant")
       .getByText("Recovery completed.", { exact: true })
       .waitFor();
     await expect.poll(() => alert.count()).toBe(0);
@@ -93,7 +93,7 @@ suite.define(() => {
     const sessionKey = "agent:main:dashboard:failed-turn-elapsed";
     const gateway = await installMockGateway(currentPage, { sessionKey });
     await currentPage.goto(controlUiSessionUrl(suite.server.baseUrl, sessionKey));
-    const composer = currentPage.locator(".agent-chat__input textarea");
+    const composer = currentPage.locator("openclaw-chat-pane .agent-chat__input textarea");
     await composer.fill("First attempt");
     // Freeze wall time without pausing the animation frames that publish sends.
     const firstStartedAt = Date.now();
@@ -144,7 +144,7 @@ suite.define(() => {
       .getByText(renderedDiagnostic)
       .waitFor();
     expect(await failedAlert.locator("details").count()).toBe(0);
-    expect(await currentPage.locator(".chat-group.assistant").count()).toBe(0);
+    expect(await currentPage.locator("openclaw-chat-pane .chat-group.assistant").count()).toBe(0);
     expect(await currentPage.getByRole("button", { name: "Stop generating" }).count()).toBe(0);
 
     await currentPage.clock.setFixedTime(firstStartedAt + 981_000);
@@ -189,7 +189,7 @@ suite.define(() => {
     });
     await gateway.emitGatewayEvent("chat", { sessionKey, runId, state: "final", message: reply });
     const replyBody = currentPage
-      .locator(".chat-group.assistant")
+      .locator("openclaw-chat-pane .chat-group.assistant")
       .getByText(reply.content, { exact: true });
     await replyBody.waitFor();
     const elapsedLabel = currentPage.locator(".chat-work-group .chat-activity-group__label");
@@ -202,7 +202,7 @@ suite.define(() => {
     await replyBody.waitFor();
     await elapsedLabel.waitFor();
     expect(await elapsedLabel.textContent()).toBe("Worked for 13s");
-    expect(await currentPage.locator(".chat-group.user").count()).toBe(2);
+    expect(await currentPage.locator("openclaw-chat-pane .chat-group.user").count()).toBe(2);
   });
 
   it("keeps a continuing run inside its latest assistant reply", async () => {
@@ -226,7 +226,7 @@ suite.define(() => {
     });
 
     await currentPage.goto(`${suite.server?.baseUrl ?? ""}chat`);
-    const assistantGroup = currentPage.locator(".chat-group.assistant");
+    const assistantGroup = currentPage.locator("openclaw-chat-pane .chat-group.assistant");
     await assistantGroup.getByText("First result is ready.", { exact: true }).waitFor();
     await assistantGroup.locator(".chat-working-indicator--continuation").waitFor();
 
@@ -266,7 +266,7 @@ suite.define(() => {
     await currentPage.getByText("Older run result.", { exact: true }).waitFor();
     await currentPage.locator(".chat-reading-indicator").waitFor();
 
-    expect(await currentPage.locator(".chat-group.assistant").count()).toBe(2);
+    expect(await currentPage.locator("openclaw-chat-pane .chat-group.assistant").count()).toBe(2);
     expect(
       await currentPage
         .locator(".chat-group.assistant", { hasText: "Older run result." })
@@ -331,14 +331,16 @@ suite.define(() => {
     const gateway = await installMockGateway(currentPage, { sessionKey });
 
     await currentPage.goto(controlUiSessionUrl(suite.server.baseUrl, sessionKey));
-    await currentPage.locator(".agent-chat__input textarea").fill("keep this run stoppable");
+    await currentPage
+      .locator("openclaw-chat-pane .agent-chat__input textarea")
+      .fill("keep this run stoppable");
     await currentPage.getByRole("button", { name: "Send message" }).click();
     const send = await gateway.waitForRequest("chat.send");
     const runId = (send.params as { idempotencyKey?: unknown }).idempotencyKey;
     expect(typeof runId).toBe("string");
     const stop = currentPage.getByRole("button", { name: "Stop generating" });
     await stop.waitFor({ state: "visible" });
-    const composer = currentPage.locator(".agent-chat__input textarea");
+    const composer = currentPage.locator("openclaw-chat-pane .agent-chat__input textarea");
 
     await gateway.setOnline(false);
     await expect
@@ -395,7 +397,9 @@ suite.define(() => {
 
     await currentPage.goto(`${suite.server?.baseUrl ?? ""}chat`);
     await currentPage.getByText("saved 875.3k tokens", { exact: true }).waitFor();
-    await currentPage.locator(".agent-chat__input textarea").fill("keep working");
+    await currentPage
+      .locator("openclaw-chat-pane .agent-chat__input textarea")
+      .fill("keep working");
     // The working timer starts at the send click; pause first so the elapsed
     // reading is exactly the fastForward below, not inflated by real time.
     await pauseVirtualClock(currentPage);
@@ -437,7 +441,9 @@ suite.define(() => {
         .getByText("Ready for run lifecycle verification.")
         .waitFor({ timeout: 10_000 });
       await gateway.waitForRequest("sessions.list", { match: rosterMatch });
-      await currentPage.locator(".agent-chat__input textarea").fill("finish this run");
+      await currentPage
+        .locator("openclaw-chat-pane .agent-chat__input textarea")
+        .fill("finish this run");
       await currentPage.getByRole("button", { name: "Send message" }).click();
       const send = await gateway.waitForRequest("chat.send");
       const params = send.params as { idempotencyKey?: unknown };
@@ -619,7 +625,9 @@ suite.define(() => {
       .getByText("Ready for yielded lifecycle verification.")
       .waitFor({ timeout: 10_000 });
     await gateway.waitForRequest("sessions.list", { match: rosterMatch });
-    await currentPage.locator(".agent-chat__input textarea").fill("restart and continue");
+    await currentPage
+      .locator("openclaw-chat-pane .agent-chat__input textarea")
+      .fill("restart and continue");
     await currentPage.getByRole("button", { name: "Send message" }).click();
     const send = await gateway.waitForRequest("chat.send");
     const params = send.params as { idempotencyKey?: unknown };
@@ -665,7 +673,10 @@ suite.define(() => {
       yielded: true,
     });
 
-    await currentPage.locator(".chat-thread-inner").getByText(finalText, { exact: true }).waitFor();
+    await currentPage
+      .locator("openclaw-chat-pane .chat-thread-inner")
+      .getByText(finalText, { exact: true })
+      .waitFor();
     expect(await currentPage.getByRole("button", { name: "Stop generating" }).count()).toBe(0);
     await expect.poll(() => mainSessionRunIndicator.count()).toBe(0);
     await expect
@@ -686,7 +697,9 @@ suite.define(() => {
     const gateway = await installMockGateway(currentPage);
 
     await currentPage.goto(`${suite.server?.baseUrl ?? ""}chat`);
-    await currentPage.locator(".agent-chat__input textarea").fill("run the edit");
+    await currentPage
+      .locator("openclaw-chat-pane .agent-chat__input textarea")
+      .fill("run the edit");
     await currentPage.getByRole("button", { name: "Send message" }).click();
     const send = await gateway.waitForRequest("chat.send");
     const params = send.params as { idempotencyKey?: unknown };

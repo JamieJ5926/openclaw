@@ -58,7 +58,7 @@ suite.define(() => {
       expect(await gateway.getRequests("chat.metadata")).toHaveLength(0);
       expect(await gateway.getRequests("commands.list")).toHaveLength(0);
       await gateway.waitForRequest("models.list");
-      const composer = page.locator(".agent-chat__composer-combobox textarea");
+      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
       const sendButton = page.getByRole("button", { name: "Send message" });
       await composer.waitFor({ state: "visible", timeout: 10_000 });
       await expect.poll(() => sendButton.count()).toBe(0);
@@ -136,7 +136,7 @@ suite.define(() => {
         .locator(".chat-thread-inner")
         .getByText("History race stayed visible.")
         .waitFor({ timeout: 10_000 });
-      await page.locator(".agent-chat__composer-combobox textarea").fill("/");
+      await composer.fill("/");
       await page.getByRole("option", { name: /\/startup-ready/ }).waitFor({ timeout: 10_000 });
       // Check after both controls render so no late fallback RPC supplied either catalog.
       expect({
@@ -150,7 +150,7 @@ suite.define(() => {
     }
   });
 
-  it("paints startup history while canonical roster and metadata requests remain pending", async () => {
+  it("hydrates startup history before revealing settled roster and metadata", async () => {
     const context = await suite.newBrowserContext(createControlUiE2eContextOptions());
     const page = await context.newPage();
     const gateway = await installMockGateway(page, {
@@ -177,10 +177,15 @@ suite.define(() => {
       await gateway.waitForRequest("chat.startup");
       await gateway.waitForRequest("agents.list");
       await gateway.waitForRequest("chat.metadata");
-      await page
-        .locator(".chat-thread-inner")
-        .getByText("Transcript paints while optional startup data loads", { exact: true })
-        .waitFor({ timeout: 10_000 });
+      await gateway.waitForRequest("models.list");
+      const transcript = page.locator("openclaw-chat-pane .chat-thread");
+      const message = transcript.getByText("Transcript paints while optional startup data loads", {
+        exact: true,
+      });
+      await message.waitFor({ state: "attached", timeout: 10_000 });
+      await expect
+        .poll(() => transcript.evaluate((node) => getComputedStyle(node).opacity))
+        .toBe("0");
       expect(await gateway.getRequests("agents.list")).toHaveLength(1);
 
       await gateway.resolveDeferred("agents.list", {
@@ -210,6 +215,10 @@ suite.define(() => {
           }),
         )
         .toEqual(["hydrated-model"]);
+      await expect
+        .poll(() => transcript.evaluate((node) => getComputedStyle(node).opacity))
+        .toBe("1");
+      await message.waitFor({ state: "visible" });
       expect(await gateway.getRequests("agents.list")).toHaveLength(1);
     } finally {
       await suite.closeBrowserContext(context);

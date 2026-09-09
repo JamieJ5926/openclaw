@@ -19,6 +19,7 @@ export const startupPresentationContext = createContext<StartupPresentation>(
 export class StartupPresentationController {
   snapshot: StartupPresentation = READY_STARTUP_PRESENTATION;
   started = false;
+  retainSkeletons = false;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private chromeReady = false;
   private contentReady = false;
@@ -29,6 +30,7 @@ export class StartupPresentationController {
   start(initialAssistantName?: string, initialSidebarEntries?: readonly string[]) {
     this.dispose();
     this.started = true;
+    this.retainSkeletons = true;
     this.chromeReady = false;
     this.contentReady = false;
     this.shownAt = undefined;
@@ -60,6 +62,14 @@ export class StartupPresentationController {
   finish() {
     this.dispose();
     this.set({ ...this.snapshot, ...READY_STARTUP_PRESENTATION });
+  }
+
+  releaseSkeletons() {
+    if (this.snapshot.stage !== "ready" || !this.retainSkeletons) {
+      return;
+    }
+    this.retainSkeletons = false;
+    this.set({ ...this.snapshot });
   }
 
   dispose() {

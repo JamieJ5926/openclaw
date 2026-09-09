@@ -669,10 +669,12 @@ suite.define(() => {
     },
   );
 
-  it.each(["empty", "failed"])(
+  it.each(["empty", "empty compact", "failed"])(
     "reveals the %s initial history outcome without virtual rows",
     async (outcome) => {
-      await suite.withPage({ viewport: { width: 1440, height: 900 } }, async ({ page }) => {
+      const viewport =
+        outcome === "empty compact" ? { width: 800, height: 520 } : { width: 1440, height: 900 };
+      await suite.withPage({ viewport }, async ({ page }) => {
         const gateway = await installMockGateway(page, {
           communityInvite: false,
           historyMessages: [],

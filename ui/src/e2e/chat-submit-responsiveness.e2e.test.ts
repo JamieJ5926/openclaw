@@ -30,7 +30,7 @@ suite.define(() => {
     await withChatPage(async (page) => {
       const gateway = await installMockGateway(page);
       await page.goto(`${suite.server.baseUrl}chat`);
-      const composer = page.locator(".agent-chat__composer-combobox textarea");
+      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
       await composer.fill("discard before delivery");
       await gateway.setOnline(false);
       await gateway.closeLatest();
@@ -94,7 +94,7 @@ suite.define(() => {
       const gateway = await installMockGateway(page);
       await page.goto(`${suite.server.baseUrl}chat`);
 
-      const composer = page.locator(".agent-chat__composer-combobox textarea");
+      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
       await composer.fill("first prompt");
       if (proofDir) {
         await page.screenshot({ path: path.join(proofDir, "before-submit.png") });

@@ -1,3 +1,4 @@
+import { pathForRoute } from "../app-route-paths.ts";
 import type { RouteId } from "../app-routes.ts";
 import type { OpenClawAssistantPanel } from "../components/assistant-panel.ts";
 import type { ChatPaneElement } from "../pages/chat/route-draft-focus-handoff.ts";
@@ -26,6 +27,7 @@ interface ShellStartupHost extends HTMLElement {
 export class ShellStartupOwner {
   private startupIdentityOwner = "";
   private startupIdentityReady = false;
+  private releasingSkeletons = false;
 
   constructor(private readonly host: ShellStartupHost) {}
 
@@ -33,7 +35,24 @@ export class ShellStartupOwner {
     const host = this.host;
     const startup = host.startupPresentation;
     const context = host.context;
-    if (!startup || startup.snapshot.stage === "ready" || !context) {
+    if (!startup || !context) {
+      return;
+    }
+    if (startup.snapshot.stage === "ready") {
+      if (startup.retainSkeletons && !this.releasingSkeletons) {
+        this.releasingSkeletons = true;
+        // Retain the original geometry through the actual exit, then retire its
+        // controls and rows. Empty animations also cover fast/reduced-motion exits.
+        const exits = [
+          ...host.querySelectorAll(".startup-chat-skeleton, .startup-sidebar-skeleton"),
+        ].flatMap((element) => element.getAnimations().map((animation) => animation.finished));
+        void Promise.allSettled(exits).then(() => {
+          this.releasingSkeletons = false;
+          if (host.isConnected && host.startupPresentation === startup) {
+            startup.releaseSkeletons();
+          }
+        });
+      }
       return;
     }
     const phase = context.gateway.snapshot.phase;
@@ -45,6 +64,17 @@ export class ShellStartupOwner {
       return;
     }
     const route = host.routeState;
+    // The outlet replaces the implicit chat landing with its canonical session.
+    // Its intermediate not-found is still startup, not a terminal route failure.
+    if (
+      !sidebarFailed &&
+      phase === "connected" &&
+      route.routeId === "chat" &&
+      route.committedRouteStatus === "notFound" &&
+      route.location?.pathname.replace(/\/$/u, "") === pathForRoute("chat", context.basePath)
+    ) {
+      return;
+    }
     if (
       sidebarFailed ||
       route.routeFailed ||

@@ -277,7 +277,7 @@ suite.define(() => {
       await gateway.waitForRequest("chat.startup", { after: 1 });
       await historyError.waitFor({ state: "detached" });
       await page
-        .locator('.chat-thread openclaw-panel-loading-skeleton[data-panel-skeleton="chat"]')
+        .locator("openclaw-chat-pane .chat-thread .startup-transcript-skeleton")
         .waitFor({ state: "visible" });
       await gateway.resolveDeferred("chat.startup");
       await page

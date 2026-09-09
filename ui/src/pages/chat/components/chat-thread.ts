@@ -73,7 +73,7 @@ function renderTranscriptShell(
                 ? historyHeader.template
                 : nothing
             }
-            ${projection.showLoadingSkeleton ? renderChatTranscriptSkeleton() : nothing}
+            ${projection.showLoadingSkeleton && !props.startupLoading ? renderChatTranscriptSkeleton() : nothing}
             ${projection.isEmpty && !projection.searchOpen ? renderWelcomeState(props) : nothing}
             ${
               projection.isEmpty && projection.searchOpen
