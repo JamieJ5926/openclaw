@@ -1,133 +1,34 @@
-/**
- * Tests for config gateway methods, writes, validation, and auth transitions.
- */
-
+/** Tests for config gateway methods, writes, validation, and auth transitions. */
+// Register shared mocks before loading config handlers.
 import { expectDefined } from "@openclaw/normalization-core";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ConfigMutationConflictError } from "../../config/mutation-conflict.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import type { PluginMetadataSnapshot } from "../../plugins/plugin-metadata-snapshot.js";
-import { createPluginMetadataSnapshotFixture } from "../../plugins/plugin-metadata.test-support.js";
-import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../../plugins/runtime.js";
+import { setActivePluginRegistry } from "../../plugins/runtime.js";
 import { createTestRegistry } from "../../test-utils/channel-plugins.js";
 import { withEnvAsync } from "../../test-utils/env.js";
-import { clearConfigSchemaResponseCacheForTests, configHandlers } from "./config.js";
+import {
+  configTestState,
+  configWriteMocks,
+  installConfigHandlerTestHooks,
+  invokeConfigPatch,
+  loadGatewayRuntimeConfigSchemaMock,
+} from "./config.handler.test-support.js";
+import { configHandlers } from "./config.js";
 import { createConfigHandlerHarness, createConfigWriteSnapshot } from "./config.test-helpers.js";
 
-const configWriteMocks = vi.hoisted(() => ({
-  commitGatewayConfigWrite: vi.fn(),
-  readConfigFileSnapshotForWrite: vi.fn(),
-}));
-
-vi.mock("../../config/io.js", async () => {
-  const actual = await vi.importActual<typeof import("../../config/io.js")>("../../config/io.js");
-  return {
-    ...actual,
-    readConfigFileSnapshotForWrite: configWriteMocks.readConfigFileSnapshotForWrite,
-  };
-});
-
-// This suite owns config patch/merge behavior, while plugin validation is covered by
-// config.plugin-validation.test.ts and validation.channel-metadata.test.ts.
-vi.mock("../../config/validation.js", async () => {
-  const actual = await vi.importActual<typeof import("../../config/validation.js")>(
-    "../../config/validation.js",
-  );
-  return {
-    ...actual,
-    validateConfigObjectRawWithPlugins: vi.fn((config: OpenClawConfig) => ({
-      ok: true,
-      config,
-      warnings: [],
-    })),
-    validateConfigObjectWithPlugins: vi.fn((config: OpenClawConfig) => ({
-      ok: true,
-      config,
-      warnings: [],
-    })),
-  };
-});
-
-// Secret materialization has dedicated runtime suites; keep these handler tests on
-// their config-write boundary instead of loading every provider and plugin artifact.
-vi.mock("../../secrets/runtime.js", () => ({
-  prepareSecretsRuntimeSnapshot: vi.fn(async ({ config }: { config: OpenClawConfig }) => ({
-    config,
-  })),
-}));
-
-vi.mock("./config-write-flow.js", async () => {
-  const actual =
-    await vi.importActual<typeof import("./config-write-flow.js")>("./config-write-flow.js");
-  return {
-    ...actual,
-    commitGatewayConfigWrite: configWriteMocks.commitGatewayConfigWrite,
-    resolveGatewayConfigRestartWriteResult: vi.fn(async () => ({
-      payload: { kind: "config-patch", mode: "config.patch", configPath: "/tmp/openclaw.json" },
-      sentinelPersisted: false,
-      restart: undefined,
-    })),
-  };
-});
-
-const { execOpenPathMock, loadGatewayRuntimeConfigSchemaMock } = vi.hoisted(() => ({
-  execOpenPathMock: vi.fn(),
-  loadGatewayRuntimeConfigSchemaMock: vi.fn(() => ({
-    schema: { type: "object" },
-    uiHints: undefined as Record<string, { advanced?: boolean }> | undefined,
-    version: "test-schema",
-  })),
-}));
+const { execOpenPathMock } = vi.hoisted(() => ({ execOpenPathMock: vi.fn() }));
 
 vi.mock("./open-path.js", async () => {
   const actual = await vi.importActual<typeof import("./open-path.js")>("./open-path.js");
   return { ...actual, execOpenPath: execOpenPathMock };
 });
 
-vi.mock("../../config/runtime-schema.js", () => ({
-  loadGatewayRuntimeConfigSchema: loadGatewayRuntimeConfigSchemaMock,
-}));
-
 function mockOpenPathError(error: Error) {
   execOpenPathMock.mockRejectedValue(error);
 }
 
-let storedConfig: OpenClawConfig;
-let storedHash: string;
-let nextHash: number;
-let modelNormalizationPluginMetadata: PluginMetadataSnapshot | undefined;
-
-function currentWriteSnapshot() {
-  const result = createConfigWriteSnapshot(storedConfig);
-  result.snapshot.hash = storedHash;
-  result.snapshot.raw = JSON.stringify(storedConfig);
-  if (modelNormalizationPluginMetadata) {
-    result.writeOptions = {
-      basePluginMetadataSnapshot: modelNormalizationPluginMetadata,
-    } as never;
-  }
-  return result;
-}
-
-async function invokeConfigPatch(args: {
-  raw: unknown;
-  baseHash?: string;
-  replacePaths?: string[];
-}) {
-  const harness = createConfigHandlerHarness({
-    method: "config.patch",
-    params: {
-      raw: JSON.stringify(args.raw),
-      ...(args.baseHash ? { baseHash: args.baseHash } : {}),
-      ...(args.replacePaths ? { replacePaths: args.replacePaths } : {}),
-    },
-  });
-  await expectDefined(
-    configHandlers["config.patch"],
-    'configHandlers["config.patch"] test invariant',
-  )(harness.options);
-  return harness;
-}
+installConfigHandlerTestHooks();
 
 function startConfigWrite(
   method: "config.patch" | "config.apply",
@@ -156,38 +57,6 @@ async function invokeConfigSchema() {
   return harness;
 }
 
-beforeEach(() => {
-  storedConfig = {};
-  storedHash = "base-hash";
-  nextHash = 1;
-  modelNormalizationPluginMetadata = undefined;
-  configWriteMocks.readConfigFileSnapshotForWrite.mockImplementation(async () =>
-    currentWriteSnapshot(),
-  );
-  configWriteMocks.commitGatewayConfigWrite.mockImplementation(
-    async ({
-      snapshot,
-      nextConfig,
-    }: {
-      snapshot: { hash?: string };
-      nextConfig: OpenClawConfig;
-    }) => {
-      if (snapshot.hash !== storedHash) {
-        throw new ConfigMutationConflictError("config changed since last load");
-      }
-      storedConfig = nextConfig;
-      storedHash = `next-hash-${nextHash}`;
-      nextHash += 1;
-      return {
-        path: "/tmp/openclaw.json",
-        config: storedConfig,
-        hash: storedHash,
-        queueFollowUp: vi.fn(),
-      };
-    },
-  );
-});
-
 async function invokeConfigOpenFile() {
   const harness = createConfigHandlerHarness({ method: "config.openFile" });
   await expectDefined(
@@ -196,13 +65,6 @@ async function invokeConfigOpenFile() {
   )(harness.options);
   return harness;
 }
-
-afterEach(() => {
-  vi.useRealTimers();
-  clearConfigSchemaResponseCacheForTests();
-  resetPluginRuntimeStateForTest();
-  vi.clearAllMocks();
-});
 
 describe("config.patch effective change receipt", () => {
   it.each([
@@ -214,7 +76,7 @@ describe("config.patch effective change receipt", () => {
   ])(
     "reports persisted secret changes without values: $expectedPaths",
     async ({ nextToken, expectedPaths }) => {
-      storedConfig = {
+      configTestState.config = {
         channels: { matrix: { accounts: { sut: { accessToken: "synthetic-old-token" } } } },
       };
       const { respond } = await invokeConfigPatch({
@@ -533,7 +395,7 @@ describe("config write source preparation", () => {
         ...source,
         agents: { defaults: { ...source.agents?.defaults, maxConcurrent: 4 } },
       };
-      storedConfig = source;
+      configTestState.config = source;
       configWriteMocks.readConfigFileSnapshotForWrite.mockImplementationOnce(async () => {
         const result = createConfigWriteSnapshot(source);
         result.snapshot.config = runtime;
@@ -549,14 +411,14 @@ describe("config write source preparation", () => {
               ? { agents: { defaults: { params: { temperature: null, topP: null } } } }
               : { ...runtime, agents: { defaults: { ...runtime.agents?.defaults, params } } },
           ),
-          baseHash: storedHash,
+          baseHash: configTestState.hash,
         },
       });
 
       await expectDefined(configHandlers[method], "config write handler")(harness.options);
 
       expect(harness.respond).toHaveBeenCalledWith(true, expect.anything(), undefined);
-      expect(storedConfig).toStrictEqual({
+      expect(configTestState.config).toStrictEqual({
         ...source,
         agents: { defaults: { params: method === "config.patch" ? {} : params } },
       });
@@ -589,7 +451,7 @@ describe("config write source preparation", () => {
         ...source,
         agents: { defaults: { maxConcurrent: 4 } },
       };
-      storedConfig = source;
+      configTestState.config = source;
       configWriteMocks.readConfigFileSnapshotForWrite.mockImplementationOnce(async () => {
         const result = createConfigWriteSnapshot(source);
         result.snapshot.config = runtime;
@@ -604,14 +466,14 @@ describe("config write source preparation", () => {
             ...(explicitDefault ? { agents: runtime.agents } : {}),
             ...(changePort ? { gateway: { port: 18790 } } : {}),
           }),
-          baseHash: storedHash,
+          baseHash: configTestState.hash,
         },
       });
 
       await expectDefined(configHandlers[method], "config write handler")(harness.options);
 
       expect(harness.respond).toHaveBeenCalledWith(true, expect.anything(), undefined);
-      expect(storedConfig).toEqual({
+      expect(configTestState.config).toEqual({
         ...source,
         ...(explicitDefault ? { agents: runtime.agents } : {}),
         gateway: { port: changePort ? 18790 : 18789 },
@@ -625,7 +487,7 @@ describe("config.patch hash-free ui.prefs LWW", () => {
   it("persists a ui.prefs-only patch and returns the committed hash", async () => {
     const { respond } = await invokeConfigPatch({ raw: { ui: { prefs: { theme: "knot" } } } });
 
-    expect(storedConfig.ui?.prefs?.theme).toBe("knot");
+    expect(configTestState.config.ui?.prefs?.theme).toBe("knot");
     expect(respond).toHaveBeenCalledWith(
       true,
       expect.objectContaining({ ok: true, hash: "next-hash-1" }),
@@ -657,7 +519,7 @@ describe("config.patch hash-free ui.prefs LWW", () => {
         message: expect.stringContaining("config base hash required for gateway.port"),
       }),
     );
-    expect(storedConfig).toEqual({});
+    expect(configTestState.config).toEqual({});
   });
 
   it("rejects an empty-object structural change outside the LWW subtree", async () => {
@@ -677,7 +539,7 @@ describe("config.patch hash-free ui.prefs LWW", () => {
     { name: "ui deletion", raw: { ui: null } },
     { name: "scalar ui.prefs", raw: { ui: { prefs: "stale-container" } } },
   ])("rejects hash-free container operation: $name", async ({ raw }) => {
-    storedConfig = { ui: { prefs: { theme: "claw" } } };
+    configTestState.config = { ui: { prefs: { theme: "claw" } } };
 
     const { respond } = await invokeConfigPatch({ raw });
 
@@ -690,7 +552,7 @@ describe("config.patch hash-free ui.prefs LWW", () => {
   });
 
   it("allows a hash-free per-key null deletion below ui.prefs", async () => {
-    storedConfig = { ui: { prefs: { chatFollowUpMode: "queue", theme: "claw" } } };
+    configTestState.config = { ui: { prefs: { chatFollowUpMode: "queue", theme: "claw" } } };
 
     const { respond } = await invokeConfigPatch({
       raw: { ui: { prefs: { chatFollowUpMode: null } } },
@@ -701,11 +563,11 @@ describe("config.patch hash-free ui.prefs LWW", () => {
       expect.objectContaining({ hash: "next-hash-1" }),
       undefined,
     );
-    expect(storedConfig.ui?.prefs).toEqual({ theme: "claw" });
+    expect(configTestState.config.ui?.prefs).toEqual({ theme: "claw" });
   });
 
   it("keeps destructive array replacement explicit for hash-free patches", async () => {
-    storedConfig = { ui: { prefs: { sidebarEntries: ["route:usage", "route:tasks"] } } };
+    configTestState.config = { ui: { prefs: { sidebarEntries: ["route:usage", "route:tasks"] } } };
 
     const rejected = await invokeConfigPatch({
       raw: { ui: { prefs: { sidebarEntries: ["route:usage"] } } },
@@ -727,11 +589,11 @@ describe("config.patch hash-free ui.prefs LWW", () => {
       expect.objectContaining({ hash: "next-hash-1" }),
       undefined,
     );
-    expect(storedConfig.ui?.prefs?.sidebarEntries).toEqual(["route:usage"]);
+    expect(configTestState.config.ui?.prefs?.sidebarEntries).toEqual(["route:usage"]);
   });
 
   it("returns a noop for an unchanged hash-free patch", async () => {
-    storedConfig = { ui: { prefs: { theme: "knot" } } };
+    configTestState.config = { ui: { prefs: { theme: "knot" } } };
 
     const { respond } = await invokeConfigPatch({
       raw: { ui: { prefs: { theme: "knot" } } },
@@ -758,8 +620,8 @@ describe("config.patch hash-free ui.prefs LWW", () => {
 
   it("surfaces a hash-free commit race without replaying stale intent", async () => {
     configWriteMocks.commitGatewayConfigWrite.mockImplementationOnce(async () => {
-      storedConfig = { ui: { prefs: { locale: "de" } } };
-      storedHash = "raced-hash";
+      configTestState.config = { ui: { prefs: { locale: "de" } } };
+      configTestState.hash = "raced-hash";
       throw new ConfigMutationConflictError("config changed since last load");
     });
 
@@ -775,7 +637,7 @@ describe("config.patch hash-free ui.prefs LWW", () => {
         message: expect.stringContaining("config changed since last load"),
       }),
     );
-    expect(storedConfig.ui?.prefs).toEqual({ locale: "de" });
+    expect(configTestState.config.ui?.prefs).toEqual({ locale: "de" });
   });
 
   it("advises retry only for retryable mutation conflicts", async () => {
@@ -802,7 +664,7 @@ describe("config.patch hash-free ui.prefs LWW", () => {
 
 describe("config.patch ID-keyed arrays", () => {
   it("rejects duplicate IDs before applying an ID-merged array patch", async () => {
-    storedConfig = {
+    configTestState.config = {
       models: {
         providers: {
           custom: {
@@ -838,7 +700,7 @@ describe("config.patch ID-keyed arrays", () => {
   });
 
   it("allows duplicate IDs for an explicit array replacement", async () => {
-    storedConfig = {
+    configTestState.config = {
       models: {
         providers: {
           custom: {
@@ -892,203 +754,5 @@ describe("config.patch ID-keyed arrays", () => {
       }),
     );
     expect(configWriteMocks.commitGatewayConfigWrite).toHaveBeenCalledOnce();
-  });
-});
-
-describe("config.patch model input normalization", () => {
-  it("uses write-snapshot policies before merging manifest-backed model IDs", async () => {
-    modelNormalizationPluginMetadata = createPluginMetadataSnapshotFixture({
-      plugins: [
-        {
-          id: "myproxy-normalizer",
-          modelIdNormalization: {
-            providers: {
-              myproxy: { aliases: { latest: "modern-model" }, prefixWhenBare: "vendor" },
-            },
-          },
-        },
-      ],
-    });
-    storedConfig = {
-      models: {
-        providers: {
-          myproxy: {
-            baseUrl: "https://proxy.example/v1",
-            models: [
-              {
-                id: "vendor/modern-model",
-                name: "Before",
-                contextWindow: 200_000,
-                maxTokens: 8192,
-                input: ["text"],
-                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-                reasoning: false,
-              },
-            ],
-          },
-        },
-      },
-    };
-
-    const sourceConfig = structuredClone(storedConfig);
-    expectDefined(sourceConfig.models?.providers?.myproxy?.models[0], "source model").id = "latest";
-    configWriteMocks.readConfigFileSnapshotForWrite.mockImplementationOnce(async () => {
-      const result = currentWriteSnapshot();
-      result.snapshot.sourceConfig = sourceConfig;
-      result.snapshot.resolved = sourceConfig;
-      result.snapshot.parsed = sourceConfig;
-      result.snapshot.raw = JSON.stringify(sourceConfig);
-      return result;
-    });
-
-    const harness = await invokeConfigPatch({
-      raw: {
-        models: {
-          providers: {
-            myproxy: { models: [{ id: "latest", name: "After" }] },
-          },
-        },
-      },
-      baseHash: storedHash,
-    });
-
-    expect(harness.respond).toHaveBeenCalledWith(true, expect.anything(), undefined);
-    expect(storedConfig.models?.providers?.myproxy?.models).toHaveLength(1);
-    expect(storedConfig.models?.providers?.myproxy?.models?.[0]).toMatchObject({
-      id: "vendor/modern-model",
-      name: "After",
-    });
-  });
-
-  it("normalizes model identities before map and ID-keyed array merges", async () => {
-    const canonical = "google/gemini-3.1-pro-preview";
-    storedConfig = {
-      agents: { defaults: { models: { [canonical]: { alias: "Gemini" } } } },
-      models: {
-        providers: {
-          google: {
-            api: "google-generative-ai",
-            baseUrl: "https://generativelanguage.googleapis.com/v1beta",
-            models: [
-              {
-                id: "gemini-3.1-pro-preview",
-                name: "Gemini before",
-                contextWindow: 1_048_576,
-                maxTokens: 65_536,
-                input: ["text", "image"],
-                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-                reasoning: true,
-              },
-            ],
-          },
-        },
-      },
-    };
-
-    const harness = await invokeConfigPatch({
-      raw: {
-        agents: {
-          defaults: { models: { "google/gemini-3-pro-preview": null } },
-        },
-        models: {
-          providers: {
-            google: {
-              models: [{ id: "gemini-3-pro-preview", name: "Gemini after" }],
-            },
-          },
-        },
-      },
-      baseHash: storedHash,
-    });
-
-    expect(harness.respond).toHaveBeenCalledWith(true, expect.anything(), undefined);
-    expect(storedConfig.agents?.defaults?.models).toEqual({});
-    expect(storedConfig.models?.providers?.google?.models).toHaveLength(1);
-    expect(storedConfig.models?.providers?.google?.models?.[0]).toMatchObject({
-      id: "gemini-3.1-pro-preview",
-      name: "Gemini after",
-    });
-  });
-
-  it("canonicalizes newly submitted nested model refs before persistence", async () => {
-    storedConfig = { gateway: { port: 18789 } };
-    const retired = "google/gemini-3-pro-preview";
-    const canonical = "google/gemini-3.1-pro-preview";
-
-    const harness = await invokeConfigPatch({
-      raw: {
-        agents: {
-          defaults: {
-            model: { primary: retired, fallbacks: [retired] },
-            utilityModel: retired,
-            imageModel: retired,
-            voiceModel: retired,
-            pdfModel: retired,
-            mediaModels: {
-              image: retired,
-              video: { primary: retired, fallbacks: [retired] },
-              music: retired,
-            },
-            heartbeat: { model: retired },
-            subagents: { model: retired },
-            compaction: { model: retired, memoryFlush: { model: retired } },
-            models: { [retired]: { alias: "Gemini" } },
-          },
-          entries: {
-            ops: {
-              model: retired,
-              utilityModel: retired,
-              subagents: { model: retired },
-              models: { [retired]: { alias: "Ops Gemini" } },
-            },
-          },
-        },
-        models: {
-          providers: {
-            google: {
-              api: "google-generative-ai",
-              baseUrl: "https://generativelanguage.googleapis.com/v1beta",
-              models: [
-                {
-                  id: "gemini-3-pro-preview",
-                  name: "Gemini 3 Pro",
-                  contextWindow: 1_048_576,
-                  maxTokens: 65_536,
-                  input: ["text", "image"],
-                  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-                  reasoning: true,
-                },
-              ],
-            },
-          },
-        },
-      },
-      baseHash: storedHash,
-    });
-
-    expect(harness.respond).toHaveBeenCalledWith(true, expect.anything(), undefined);
-    expect(storedConfig.agents?.defaults).toMatchObject({
-      model: { primary: canonical, fallbacks: [canonical] },
-      utilityModel: canonical,
-      imageModel: canonical,
-      voiceModel: canonical,
-      pdfModel: canonical,
-      mediaModels: {
-        image: canonical,
-        video: { primary: canonical, fallbacks: [canonical] },
-        music: canonical,
-      },
-      heartbeat: { model: canonical },
-      subagents: { model: canonical },
-      compaction: { model: canonical, memoryFlush: { model: canonical } },
-      models: { [canonical]: { alias: "Gemini" } },
-    });
-    expect(storedConfig.agents?.entries?.ops).toMatchObject({
-      model: canonical,
-      utilityModel: canonical,
-      subagents: { model: canonical },
-      models: { [canonical]: { alias: "Ops Gemini" } },
-    });
-    expect(storedConfig.models?.providers?.google?.models?.[0]?.id).toBe("gemini-3.1-pro-preview");
   });
 });

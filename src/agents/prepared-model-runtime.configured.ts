@@ -212,19 +212,30 @@ export function prepareConfiguredRuntimeModels(params: {
         params.normalizeModelId,
       );
     if (!model) {
-      const inlineModel = findConfiguredStaticModel(
-        params.inlineProviderModels,
-        provider,
-        modelId,
-        params.normalizeModelId,
-      );
+      const catalogIds = new Set<string>();
+      const inlineModels = resolveMergedModelProviderModels({
+        models: params.inlineProviderModels.filter(
+          (entry) => normalizeProviderId(entry.provider) === provider,
+        ),
+        normalizeModelId: (id) => {
+          const resolvedId = params.normalizeModelId(provider, id.trim());
+          catalogIds.add(resolvedId);
+          return resolvedId;
+        },
+      });
+      // Config retains authored aliases. Match their catalog IDs before resolving
+      // a raw selector, then carry that executable identity into the runtime model.
+      const inlineModelId = catalogIds.has(modelId)
+        ? modelId
+        : params.normalizeModelId(provider, modelId);
+      const inlineModel = inlineModels.get(inlineModelId);
       const providerConfig =
         inlineModel &&
         findNormalizedProviderValue(params.config.models?.providers, inlineModel.provider);
       // Excluding an implicit catalog must not discard an authored transport definition.
       // Missing authored API metadata remains unresolved, matching request-time inline lookup.
       if (inlineModel?.api && providerConfig) {
-        model = completeInlineProviderModel(inlineModel, providerConfig);
+        model = completeInlineProviderModel({ ...inlineModel, id: inlineModelId }, providerConfig);
       }
     }
     if (model) {

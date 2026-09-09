@@ -174,7 +174,6 @@ type CatalogSeedModel = Pick<
  */
 function buildManifestCatalogModelLookup(
   manifestRegistry: Pick<PluginManifestRegistry, "plugins"> | undefined,
-  policies: ReturnType<typeof collectManifestModelIdNormalizationPolicies> | undefined,
 ): (providerId: string, modelId: string) => Partial<CatalogSeedModel> | undefined {
   const plugins = manifestRegistry?.plugins;
   if (!plugins || plugins.length === 0) {
@@ -182,9 +181,7 @@ function buildManifestCatalogModelLookup(
   }
   let index: Map<string, Partial<CatalogSeedModel>> | undefined;
   const keyFor = (providerId: string, modelId: string) =>
-    normalizeProviderId(providerId) +
-    " " +
-    normalizeConfiguredProviderCatalogModelId(providerId, modelId, policies).toLowerCase();
+    normalizeProviderId(providerId) + " " + modelId;
   return (providerId, modelId) => {
     if (!index) {
       index = new Map();
@@ -219,10 +216,7 @@ export function applyModelDefaults(
     const modelIdNormalizationPolicies = manifestRegistry
       ? collectManifestModelIdNormalizationPolicies(manifestRegistry.plugins)
       : undefined;
-    const resolveCatalogModel = buildManifestCatalogModelLookup(
-      manifestRegistry,
-      modelIdNormalizationPolicies,
-    );
+    const resolveCatalogModel = buildManifestCatalogModelLookup(manifestRegistry);
     const nextProviders = { ...providerConfig };
     for (const [providerId, provider] of Object.entries(providerConfig)) {
       const normalizedProvider = normalizeProviderConfigForConfigDefaults({
@@ -230,24 +224,20 @@ export function applyModelDefaults(
         providerConfig: provider,
         manifestRegistry,
       });
+      if (normalizedProvider !== provider) {
+        nextProviders[providerId] = normalizedProvider;
+        mutated = true;
+      }
       const models = normalizedProvider.models;
       if (!Array.isArray(models) || models.length === 0) {
-        if (normalizedProvider !== provider) {
-          nextProviders[providerId] = normalizedProvider;
-          mutated = true;
-        }
         continue;
       }
       const providerApi = normalizedProvider.api;
       const providerMaxTokens = asPositiveFiniteNumber(normalizedProvider.maxTokens);
-      const nextProvider = normalizedProvider;
-      if (nextProvider !== provider) {
-        mutated = true;
-      }
       let providerMutated = false;
       const nextModels = models.map((model) => {
         const raw = model as ModelDefinitionLike;
-        const id = normalizeConfiguredProviderCatalogModelId(
+        const catalogId = normalizeConfiguredProviderCatalogModelId(
           providerId,
           raw.id,
           modelIdNormalizationPolicies,
@@ -258,7 +248,9 @@ export function applyModelDefaults(
         // generic defaults apply. Defaulting straight past the catalog would
         // erase field absence (for example turning an entry that pins only
         // contextWindow into a text-only model, dropping vision-gated tools).
-        const catalogModel = resolveCatalogModel(providerId, id);
+        // Keep authored IDs in config: catalog publication and input resolution
+        // each interpret those rows once. Manifest catalog IDs are already literal.
+        const catalogModel = resolveCatalogModel(providerId, catalogId);
         const reasoning =
           typeof raw.reasoning === "boolean" ? raw.reasoning : (catalogModel?.reasoning ?? false);
 
@@ -290,7 +282,7 @@ export function applyModelDefaults(
           defaultMaxTokens;
         const maxTokens = resolveNormalizedProviderModelMaxTokens({
           providerId,
-          modelId: id,
+          modelId: catalogId,
           contextWindow: maxTokenContextWindow,
           rawMaxTokens,
         });
@@ -305,7 +297,6 @@ export function applyModelDefaults(
             ? catalogModel.compat
             : undefined;
         const modelMutated =
-          id !== raw.id ||
           raw.reasoning !== reasoning ||
           raw.input === undefined ||
           costMutated ||
@@ -319,31 +310,23 @@ export function applyModelDefaults(
           return model;
         }
         providerMutated = true;
-        return Object.assign(
-          {},
-          raw,
-          {
-            id,
-            reasoning,
-            input,
-            cost,
-            contextWindow,
-            contextTokens,
-            maxTokens,
-            api,
-          },
-          thinkingLevelMap !== undefined ? { thinkingLevelMap } : {},
-          compat !== undefined ? { compat } : {},
-        ) as ModelDefinitionConfig;
+        return Object.assign({}, raw, {
+          reasoning,
+          input,
+          cost,
+          contextWindow,
+          contextTokens,
+          maxTokens,
+          api,
+          ...(thinkingLevelMap !== undefined ? { thinkingLevelMap } : {}),
+          ...(compat !== undefined ? { compat } : {}),
+        });
       });
 
       if (!providerMutated) {
-        if (nextProvider !== provider) {
-          nextProviders[providerId] = nextProvider;
-        }
         continue;
       }
-      nextProviders[providerId] = { ...nextProvider, models: nextModels };
+      nextProviders[providerId] = { ...normalizedProvider, models: nextModels };
       mutated = true;
     }
 

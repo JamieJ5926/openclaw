@@ -1,5 +1,6 @@
 // Config gateway methods: validation, redaction, secrets, reload planning.
 import { isDeepStrictEqual } from "node:util";
+import { normalizeConfiguredProviderCatalogModelId } from "@openclaw/model-catalog-core/provider-model-id-normalization";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { normalizeStringEntries } from "@openclaw/normalization-core/string-normalization";
 import {
@@ -23,7 +24,11 @@ import {
   resolveConfigSnapshotHash,
 } from "../../config/io.js";
 import { formatConfigIssueLines } from "../../config/issue-format.js";
-import { applyMergePatch, createMergePatch } from "../../config/merge-patch.js";
+import {
+  applyMergePatch,
+  createMergePatch,
+  type GetMergePatchObjectArrayId,
+} from "../../config/merge-patch.js";
 import { normalizeSubmittedConfigModelRefs } from "../../config/model-input-normalization.js";
 import { ConfigMutationConflictError } from "../../config/mutation-conflict.js";
 import {
@@ -158,6 +163,7 @@ function collectDestructiveArrayPatchPaths(params: {
   patch: unknown;
   merged: unknown;
   path?: string;
+  getObjectArrayId: GetMergePatchObjectArrayId;
 }): string[] {
   if (!isPlainObject(params.patch) || !isPlainObject(params.base)) {
     return [];
@@ -180,16 +186,13 @@ function collectDestructiveArrayPatchPaths(params: {
       }
       if (Array.isArray(mergedValue)) {
         if (isConfigPatchIdKeyedArray(baseValue)) {
-          if (!idKeyedArrayPreservesBaseIds(baseValue, mergedValue)) {
-            paths.push(path);
-            continue;
-          }
           paths.push(
             ...collectDestructiveIdKeyedArrayEntryPatchPaths({
               base: baseValue,
               patch: patchValue,
               merged: mergedValue,
               path,
+              getObjectArrayId: params.getObjectArrayId,
             }),
           );
         } else if (!arrayPreservesBaseEntries(baseValue, mergedValue)) {
@@ -209,6 +212,7 @@ function collectDestructiveArrayPatchPaths(params: {
           patch: patchValue,
           merged: mergedValue,
           path,
+          getObjectArrayId: params.getObjectArrayId,
         }),
       );
     }
@@ -227,6 +231,7 @@ function assertNoDuplicateConfigPatchIds(params: {
   current: unknown;
   replacePaths: ReadonlySet<string>;
   path?: string;
+  getObjectArrayId: GetMergePatchObjectArrayId;
 }): void {
   const path = params.path ?? "";
   if (Array.isArray(params.patch)) {
@@ -239,37 +244,34 @@ function assertNoDuplicateConfigPatchIds(params: {
     }
     // ID-keyed merge is sequential and would silently let the last duplicate win.
     // Reject only arrays using that merge contract; explicit replacements may contain duplicates.
-    const currentIds = new Set<string>();
+    const currentById = new Map<string, Record<string, unknown> & { id: string }>();
     for (const entry of params.current) {
-      if (currentIds.has(entry.id)) {
+      const id = params.getObjectArrayId(path, entry.id);
+      if (currentById.has(id)) {
         throw new Error(
           `Cannot ID-merge array at ${path || "<root>"}: current config contains duplicate ID ${entry.id}; use replacePaths for an explicit replacement.`,
         );
       }
-      currentIds.add(entry.id);
+      currentById.set(id, entry);
     }
     const ids = new Set<string>();
     for (const entry of params.patch) {
       if (!isConfigPatchObjectWithStringId(entry)) {
         continue;
       }
-      if (ids.has(entry.id)) {
+      const id = params.getObjectArrayId(path, entry.id);
+      if (ids.has(id)) {
         throw new Error(`Ambiguous duplicate ID ${entry.id} in array at ${path || "<root>"}.`);
       }
-      ids.add(entry.id);
-    }
-    const currentById = new Map(params.current.map((entry) => [entry.id, entry] as const));
-    for (const entry of params.patch) {
-      if (!isConfigPatchObjectWithStringId(entry)) {
-        continue;
-      }
-      const currentEntry = currentById.get(entry.id);
+      ids.add(id);
+      const currentEntry = currentById.get(id);
       if (currentEntry) {
         assertNoDuplicateConfigPatchIds({
           patch: entry,
           current: currentEntry,
           replacePaths: params.replacePaths,
           path: `${path}[]`,
+          getObjectArrayId: params.getObjectArrayId,
         });
       }
     }
@@ -284,6 +286,7 @@ function assertNoDuplicateConfigPatchIds(params: {
       current: params.current[key],
       replacePaths: params.replacePaths,
       path: formatConfigPatchPath(path, key),
+      getObjectArrayId: params.getObjectArrayId,
     });
   }
 }
@@ -292,16 +295,6 @@ function isConfigPatchIdKeyedArray(
   value: unknown[],
 ): value is Array<Record<string, unknown> & { id: string }> {
   return value.every(isConfigPatchObjectWithStringId);
-}
-
-function idKeyedArrayPreservesBaseIds(
-  base: Array<Record<string, unknown> & { id: string }>,
-  merged: unknown[],
-): boolean {
-  const mergedIds = new Set(
-    merged.filter(isConfigPatchObjectWithStringId).map((entry) => entry.id),
-  );
-  return base.every((entry) => mergedIds.has(entry.id));
 }
 
 function arrayPreservesBaseEntries(base: unknown[], merged: unknown[]): boolean {
@@ -319,25 +312,28 @@ function arrayPreservesBaseEntries(base: unknown[], merged: unknown[]): boolean 
 }
 
 function collectDestructiveIdKeyedArrayEntryPatchPaths(params: {
-  base: unknown[];
+  base: Array<Record<string, unknown> & { id: string }>;
   patch: unknown[];
   merged: unknown[];
   path: string;
+  getObjectArrayId: GetMergePatchObjectArrayId;
 }): string[] {
-  if (!isConfigPatchIdKeyedArray(params.base)) {
-    return [];
-  }
-  const baseById = new Map(params.base.map((entry) => [entry.id, entry]));
+  const getId = (entry: { id: string }) => params.getObjectArrayId(params.path, entry.id);
+  const baseById = new Map(params.base.map((entry) => [getId(entry), entry]));
   const mergedById = new Map(
-    params.merged.filter(isConfigPatchObjectWithStringId).map((entry) => [entry.id, entry]),
+    params.merged.filter(isConfigPatchObjectWithStringId).map((entry) => [getId(entry), entry]),
   );
+  if ([...baseById.keys()].some((id) => !mergedById.has(id))) {
+    return [params.path];
+  }
   const paths: string[] = [];
   for (const patchEntry of params.patch) {
     if (!isConfigPatchObjectWithStringId(patchEntry)) {
       continue;
     }
-    const baseEntry = baseById.get(patchEntry.id);
-    const mergedEntry = mergedById.get(patchEntry.id);
+    const id = getId(patchEntry);
+    const baseEntry = baseById.get(id);
+    const mergedEntry = mergedById.get(id);
     if (!baseEntry || !mergedEntry) {
       continue;
     }
@@ -347,6 +343,7 @@ function collectDestructiveIdKeyedArrayEntryPatchPaths(params: {
         patch: patchEntry,
         merged: mergedEntry,
         path: `${params.path}[]`,
+        getObjectArrayId: params.getObjectArrayId,
       }),
     );
   }
@@ -359,11 +356,13 @@ function rejectDestructiveArrayPatchWithoutIntent(params: {
   patch: unknown;
   replacePaths: Set<string>;
   respond: RespondFn;
+  getObjectArrayId: GetMergePatchObjectArrayId;
 }): boolean {
   const destructivePaths = collectDestructiveArrayPatchPaths({
     base: params.currentConfig,
     patch: params.patch,
     merged: params.mergedConfig,
+    getObjectArrayId: params.getObjectArrayId,
   });
   const unconfirmedPaths = destructivePaths.filter((path) => !params.replacePaths.has(path));
   if (unconfirmedPaths.length === 0) {
@@ -473,7 +472,6 @@ function parseValidateConfigFromRawOrRespond(
   requestName: string,
   snapshot: Awaited<ReturnType<typeof readConfigFileSnapshot>>,
   respond: RespondFn,
-  modelIdNormalizationPolicies?: Parameters<typeof normalizeSubmittedConfigModelRefs>[1],
 ): { config: OpenClawConfig; writeConfig: OpenClawConfig; schema: ConfigSchemaResponse } | null {
   const rawValue = parseRawConfigOrRespond(params, requestName, respond);
   if (!rawValue) {
@@ -503,7 +501,6 @@ function parseValidateConfigFromRawOrRespond(
       candidate: sourceCandidate,
       sourceConfig: snapshot.sourceConfig,
     }),
-    modelIdNormalizationPolicies,
     respond,
   });
   if (!validatedSubmission) {
@@ -558,13 +555,9 @@ function rejectDroppedAgentRosterEntries(params: {
 /** Shared normalize -> raw-validate -> plugin-validate pipeline for submitted configs; responds on failure. */
 function validateSubmittedConfigOrRespond(params: {
   candidate: unknown;
-  modelIdNormalizationPolicies: Parameters<typeof normalizeSubmittedConfigModelRefs>[1];
   respond: RespondFn;
 }): { validationCandidate: OpenClawConfig; config: OpenClawConfig } | null {
-  const validationCandidate = normalizeSubmittedConfigModelRefs(
-    params.candidate as OpenClawConfig,
-    params.modelIdNormalizationPolicies,
-  );
+  const validationCandidate = normalizeSubmittedConfigModelRefs(params.candidate as OpenClawConfig);
   const respondInvalid = (issues: ReadonlyArray<ConfigValidationIssue>) => {
     params.respond(
       false,
@@ -907,13 +900,7 @@ export const configHandlers: GatewayRequestHandlers = {
       return;
     }
     const { snapshot, writeOptions } = writeSnapshot;
-    const parsed = parseValidateConfigFromRawOrRespond(
-      params,
-      "config.set",
-      snapshot,
-      respond,
-      writeOptions.basePluginMetadataSnapshot?.owners.modelIdNormalizationPolicies,
-    );
+    const parsed = parseValidateConfigFromRawOrRespond(params, "config.set", snapshot, respond);
     if (!parsed) {
       return;
     }
@@ -1019,10 +1006,7 @@ export const configHandlers: GatewayRequestHandlers = {
       );
       return;
     }
-    const normalizedPatch = normalizeSubmittedConfigModelRefs(
-      parsedRes.parsed as OpenClawConfig,
-      modelIdNormalizationPolicies,
-    );
+    const normalizedPatch = normalizeSubmittedConfigModelRefs(parsedRes.parsed as OpenClawConfig);
     if (hashlessPatch && !hasHashlessPatchLwwStructure(normalizedPatch)) {
       respond(
         false,
@@ -1035,26 +1019,41 @@ export const configHandlers: GatewayRequestHandlers = {
       return;
     }
     const replacePaths = readConfigPatchReplacePaths(params);
+    const providerByArrayPath = new Map(
+      Object.keys(normalizedPatch.models?.providers ?? {}).map((id) => [
+        `models.providers.${id}.models`,
+        id,
+      ]),
+    );
+    const getObjectArrayId: GetMergePatchObjectArrayId = (path, id) => {
+      const provider = providerByArrayPath.get(path);
+      return provider === undefined
+        ? id
+        : normalizeConfiguredProviderCatalogModelId(
+            provider,
+            id.trim(),
+            modelIdNormalizationPolicies,
+          );
+    };
+    // Merge authored rows first; merging runtime rows would persist catalog defaults
+    // from untouched siblings whenever an ID-keyed array changes.
+    const sourceConfig = normalizeSubmittedConfigModelRefs(snapshot.sourceConfig);
     try {
       assertNoDuplicateConfigPatchIds({
         patch: normalizedPatch,
-        current: snapshot.config,
+        current: sourceConfig,
         replacePaths,
+        getObjectArrayId,
       });
     } catch (error) {
       respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, formatErrorMessage(error)));
       return;
     }
-    // Merge authored rows first; merging runtime rows would persist catalog defaults
-    // from untouched siblings whenever an ID-keyed array changes.
-    const sourceConfig = normalizeSubmittedConfigModelRefs(
-      snapshot.sourceConfig,
-      modelIdNormalizationPolicies,
-    );
     const mergedSource = applyMergePatch(sourceConfig, normalizedPatch, {
       // Arrays with stable ids behave like maps for partial control-plane edits.
       mergeObjectArraysById: true,
       replaceArrayPaths: replacePaths,
+      getObjectArrayId,
     });
     const schemaPatch = loadSchemaWithPlugins();
     const restoredMerge = restoreRedactedValues(mergedSource, snapshot.config, schemaPatch.uiHints);
@@ -1078,6 +1077,7 @@ export const configHandlers: GatewayRequestHandlers = {
         ),
         patch: normalizedPatch,
         replacePaths,
+        getObjectArrayId,
         respond,
       })
     ) {
@@ -1111,7 +1111,6 @@ export const configHandlers: GatewayRequestHandlers = {
     }
     const validatedSubmission = validateSubmittedConfigOrRespond({
       candidate: restoredMerge.result,
-      modelIdNormalizationPolicies,
       respond,
     });
     if (!validatedSubmission) {
@@ -1187,13 +1186,7 @@ export const configHandlers: GatewayRequestHandlers = {
       return;
     }
     const { snapshot, writeOptions } = writeSnapshot;
-    const parsed = parseValidateConfigFromRawOrRespond(
-      params,
-      "config.apply",
-      snapshot,
-      respond,
-      writeOptions.basePluginMetadataSnapshot?.owners.modelIdNormalizationPolicies,
-    );
+    const parsed = parseValidateConfigFromRawOrRespond(params, "config.apply", snapshot, respond);
     if (!parsed) {
       return;
     }

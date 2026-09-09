@@ -181,6 +181,8 @@ Use `modelIdNormalization` for cheap provider-owned model-id cleanup that must h
 
 Rules may name a declared provider or a validated `modelCatalog.aliases` key targeting a declared provider. CLI-backend-only and foreign targets do not grant normalization ownership. Policies match the source provider spelling; declaring an alias policy does not add a runtime provider.
 
+Aliases apply once to authored provider rows when OpenClaw builds a configured catalog. Manifest, discovered, and generated catalog rows already contain provider-local model IDs; their IDs are not reinterpreted as input aliases. For example, with `latest` mapped to `middle` and `middle` mapped to `final`, an authored `latest` row produces `middle`, and a catalog row named `middle` stays `middle`.
+
 ```json
 {
   "providers": ["anthropic", "openrouter"],

@@ -997,7 +997,7 @@ describe("config cli", () => {
       );
     });
 
-    it("normalizes manifest-backed provider catalog refs before writing config mutations", async () => {
+    it("preserves authored provider aliases when writing unrelated config mutations", async () => {
       mockLoadPluginMetadataSnapshot.mockReturnValue(
         createPluginMetadataSnapshot({
           diagnostics: [],
@@ -1007,7 +1007,7 @@ describe("config cli", () => {
               providers: ["myproxy"],
               modelIdNormalization: {
                 providers: {
-                  myproxy: { aliases: { latest: "modern-model" }, prefixWhenBare: "vendor" },
+                  myproxy: { aliases: { latest: "middle", middle: "final" } },
                 },
               },
             }),
@@ -1038,9 +1038,7 @@ describe("config cli", () => {
 
       await runConfigSet("gateway.port", "18790");
 
-      expect(firstWrittenConfig().models?.providers?.myproxy?.models?.[0]?.id).toBe(
-        "vendor/modern-model",
-      );
+      expect(firstWrittenConfig().models?.providers?.myproxy?.models?.[0]?.id).toBe("latest");
     });
 
     it("rejects plugin install record config updates", async () => {

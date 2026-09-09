@@ -3,18 +3,13 @@
  * this module to merge implicit provider discovery, explicit config, and
  * preserved secrets before touching models.json.
  */
-import { mergeModelCost } from "../config/model-cost.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { PluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot.js";
 import type { ProviderCatalogOutcome } from "../plugins/provider-catalog.types.js";
 import type { PreparedProviderStaticCatalog } from "../plugins/provider-discovery.js";
 import { isRecord } from "../utils.js";
 import type { AuthProfileStore } from "./auth-profiles/types.js";
-import {
-  modelKey,
-  createConfiguredProviderCatalogModelIdNormalizer,
-  type ModelManifestNormalizationContext,
-} from "./model-ref-shared.js";
+import { modelKey } from "./model-ref-shared.js";
 import {
   mergeProviders,
   mergeWithExistingProviderSecrets,
@@ -29,6 +24,7 @@ import {
   resolveImplicitProviders,
   type ProviderConfig,
 } from "./models-config.providers.js";
+import { materializeConfiguredProviderCatalogModels } from "./models-config.providers.normalize.js";
 import {
   encodePluginModelCatalogRelativePath,
   filterGeneratedPluginModelCatalogProviders,
@@ -127,28 +123,23 @@ function buildPluginCatalogWrites(
   return Object.fromEntries(
     Object.entries(pluginProviders).map(([pluginId, providers]) => [
       encodePluginModelCatalogRelativePath(pluginId),
-      `${JSON.stringify({ generatedBy: PLUGIN_MODEL_CATALOG_GENERATED_BY, providers }, null, 2)}\n`,
+      `${JSON.stringify({ generatedBy: PLUGIN_MODEL_CATALOG_GENERATED_BY, providers: normalizeProviderCatalogModelsForConfig(providers) }, null, 2)}\n`,
     ]),
   );
 }
 
 function buildSourceModelFields(
-  sourceProviders: Record<string, ProviderConfig> | undefined,
-  manifestPlugins: ModelManifestNormalizationContext["manifestPlugins"],
+  sourceProviders: Record<string, ProviderConfig>,
 ): SourceModelFields {
-  const normalizeModelId = createConfiguredProviderCatalogModelIdNormalizer({ manifestPlugins });
   const fields = new Map<
     string,
-    { inputOmitted: boolean; cost: ReturnType<typeof mergeModelCost> }
+    { inputOmitted: boolean; cost: ProviderConfig["models"][number]["cost"] | undefined }
   >();
-  for (const [providerId, provider] of Object.entries(normalizeProviderMapKeys(sourceProviders))) {
+  for (const [providerId, provider] of Object.entries(sourceProviders)) {
     for (const model of provider.models ?? []) {
-      const key = modelKey(providerId, normalizeModelId(providerId, model.id));
-      const existing = fields.get(key);
-      fields.set(key, {
-        inputOmitted: existing?.inputOmitted || !Object.hasOwn(model, "input"),
-        // Duplicate source rows keep the same first-authored priority as publication.
-        cost: mergeModelCost(model.cost, existing?.cost),
+      fields.set(modelKey(providerId, model.id), {
+        inputOmitted: !Object.hasOwn(model, "input"),
+        cost: model.cost,
       });
     }
   }
@@ -167,12 +158,15 @@ async function resolveProvidersForModelsJsonWithDeps(
 ): Promise<Record<string, ProviderConfig>> {
   const { context } = params;
   const { agentDir, env } = context;
-  const explicitProviders = stripBlankProviderBaseUrls(context.cfg.models?.providers ?? {});
+  const explicitProviders =
+    materializeConfiguredProviderCatalogModels(
+      stripBlankProviderBaseUrls(normalizeProviderMapKeys(context.cfg.models?.providers)),
+      { manifestPlugins: context.pluginMetadataSnapshot },
+    ) ?? {};
   const cfg = context.cfg.models?.providers
     ? { ...context.cfg, models: { ...context.cfg.models, providers: explicitProviders } }
     : context.cfg;
-  const manifestPlugins = context.pluginMetadataSnapshot;
-  const sourceModelFields = buildSourceModelFields(context.cfg.models?.providers, manifestPlugins);
+  const sourceModelFields = buildSourceModelFields(explicitProviders);
   // When models.mode is "replace" the user opts out of provider discovery, so
   // skip the (potentially slow) implicit-provider resolver entirely and return
   // only the explicit providers. See openclaw#66957.
@@ -214,7 +208,6 @@ async function resolveProvidersForModelsJsonWithDeps(
     implicit: implicitProviders,
     explicit: explicitProviders,
     sourceModelFields,
-    manifestPlugins,
   });
 }
 
@@ -342,7 +335,6 @@ async function planOpenClawModelsJsonWithDeps(
 
   const mode = cfg.models?.mode ?? "merge";
   const secretRefManagedProviders = new Set<string>();
-  const manifestPlugins = context.pluginMetadataSnapshot;
   const providerPolicyManifestRegistry =
     context.pluginMetadataSnapshot?.pluginIds === undefined
       ? context.pluginMetadataSnapshot?.manifestRegistry
@@ -355,7 +347,6 @@ async function planOpenClawModelsJsonWithDeps(
       secretDefaults: cfg.secrets?.defaults,
       sourceConfigForSecrets: context.sourceConfigForSecrets,
       secretRefManagedProviders,
-      manifestPlugins,
       ...(providerPolicyManifestRegistry
         ? { manifestRegistry: providerPolicyManifestRegistry }
         : {}),
@@ -371,16 +362,12 @@ async function planOpenClawModelsJsonWithDeps(
     providers: normalizedProviders,
     secretRefManagedProviders,
   });
-  const normalizedMergedProviders =
-    normalizeProviderCatalogModelsForConfig(mergedProviders, {
-      manifestPlugins,
-    }) ?? mergedProviders;
   const secretEnforcedProviders =
     enforceSourceManagedProviderSecrets({
-      providers: normalizedMergedProviders,
+      providers: mergedProviders,
       sourceConfigForSecrets: context.sourceConfigForSecrets,
       secretRefManagedProviders,
-    }) ?? normalizedMergedProviders;
+    }) ?? mergedProviders;
   const finalProviders = filterWritableProviders(secretEnforcedProviders);
   const splitProviders = splitProvidersByPluginOwner({
     providers: finalProviders,
@@ -395,9 +382,7 @@ async function planOpenClawModelsJsonWithDeps(
     secretRefManagedProviders,
   });
   const normalizedRootProviders =
-    normalizeProviderCatalogModelsForConfig(rootProviders, {
-      manifestPlugins,
-    }) ?? rootProviders;
+    normalizeProviderCatalogModelsForConfig(rootProviders) ?? rootProviders;
   const rootWithManagedSecrets =
     enforceSourceManagedProviderSecrets({
       providers: normalizedRootProviders,

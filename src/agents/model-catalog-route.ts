@@ -7,6 +7,7 @@ import {
   resolveMergedModelProviderConfig,
   resolveMergedModelProviderModels,
 } from "../config/model-provider-config.js";
+import { projectConfigOntoRuntimeSourceSnapshot } from "../config/runtime-source-projection.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { ProviderModelRouteCandidate } from "../plugin-sdk/provider-model-types.js";
 import {
@@ -64,7 +65,10 @@ export function resolveConfiguredModelCatalogOverrides(params: {
   policy?: ModelCatalogRoutePolicy;
 }): ModelCatalogLogicalOverrides | undefined {
   const provider = normalizeProviderId(params.entry.provider);
-  const providerConfig = resolveMergedModelProviderConfig(params.cfg, provider);
+  const providerConfig = resolveMergedModelProviderConfig(
+    projectConfigOntoRuntimeSourceSnapshot(params.cfg),
+    provider,
+  );
   if (!providerConfig?.models?.length) {
     return undefined;
   }

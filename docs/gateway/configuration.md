@@ -859,6 +859,9 @@ Arrays of objects with stable `id` fields merge by ID unless their path appears
 in `replacePaths`. These updates preserve authored fields in untouched entries;
 runtime defaults, such as model catalog compatibility and context budgets, are
 not saved into sibling entries. Explicitly configured values remain authoritative.
+Provider model rows compare supported aliases without rewriting the existing
+row's authored ID. New rows and explicit array replacements retain submitted IDs;
+named retired-model migrations still apply.
 
 ## Environment variables
 

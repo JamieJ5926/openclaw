@@ -14,6 +14,7 @@ import {
 } from "../config/model-policy-allowlist-migration.js";
 import { parseModelPolicyWildcardRef } from "../config/model-policy-ref.js";
 import { resolveMergedModelProviderModels } from "../config/model-provider-config.js";
+import { projectConfigOntoRuntimeSourceSnapshot } from "../config/runtime-source-projection.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { getCurrentPluginMetadataSnapshot } from "../plugins/current-plugin-metadata-snapshot.js";
@@ -1295,6 +1296,7 @@ export function buildConfiguredModelCatalog(params: {
   }
 
   const manifestPlugins = resolveConfiguredModelManifestPlugins(params);
+  const sourceProviders = projectConfigOntoRuntimeSourceSnapshot(params.cfg).models?.providers;
   const normalizeModelId = createConfiguredProviderCatalogModelIdNormalizer({ manifestPlugins });
   const catalog: ModelCatalogEntry[] = [];
   for (const [providerRaw, provider] of Object.entries(providers)) {
@@ -1312,28 +1314,34 @@ export function buildConfiguredModelCatalog(params: {
         return id;
       },
     });
+    const sourceModels = resolveMergedModelProviderModels({
+      models: findNormalizedProviderValue(sourceProviders, providerRaw)?.models,
+      normalizeModelId: (id) => normalizeModelId(providerId, id.trim()),
+    });
     // Preserve normalized catalog membership while exact authored rows own its
     // fields. Raw alias lookup keys are not additional catalog entries.
     for (const [id, model] of models) {
       if (!catalogIds.has(id)) {
         continue;
       }
+      const metadata = sourceModels.get(id);
       const name = normalizeOptionalString(model?.name) || id;
       const contextWindow =
-        typeof model?.contextWindow === "number" && model.contextWindow > 0
-          ? model.contextWindow
+        typeof metadata?.contextWindow === "number" && metadata.contextWindow > 0
+          ? metadata.contextWindow
           : undefined;
       const contextTokens =
-        typeof model?.contextTokens === "number" && model.contextTokens > 0
-          ? model.contextTokens
+        typeof metadata?.contextTokens === "number" && metadata.contextTokens > 0
+          ? metadata.contextTokens
           : undefined;
-      const input = Array.isArray(model?.input) ? model.input : undefined;
+      const input = Array.isArray(metadata?.input) ? metadata.input : undefined;
       const modelParams =
         model?.params && typeof model.params === "object" ? model.params : undefined;
-      const compat = model?.compat && typeof model.compat === "object" ? model.compat : undefined;
+      const compat =
+        metadata?.compat && typeof metadata.compat === "object" ? metadata.compat : undefined;
       const reasoning =
-        typeof model?.reasoning === "boolean"
-          ? model.reasoning
+        typeof metadata?.reasoning === "boolean"
+          ? metadata.reasoning
           : isVllmQwenThinkingCompat(providerId, compat)
             ? true
             : undefined;
@@ -1348,8 +1356,10 @@ export function buildConfiguredModelCatalog(params: {
         contextWindow,
         contextTokens,
         reasoning,
-        ...(typeof model?.reasoning === "boolean" ? { configuredReasoning: model.reasoning } : {}),
-        ...(model.thinkingLevelMap ? { thinkingLevelMap: model.thinkingLevelMap } : {}),
+        ...(typeof metadata?.reasoning === "boolean"
+          ? { configuredReasoning: metadata.reasoning }
+          : {}),
+        ...(metadata?.thinkingLevelMap ? { thinkingLevelMap: metadata.thinkingLevelMap } : {}),
         input,
         ...(modelParams ? { params: modelParams } : {}),
         compat,

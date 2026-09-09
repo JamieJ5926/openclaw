@@ -3,6 +3,7 @@
  */
 import { normalizeProviderId } from "@openclaw/model-catalog-core/provider-id";
 import { mergeModelCost } from "../config/model-cost.js";
+import { normalizeProviderCatalogModelIdForConfig } from "../config/model-input.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { PluginManifestRegistry } from "../plugins/manifest-registry.js";
 import { ensureAuthProfileStore } from "./auth-profiles/store-runtime.js";
@@ -66,22 +67,32 @@ function mergeNormalizedProviderModel(
   return { ...incoming, ...existing, ...(cost ? { cost } : {}) };
 }
 
+type ProviderModelNormalizationOptions = {
+  normalizeModelId?: (provider: string, model: string) => string;
+  preserveExactRows?: boolean;
+  completeCatalogCosts?: boolean;
+};
+
 function normalizeProviderModelsForConfig(
   providerKey: string,
   provider: ProviderConfig,
-  options: ModelManifestNormalizationContext = {},
-  completeCatalogCosts = false,
+  options: ProviderModelNormalizationOptions = {},
 ): ProviderConfig {
   if (!Array.isArray(provider.models) || provider.models.length === 0) {
     return provider;
   }
 
-  const normalizeModelId = createConfiguredProviderCatalogModelIdNormalizer(options);
+  const normalizeModelId = options.normalizeModelId ?? normalizeProviderCatalogModelIdForConfig;
   let mutated = false;
   const nextModels: ProviderModelConfig[] = [];
   const seenById = new Map<string, number>();
+  const exactRows = new Map<string, ProviderModelConfig>();
   for (const model of provider.models) {
     const rawId = getProviderModelId(model);
+    if (rawId && options.preserveExactRows) {
+      const exact = exactRows.get(rawId.trim());
+      exactRows.set(rawId.trim(), exact ? mergeNormalizedProviderModel(exact, model) : model);
+    }
     const normalizedId = rawId ? normalizeModelId(providerKey, rawId) : rawId;
     const normalizedModel =
       normalizedId && normalizedId !== rawId ? { ...model, id: normalizedId } : model;
@@ -104,7 +115,18 @@ function normalizeProviderModelsForConfig(
     nextModels.push(normalizedModel);
   }
 
-  if (completeCatalogCosts) {
+  // Normalized membership is fixed above; exact authored rows own its fields,
+  // even when that executable ID is also an input alias for another model.
+  for (const [id, index] of seenById) {
+    const exact = exactRows.get(id);
+    const normalized = nextModels[index];
+    if (exact && normalized && exact !== normalized) {
+      nextModels[index] = { ...mergeNormalizedProviderModel(exact, normalized), id };
+      mutated = true;
+    }
+  }
+
+  if (options.completeCatalogCosts) {
     for (const [index, model] of nextModels.entries()) {
       const normalized = normalizeModelCostForCatalog(model);
       if (normalized !== model) {
@@ -117,9 +139,9 @@ function normalizeProviderModelsForConfig(
   return mutated ? { ...provider, models: nextModels } : provider;
 }
 
-export function normalizeProviderCatalogModelsForConfig(
+function normalizeProviderModelMap(
   providers: ModelsConfig["providers"],
-  options: ModelManifestNormalizationContext = {},
+  options: ProviderModelNormalizationOptions,
 ): ModelsConfig["providers"] {
   if (!providers) {
     return providers;
@@ -128,14 +150,32 @@ export function normalizeProviderCatalogModelsForConfig(
   let mutated = false;
   const next: Record<string, ProviderConfig> = {};
   for (const [providerKey, provider] of Object.entries(providers)) {
-    // Complete the publication schema after duplicate rows merge, or synthetic
-    // zeroes can mask explicit cache prices supplied by a later row.
-    const normalized = normalizeProviderModelsForConfig(providerKey, provider, options, true);
+    const normalized = normalizeProviderModelsForConfig(providerKey, provider, options);
     mutated ||= normalized !== provider;
     next[providerKey] = normalized;
   }
 
   return mutated ? next : providers;
+}
+
+/** Authored aliases become executable IDs exactly once, before discovery merges. */
+export function materializeConfiguredProviderCatalogModels(
+  providers: ModelsConfig["providers"],
+  options: ModelManifestNormalizationContext = {},
+): ModelsConfig["providers"] {
+  return normalizeProviderModelMap(providers, {
+    normalizeModelId: createConfiguredProviderCatalogModelIdNormalizer(options),
+    preserveExactRows: true,
+  });
+}
+
+/** Complete literal catalog rows without reinterpreting executable IDs as aliases. */
+export function normalizeProviderCatalogModelsForConfig(
+  providers: ModelsConfig["providers"],
+): ModelsConfig["providers"] {
+  // Complete costs after duplicate rows merge, so synthetic zeroes cannot mask
+  // explicit cache prices supplied by a later row.
+  return normalizeProviderModelMap(providers, { completeCatalogCosts: true });
 }
 
 export function normalizeProviders(params: {
@@ -145,7 +185,6 @@ export function normalizeProviders(params: {
   secretDefaults?: SecretDefaults;
   sourceConfigForSecrets?: OpenClawConfig;
   secretRefManagedProviders?: Set<string>;
-  manifestPlugins?: ModelManifestNormalizationContext["manifestPlugins"];
   manifestRegistry?: Pick<PluginManifestRegistry, "plugins">;
 }): ModelsConfig["providers"] {
   const { providers } = params;
@@ -252,9 +291,7 @@ export function normalizeProviders(params: {
       params.manifestRegistry,
     );
 
-    normalizedProvider = normalizeProviderModelsForConfig(normalizedKey, normalizedProvider, {
-      manifestPlugins: params.manifestPlugins,
-    });
+    normalizedProvider = normalizeProviderModelsForConfig(normalizedKey, normalizedProvider);
     mutated ||= normalizedProvider !== provider;
 
     const existing = next[normalizedKey];

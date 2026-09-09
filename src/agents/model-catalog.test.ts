@@ -72,7 +72,11 @@ function providerManifestSnapshot(params: {
 }
 
 function registry(entries: ModelCatalogEntry[]): ModelRegistry {
-  return { getAll: () => entries } as unknown as ModelRegistry;
+  return {
+    getAll: () => entries,
+    find: (provider: string, id: string) =>
+      entries.find((entry) => entry.provider === provider && entry.id === id) ?? null,
+  } as unknown as ModelRegistry;
 }
 
 async function build(params: {

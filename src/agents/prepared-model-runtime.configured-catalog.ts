@@ -3,6 +3,7 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { dedupeByKey } from "../shared/dedupe-by-key.js";
 import type { InlineModelEntry } from "./embedded-agent-runner/model.inline-provider.js";
 import { modelCatalogRowToEntry } from "./model-catalog-entry.js";
+import { overlayCatalogMetadata } from "./model-catalog-metadata.js";
 import type { ModelCatalogEntry } from "./model-catalog.js";
 import type { ModelCatalogSnapshot } from "./model-catalog.types.js";
 import { resolveModelCatalogIdentityKey } from "./openai-model-routes.js";
@@ -27,6 +28,12 @@ function createConfiguredModelCatalogSnapshot(params: {
   configuredRuntimeModels: readonly PreparedConfiguredRuntimeModel[];
 }): ModelCatalogSnapshot {
   const entries = new Map<string, ModelCatalogEntry>();
+  const staticEntries = params.configuredRuntimeModels.map(({ model }) =>
+    modelCatalogRowToEntry(model),
+  );
+  const staticByKey = new Map(
+    staticEntries.map((entry) => [resolveModelCatalogIdentityKey(entry), entry]),
+  );
   const addEntry = (entry: ModelCatalogEntry) => {
     const key = resolveModelCatalogIdentityKey(entry);
     if (!entries.has(key)) {
@@ -34,7 +41,19 @@ function createConfiguredModelCatalogSnapshot(params: {
     }
   };
   for (const entry of params.workspaceFacts.configuredCatalogEntries) {
-    addEntry(entry);
+    const donor =
+      staticByKey.get(resolveModelCatalogIdentityKey(entry)) ??
+      params.templateModelRegistry.find(entry.provider, entry.id);
+    addEntry(
+      donor
+        ? {
+            ...overlayCatalogMetadata(modelCatalogRowToEntry(donor), entry, {
+              preserveBaseCompat: true,
+            }),
+            name: entry.name,
+          }
+        : entry,
+    );
   }
   for (const configured of params.configuredRuntimeModels) {
     addEntry(modelCatalogRowToEntry(configured.model));
@@ -46,9 +65,6 @@ function createConfiguredModelCatalogSnapshot(params: {
     }
   }
   const configuredEntries = [...entries.values()];
-  const staticEntries = params.configuredRuntimeModels.map(({ model }) =>
-    modelCatalogRowToEntry(model),
-  );
   return {
     entries: configuredEntries,
     routeVariants: configuredEntries,

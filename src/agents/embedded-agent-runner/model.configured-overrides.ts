@@ -6,6 +6,7 @@ import { mergeModelCost } from "../../config/model-cost.js";
 import { resolveAgentModelConfigValue } from "../../config/model-input.js";
 import { findProviderModelConfig } from "../../config/model-provider-config.js";
 import { projectConfigOntoRuntimeSourceSnapshot } from "../../config/runtime-source-projection.js";
+import type { ModelDefinitionConfig } from "../../config/types.models.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { Api, Model } from "../../llm/types.js";
 import type { PluginMetadataSnapshotOwnerMaps } from "../../plugins/plugin-metadata-snapshot.types.js";
@@ -144,23 +145,13 @@ export function resolveConfiguredProviderConfig(
   );
 }
 
-function isModelsAddMetadataModel(params: {
-  model: NonNullable<InlineProviderConfig["models"]>[number] | undefined;
-}) {
-  return (
-    (params.model as { metadataSource?: unknown } | undefined)?.metadataSource === "models-add"
-  );
-}
-
-/** Merge authored rates after discovery; runtime defaults must not become price pins. */
-export function mergeConfiguredModelCost(params: {
+/** Runtime catalog defaults are not authored overrides of the selected model. */
+export function resolveConfiguredModelMetadata(params: {
   provider: string;
   modelId: string;
   cfg?: OpenClawConfig;
-  configuredModel?: NonNullable<InlineProviderConfig["models"]>[number];
-  catalogCost?: Model["cost"];
-}): Model["cost"] {
-  let authoredCost = params.configuredModel?.cost;
+  configuredModel?: ModelDefinitionConfig;
+}): Partial<ModelDefinitionConfig> | undefined {
   if (params.cfg && params.configuredModel) {
     const source = projectConfigOntoRuntimeSourceSnapshot(params.cfg);
     if (source !== params.cfg) {
@@ -185,60 +176,75 @@ export function mergeConfiguredModelCost(params: {
           (left, right) =>
             Number(right.id.trim() === params.modelId) - Number(left.id.trim() === params.modelId),
         );
-        authoredCost = sourceModels.reduce<Model["cost"] | undefined>(
-          (cost, model) => mergeModelCost(model.cost, cost),
-          undefined,
+        const authored = sourceModels.reduceRight<Partial<ModelDefinitionConfig>>(
+          (model, row) => Object.assign(model, row, { cost: mergeModelCost(model.cost, row.cost) }),
+          {},
         );
+        return {
+          ...params.configuredModel,
+          cost: authored.cost,
+          input: authored.input,
+          reasoning: authored.reasoning,
+          contextWindow: authored.contextWindow,
+          contextTokens: authored.contextTokens,
+          maxTokens: authored.maxTokens,
+          thinkingLevelMap: authored.thinkingLevelMap,
+          compat: authored.compat,
+          mediaInput: authored.mediaInput,
+        };
       }
     }
   }
-  return normalizeResolvedPricing(mergeModelCost(params.catalogCost, authoredCost) ?? {});
+  return params.configuredModel;
 }
 
 export function mergeStaticCatalogInlineModel(
   staticCatalogModel: StaticCatalogFallbackModel | undefined,
   inlineModel: Model,
+  capabilityDonor = staticCatalogModel,
 ): Model {
-  if (!staticCatalogModel) {
+  if (!staticCatalogModel && !capabilityDonor) {
     return inlineModel;
   }
-  const compat = resolveCatalogOwnedModelCompat({
-    catalogRoute: staticCatalogModel,
-    catalogCompat: staticCatalogModel.compat,
-    configuredRoute: inlineModel,
-    configuredCompat: inlineModel.compat,
-  });
-  const mediaInput = mergeModelMediaInput(staticCatalogModel.mediaInput, inlineModel.mediaInput);
   const params = mergeModelParams(
-    readModelParams(staticCatalogModel.params),
+    readModelParams(staticCatalogModel?.params),
     readModelParams(inlineModel.params),
   );
   return {
     ...staticCatalogModel,
     ...inlineModel,
-    api: inlineModel.api ?? staticCatalogModel.api,
+    // The selected literal row supplies capabilities; authored overrides are applied below.
+    ...(capabilityDonor
+      ? {
+          input: capabilityDonor.input,
+          reasoning: capabilityDonor.reasoning,
+          contextWindow: capabilityDonor.contextWindow,
+          contextTokens: capabilityDonor.contextTokens,
+          maxTokens: capabilityDonor.maxTokens,
+          thinkingLevelMap: capabilityDonor.thinkingLevelMap,
+          mediaInput: capabilityDonor.mediaInput,
+          compat: capabilityDonor.compat,
+        }
+      : {}),
+    api: inlineModel.api ?? staticCatalogModel?.api,
     baseUrl:
       normalizeTransportBaseUrl(inlineModel.baseUrl) ??
-      normalizeTransportBaseUrl(staticCatalogModel.baseUrl),
-    headers: inlineModel.headers ?? staticCatalogModel.headers,
-    ...(compat ? { compat } : {}),
-    ...(mediaInput ? { mediaInput } : {}),
+      normalizeTransportBaseUrl(staticCatalogModel?.baseUrl),
+    headers: inlineModel.headers ?? staticCatalogModel?.headers,
     ...(params ? { params } : {}),
   } as Model;
 }
 
 export function hasConfiguredFallbackSurface(params: {
   providerConfig: InlineProviderConfig | undefined;
-  configuredModel: NonNullable<InlineProviderConfig["models"]>[number] | undefined;
+  configuredModel: Partial<ModelDefinitionConfig> | undefined;
   modelId: string;
 }): boolean {
-  if (params.modelId.startsWith("mock-")) {
-    return true;
-  }
-  if (params.configuredModel) {
-    return true;
-  }
-  return Boolean(params.providerConfig?.baseUrl?.trim());
+  return Boolean(
+    params.modelId.startsWith("mock-") ||
+    params.configuredModel ||
+    params.providerConfig?.baseUrl?.trim(),
+  );
 }
 
 function mergeModelParams(
@@ -312,6 +318,7 @@ export function applyConfiguredProviderOverrides(params: {
   preferDiscoveredModelMetadata?: boolean;
   preferDiscoveredTransport?: boolean;
   staticCatalogModel?: StaticCatalogFallbackModel;
+  catalogMetadataRoute?: Pick<ProviderRuntimeModel, "api" | "baseUrl" | "compat">;
   getStaticCatalogModel?: () => ProviderRuntimeModel | undefined;
   workspaceDir?: string;
 }): ProviderRuntimeModel {
@@ -392,9 +399,14 @@ export function applyConfiguredProviderOverrides(params: {
   const configuredStaticCatalogModel =
     configuredModel && (params.staticCatalogModel ?? params.getStaticCatalogModel?.());
   const metadataOverrideModel =
-    params.preferDiscoveredModelMetadata && isModelsAddMetadataModel({ model: configuredModel })
+    params.preferDiscoveredModelMetadata && configuredModel?.metadataSource === "models-add"
       ? undefined
-      : configuredModel;
+      : resolveConfiguredModelMetadata({
+          provider: params.provider,
+          modelId: requestedConfiguredModel ? modelId : discoveredModel.id,
+          cfg: params.cfg,
+          configuredModel,
+        });
   const discoveredHeaders = sanitizeModelHeaders(discoveredModel.headers, {
     stripSecretRefMarkers: true,
   });
@@ -514,16 +526,18 @@ export function applyConfiguredProviderOverrides(params: {
     resolvedMaxTokens,
     contextWindow,
   );
-  const catalogCompat = mergeModelCompat(
-    configuredStaticCatalogModel?.compat,
-    discoveredModel.compat,
-  );
+  const catalogCompat = params.catalogMetadataRoute
+    ? mergeModelCompat(
+        params.catalogMetadataRoute.compat,
+        configuredStaticCatalogModel ? undefined : metadataOverrideModel?.compat,
+      )
+    : mergeModelCompat(configuredStaticCatalogModel?.compat, discoveredModel.compat);
   const hasCatalogOwnedModel =
     configuredStaticCatalogModel !== undefined || discoveredModel.maxTokensSource !== "configured";
   const resolvedCompat = resolveCatalogOwnedModelCompat({
     ...(hasCatalogOwnedModel
       ? {
-          catalogRoute: {
+          catalogRoute: params.catalogMetadataRoute ?? {
             api: discoveredModel.api ?? configuredStaticCatalogModel?.api,
             baseUrl: discoveredModel.baseUrl ?? configuredStaticCatalogModel?.baseUrl,
           },
@@ -574,16 +588,13 @@ export function applyConfiguredProviderOverrides(params: {
           baseUrl: requestConfig.baseUrl ?? discoveredModel.baseUrl,
           reasoning: resolvedReasoning,
           input: normalizedInput,
-          cost: mergeConfiguredModelCost({
-            provider: params.provider,
-            // Pricing follows the exact query that supplied the configured metadata.
-            modelId: requestedConfiguredModel ? modelId : discoveredModel.id,
-            cfg: params.cfg,
-            configuredModel: metadataOverrideModel,
-            catalogCost: discoveredModel.cost,
-          }),
+          cost: normalizeResolvedPricing(
+            mergeModelCost(discoveredModel.cost, metadataOverrideModel?.cost) ?? {},
+          ),
           contextWindow,
           contextTokens: metadataOverrideModel?.contextTokens ?? discoveredModel.contextTokens,
+          thinkingLevelMap:
+            metadataOverrideModel?.thinkingLevelMap ?? discoveredModel.thinkingLevelMap,
           ...(normalizedResolvedMaxTokens !== undefined
             ? {
                 maxTokens: normalizedResolvedMaxTokens,

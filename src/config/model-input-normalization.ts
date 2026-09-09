@@ -1,13 +1,10 @@
 // Normalizes user-submitted model config at config mutation boundaries.
-import {
-  normalizeConfiguredProviderCatalogModelId,
-  type ManifestModelIdNormalizationProvider,
-} from "@openclaw/model-catalog-core/provider-model-id-normalization";
 import { isRecord } from "../utils.js";
 import {
   normalizeAgentModelMapForConfig,
   normalizeAgentModelRefForConfig,
   normalizeAgentModelSelectionForConfig,
+  normalizeProviderCatalogModelIdForConfig,
 } from "./model-input.js";
 import type { OpenClawConfig } from "./types.openclaw.js";
 
@@ -133,10 +130,7 @@ function normalizeAgentScopes(agents: unknown): unknown {
   return next;
 }
 
-function normalizeProviderCatalogs(
-  models: unknown,
-  modelIdNormalizationPolicies?: ReadonlyMap<string, ManifestModelIdNormalizationProvider>,
-): unknown {
+function normalizeProviderCatalogs(models: unknown): unknown {
   if (!isRecord(models) || !isRecord(models.providers)) {
     return models;
   }
@@ -156,11 +150,7 @@ function normalizeProviderCatalogs(
         if (!trimmed) {
           return model;
         }
-        const id = normalizeConfiguredProviderCatalogModelId(
-          providerId,
-          trimmed,
-          modelIdNormalizationPolicies,
-        );
+        const id = normalizeProviderCatalogModelIdForConfig(providerId, trimmed);
         return id === model.id ? model : { ...model, id };
       });
       if (providerModels.every((model, index) => model === originalModels[index])) {
@@ -174,16 +164,13 @@ function normalizeProviderCatalogs(
 }
 
 /** Canonicalize model refs submitted through a config mutation API before persistence. */
-export function normalizeSubmittedConfigModelRefs(
-  cfg: OpenClawConfig,
-  modelIdNormalizationPolicies?: ReadonlyMap<string, ManifestModelIdNormalizationProvider>,
-): OpenClawConfig {
+export function normalizeSubmittedConfigModelRefs(cfg: OpenClawConfig): OpenClawConfig {
   let next = cfg;
   const agents = normalizeAgentScopes(cfg.agents);
   if (agents !== cfg.agents) {
     next = { ...next, agents: agents as OpenClawConfig["agents"] };
   }
-  const models = normalizeProviderCatalogs(cfg.models, modelIdNormalizationPolicies);
+  const models = normalizeProviderCatalogs(cfg.models);
   if (models !== cfg.models) {
     next = { ...next, models: models as OpenClawConfig["models"] };
   }

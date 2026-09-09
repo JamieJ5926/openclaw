@@ -4,6 +4,7 @@ import { resolveManagedUnsetPathsForWrite } from "../config/config-path-mutation
 import { replaceConfigFile } from "../config/config.js";
 import { AUTO_MANAGED_CONFIG_META_PATHS } from "../config/io.meta.js";
 import { prepareConfigWriteTopology } from "../config/io.write-topology.js";
+import { normalizeSubmittedConfigModelRefs } from "../config/model-input-normalization.js";
 import { ConfigMutationConflictError } from "../config/mutation-conflict.js";
 import { resolveConfigPath } from "../config/paths.js";
 import { readBestEffortRuntimeConfigSchema } from "../config/runtime-schema.js";
@@ -21,10 +22,7 @@ import {
   type ConfigMutationOptions,
   type ConfigSetOperation,
 } from "./config-cli-input.js";
-import {
-  normalizeConfigMutationExplicitSetPath,
-  normalizeConfigMutationModelRefs,
-} from "./config-cli-model-normalization.js";
+import { normalizeConfigMutationExplicitSetPath } from "./config-cli-model-normalization.js";
 import {
   assertNonDestructiveReplacement,
   formatConfigSetPath,
@@ -312,7 +310,7 @@ export async function runConfigOperations(params: {
   }
   // Mutate resolved config so runtime defaults never leak into the authored file.
   const next = structuredClone(snapshot.resolved) as Record<string, unknown>;
-  const currentConfig = normalizeConfigMutationModelRefs(snapshot.resolved);
+  const currentConfig = normalizeSubmittedConfigModelRefs(snapshot.resolved);
   const mutationSchema = await loadMutationSchema();
   const roster = new ConfigMutationAgentRoster(next, snapshot.sourceConfigBeforeMigrations);
   let unsetPaths: PathSegment[][] = [];
@@ -406,7 +404,7 @@ export async function runConfigOperations(params: {
   // Only final deletions may be replayed by the persistence owner.
   unsetPaths = unsetPaths.filter((path) => !getAtPath(next, path).found);
   const removedGatewayAuthPaths = pruneInactiveGatewayAuthCredentials({ root: next, operations });
-  let nextConfig = normalizeConfigMutationModelRefs(next as OpenClawConfig);
+  let nextConfig = normalizeSubmittedConfigModelRefs(next as OpenClawConfig);
   const normalizedExplicitSetPaths = explicitSetPaths.map(normalizeConfigMutationExplicitSetPath);
   if (options.dryRun) {
     nextConfig = prepareConfigWriteTopology({

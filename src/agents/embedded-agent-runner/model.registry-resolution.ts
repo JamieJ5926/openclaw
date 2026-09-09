@@ -8,6 +8,7 @@ import { externalCliDiscoveryForProviderAuth } from "../auth-profiles/external-c
 import { createSelectedAuthProfileUnavailableError } from "../auth-profiles/selection-error.js";
 import type { AuthProfileCredential } from "../auth-profiles/types.js";
 import { resolveAgentHarnessPolicy } from "../harness/policy.js";
+import { modelTransportRoutesMatch } from "../model-compat-catalog.js";
 import { normalizeProviderId } from "../model-selection.js";
 import {
   buildSuppressedBuiltInModelError,
@@ -94,9 +95,14 @@ export function resolveExplicitModelWithRegistry(params: {
       return { kind: "suppressed" };
     }
     const staticCatalogModel = params.getStaticCatalogModel?.();
-    // Inline config owns transport and sizing; the current registry owns the lower price schedule.
-    const catalogCost =
-      modelRegistry.find(provider, modelId)?.cost ?? staticCatalogModel?.cost ?? inlineMatch.cost;
+    const registryModel = modelRegistry.find(provider, modelId);
+    // Registry capabilities are usable only on the configured endpoint; pricing keeps its own priority.
+    const capabilityDonor =
+      staticCatalogModel ??
+      (registryModel && modelTransportRoutesMatch(registryModel, transport)
+        ? registryModel
+        : undefined);
+    const catalogCost = registryModel?.cost ?? staticCatalogModel?.cost ?? inlineMatch.cost;
     return {
       kind: "resolved",
       source: "configured",
@@ -108,7 +114,11 @@ export function resolveExplicitModelWithRegistry(params: {
         model: applyConfiguredProviderOverrides({
           provider,
           discoveredModel: {
-            ...mergeStaticCatalogInlineModel(staticCatalogModel, inlineMatch as Model),
+            ...mergeStaticCatalogInlineModel(
+              staticCatalogModel,
+              inlineMatch as Model,
+              capabilityDonor,
+            ),
             id: modelId,
             cost: catalogCost,
           },
@@ -121,6 +131,11 @@ export function resolveExplicitModelWithRegistry(params: {
           workspaceDir,
           preferDiscoveredTransport: true,
           staticCatalogModel,
+          catalogMetadataRoute: capabilityDonor && {
+            api: capabilityDonor.api,
+            baseUrl: capabilityDonor.baseUrl,
+            compat: capabilityDonor.compat,
+          },
         }),
         runtimeHooks,
       }),

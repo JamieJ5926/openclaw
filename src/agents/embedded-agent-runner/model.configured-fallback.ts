@@ -1,3 +1,5 @@
+import { normalizeResolvedPricing } from "@openclaw/llm-core";
+import { mergeModelCost } from "../../config/model-cost.js";
 import { findProviderModelConfig } from "../../config/model-provider-config.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { Model } from "../../llm/types.js";
@@ -17,7 +19,7 @@ import {
   clampModelMaxTokensToContextWindow,
   hasConfiguredFallbackSurface,
   mergeConfiguredRuntimeModelParams,
-  mergeConfiguredModelCost,
+  resolveConfiguredModelMetadata,
   resolveConfiguredProviderConfig,
   resolveConfiguredProviderDefaultApi,
   shouldSuppressConfiguredModel,
@@ -51,12 +53,17 @@ export function buildConfiguredFallbackModel(params: {
   const { provider, modelId, cfg, agentDir, workspaceDir, runtimeHooks } = params;
   const providerConfig = resolveConfiguredProviderConfig(cfg, provider);
   const requestTimeoutMs = resolveProviderRequestTimeoutMs(providerConfig?.timeoutSeconds);
-  const configuredModel = findProviderModelConfig(
-    providerConfig?.models,
+  const configuredModel = resolveConfiguredModelMetadata({
     provider,
     modelId,
-    createProviderModelCatalogIdNormalizer(provider),
-  );
+    cfg,
+    configuredModel: findProviderModelConfig(
+      providerConfig?.models,
+      provider,
+      modelId,
+      createProviderModelCatalogIdNormalizer(provider),
+    ),
+  });
   if (!hasConfiguredFallbackSurface({ providerConfig, configuredModel, modelId })) {
     return undefined;
   }
@@ -154,12 +161,12 @@ export function buildConfiguredFallbackModel(params: {
   const fallbackReasoning = resolveConfiguredFallbackReasoning({
     provider,
     compat: fallbackCompat,
-    reasoning: metadataModel?.reasoning,
+    reasoning: configuredModel?.reasoning ?? staticCatalogModel?.reasoning,
   });
   const configuredFallbackMaxTokens =
     configuredModel?.maxTokens ??
     providerConfig?.maxTokens ??
-    providerConfig?.models?.[0]?.maxTokens;
+    (configuredModel ? undefined : providerConfig?.models?.[0]?.maxTokens);
   const resolvedFallbackMaxTokens = configuredFallbackMaxTokens ?? staticCatalogModel?.maxTokens;
   const resolvedFallbackContextWindow =
     configuredModel?.contextWindow ?? staticCatalogModel?.contextWindow ?? DEFAULT_CONTEXT_TOKENS;
@@ -186,18 +193,14 @@ export function buildConfiguredFallbackModel(params: {
               provider,
               modelId,
               modelName: metadataModel?.name ?? modelId,
-              input: metadataModel?.input,
+              input: configuredModel?.input,
+              fallbackInput: staticCatalogModel?.input,
             }),
-            ...(configuredModel?.thinkingLevelMap !== undefined
-              ? { thinkingLevelMap: configuredModel.thinkingLevelMap }
-              : {}),
-            cost: mergeConfiguredModelCost({
-              provider,
-              modelId,
-              cfg,
-              configuredModel,
-              catalogCost: staticCatalogModel?.cost,
-            }),
+            thinkingLevelMap:
+              configuredModel?.thinkingLevelMap ?? staticCatalogModel?.thinkingLevelMap,
+            cost: normalizeResolvedPricing(
+              mergeModelCost(staticCatalogModel?.cost, configuredModel?.cost) ?? {},
+            ),
             contextWindow: resolvedFallbackContextWindow,
             contextTokens: configuredModel?.contextTokens ?? staticCatalogModel?.contextTokens,
             // maxTokens is a wire-level output cap, not a context-budget fallback.

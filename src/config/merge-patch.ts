@@ -5,9 +5,11 @@ import { isRecord } from "../utils.js";
 import { formatConfigPatchPath, isMergePatchObjectKeyAllowed } from "./patch-replace-paths.js";
 
 type PlainObject = Record<string, unknown>;
+export type GetMergePatchObjectArrayId = (arrayPath: string, id: string) => string;
 
 type MergePatchOptions = {
   mergeObjectArraysById?: boolean;
+  getObjectArrayId?: GetMergePatchObjectArrayId;
   replaceArrayPaths?: ReadonlySet<string>;
   path?: string;
 };
@@ -77,17 +79,14 @@ function mergeObjectArraysById(
   options: MergePatchOptions,
   arrayPath: string,
 ): unknown[] | undefined {
-  if (!base.every(isObjectWithStringId)) {
-    return undefined;
-  }
-
   const merged: unknown[] = [...base];
-  const indexById = new Map<string, number>();
+  const getId = (id: string) => options.getObjectArrayId?.(arrayPath, id) ?? id;
+  const indexById = new Map<string, { index: number; id: string }>();
   for (const [index, entry] of merged.entries()) {
     if (!isObjectWithStringId(entry)) {
       return undefined;
     }
-    indexById.set(entry.id, index);
+    indexById.set(getId(entry.id), { index, id: entry.id });
   }
 
   for (const patchEntry of patch) {
@@ -96,14 +95,18 @@ function mergeObjectArraysById(
       continue;
     }
 
-    const existingIndex = indexById.get(patchEntry.id);
-    if (existingIndex === undefined) {
+    const id = getId(patchEntry.id);
+    const existing = indexById.get(id);
+    if (existing === undefined) {
       merged.push(structuredClone(patchEntry));
-      indexById.set(patchEntry.id, merged.length - 1);
+      indexById.set(id, { index: merged.length - 1, id: patchEntry.id });
       continue;
     }
 
-    merged[existingIndex] = applyMergePatch(merged[existingIndex], patchEntry, {
+    // Matching aliases identify an existing row; they do not replace its authored ID.
+    const entryPatch =
+      patchEntry.id === existing.id ? patchEntry : { ...patchEntry, id: existing.id };
+    merged[existing.index] = applyMergePatch(merged[existing.index], entryPatch, {
       ...options,
       path: formatMergePatchArrayEntryPath(arrayPath),
     });

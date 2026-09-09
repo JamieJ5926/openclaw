@@ -2,6 +2,7 @@
 
 import { expectDefined } from "@openclaw/normalization-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { buildConfiguredModelCatalog } from "../agents/model-selection-shared.js";
 import type { PluginManifestRegistry } from "../plugins/manifest-registry.js";
 import { applyModelDefaults as applyModelDefaultsWithPolicy } from "./defaults.js";
 import type { ModelProviderConfig, OpenClawConfig } from "./types.js";
@@ -415,50 +416,24 @@ describe("applyModelDefaults", () => {
     expect(next.models?.providers?.google?.models?.[0]?.id).toBe("google/gemini-3.1-pro-preview");
   });
 
-  it("normalizes nested retired Gemini ids in proxy provider rows", () => {
+  it.each([
+    { id: "google/gemini-3-pro-preview", catalogId: "google/gemini-3.1-pro-preview" },
+    {
+      id: "myproxy/google/gemini-3-pro-preview",
+      catalogId: "myproxy/google/gemini-3.1-pro-preview",
+    },
+    { id: "latest", catalogId: "vendor/modern-model" },
+  ])("keeps authored $id until catalog construction", ({ id, catalogId }) => {
     const cfg = buildProxyProviderConfig();
-    const model = expectDefined(
-      cfg.models.providers.myproxy.models[0],
-      "cfg.models.providers.myproxy.models[0] test invariant",
-    );
-    model.id = "google/gemini-3-pro-preview";
-    model.name = "Gemini via proxy";
+    const model = expectDefined(cfg.models.providers.myproxy.models[0], "configured proxy model");
+    model.id = id;
+    const manifestRegistry = buildCustomProviderManifestRegistry();
+    const next = applyModelDefaults(cfg, { manifestRegistry });
 
-    const next = applyModelDefaults(cfg);
-
-    expect(next.models?.providers?.myproxy?.models?.[0]?.id).toBe("google/gemini-3.1-pro-preview");
-  });
-
-  it("normalizes provider-prefixed nested retired Gemini ids in proxy provider rows", () => {
-    const cfg = buildProxyProviderConfig();
-    const model = expectDefined(
-      cfg.models.providers.myproxy.models[0],
-      "cfg.models.providers.myproxy.models[0] test invariant",
-    );
-    model.id = "myproxy/google/gemini-3-pro-preview";
-    model.name = "Gemini via proxy";
-
-    const next = applyModelDefaults(cfg);
-
-    expect(next.models?.providers?.myproxy?.models?.[0]?.id).toBe(
-      "myproxy/google/gemini-3.1-pro-preview",
-    );
-  });
-
-  it("normalizes configured provider rows with explicit manifest registry policies", () => {
-    const cfg = buildProxyProviderConfig();
-    const model = expectDefined(
-      cfg.models.providers.myproxy.models[0],
-      "cfg.models.providers.myproxy.models[0] test invariant",
-    );
-    model.id = "latest";
-    model.name = "Custom latest";
-
-    const next = applyModelDefaults(cfg, {
-      manifestRegistry: buildCustomProviderManifestRegistry(),
-    });
-
-    expect(next.models?.providers?.myproxy?.models?.[0]?.id).toBe("vendor/modern-model");
+    expect(next.models?.providers?.myproxy?.models?.[0]?.id).toBe(id);
+    expect(
+      buildConfiguredModelCatalog({ cfg: next, manifestPlugins: manifestRegistry.plugins }),
+    ).toMatchObject([{ provider: "myproxy", id: catalogId }]);
   });
 
   it("leaves an omitted native context window undefined", () => {

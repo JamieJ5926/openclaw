@@ -1,7 +1,10 @@
 // Normalizes model input config into provider and model references.
 import { parseModelCatalogRef } from "@openclaw/model-catalog-core/model-catalog-refs";
 import { normalizeProviderId } from "@openclaw/model-catalog-core/provider-id";
-import { normalizeConfiguredProviderCatalogModelId } from "@openclaw/model-catalog-core/provider-model-id-normalization";
+import {
+  normalizeConfiguredProviderCatalogModelId,
+  normalizeConfiguredProviderCatalogModelRef,
+} from "@openclaw/model-catalog-core/provider-model-id-normalization";
 import {
   normalizeGooglePreviewModelId,
   normalizeTogetherModelId,
@@ -115,6 +118,14 @@ export function toAgentModelListLike(model?: AgentModelConfig): AgentModelListLi
 
 const GOOGLE_PROVIDER_IDS = new Set(["google", "google-gemini-cli", "google-vertex"]);
 
+function normalizeRetiredProviderModelId(provider: string, model: string): string {
+  return GOOGLE_PROVIDER_IDS.has(provider) || model.startsWith("google/")
+    ? normalizeGooglePreviewModelId(model)
+    : provider === "together"
+      ? normalizeTogetherModelId(model)
+      : model;
+}
+
 /** Canonicalizes provider/model refs before they are persisted to config. */
 export function normalizeAgentModelRefForConfig(model: string): string {
   const trimmed = model.trim();
@@ -124,13 +135,14 @@ export function normalizeAgentModelRefForConfig(model: string): string {
   }
 
   const { provider, modelId: modelSuffix } = parsed;
-  const normalizedModel =
-    GOOGLE_PROVIDER_IDS.has(provider) || modelSuffix.startsWith("google/")
-      ? normalizeGooglePreviewModelId(modelSuffix)
-      : provider === "together"
-        ? normalizeTogetherModelId(modelSuffix)
-        : modelSuffix;
-  return modelKey(provider, normalizedModel);
+  return modelKey(provider, normalizeRetiredProviderModelId(provider, modelSuffix));
+}
+
+/** Apply named retirement migrations without reinterpreting provider input aliases. */
+export function normalizeProviderCatalogModelIdForConfig(provider: string, model: string): string {
+  return normalizeConfiguredProviderCatalogModelRef(
+    normalizeRetiredProviderModelId(normalizeProviderId(provider), model),
+  );
 }
 
 /** Normalizes primary/fallback refs without replacing unchanged config values. */
