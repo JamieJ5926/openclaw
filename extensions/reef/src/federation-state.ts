@@ -132,6 +132,20 @@ export class ReefFederationState {
     return this.#grants.list(this.authoritySignal).map(fromCrossSessionGrant);
   }
 
+  /** List durable inbound prompt proposals for operator status surfaces. */
+  listPromptProposals(): ReefFederationProposal[] {
+    this.authoritySignal.throwIfAborted();
+    return this.#proposals.entries().map((entry) => structuredClone(validateProposal(entry.value)));
+  }
+
+  /** List durable outbound prompt proposals for operator status surfaces. */
+  listOutboundPromptProposals(): ReefOutboundProposal[] {
+    this.authoritySignal.throwIfAborted();
+    return this.#outboundProposals
+      .entries()
+      .map((entry) => structuredClone(validateOutboundProposal(entry.value)));
+  }
+
   /** Read one mount projected from its host-owned grant record. */
   getMount(mountId: string): ReefFederationMount | undefined {
     const grant = this.#grants.get(mountId, this.authoritySignal);

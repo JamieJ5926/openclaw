@@ -2,14 +2,14 @@ import { prepareReefMessageId } from "./flow.js";
 import { reefPeerIdentity, ReefAutonomySchema, sameReefPeerIdentity } from "./friend-types.js";
 import { getActiveReef, getReefRuntime } from "./runtime.js";
 
-export async function handleReefCommand({
-  args,
+/** Execute a Reef command from already-separated arguments. */
+export async function handleReefCommandWords({
+  words,
   senderIsOwner,
 }: {
-  args?: string;
+  words: string[];
   senderIsOwner?: boolean;
 }): Promise<{ text: string }> {
-  const words = (args ?? "").trim().split(/\s+/).filter(Boolean);
   const changesFriendship =
     words[0] === "friend" && /^(code|request|remove|block|autonomy)$/.test(words[1] ?? "");
   const decidesReview = words[0] === "review" && /^(approve|deny)$/.test(words[1] ?? "");
@@ -194,4 +194,18 @@ export async function handleReefCommand({
   return {
     text: "Usage: /reef friend code|request <handle> [code]|list|remove <handle>|autonomy <handle> <notify-only|bounded|extended>; /reef review list|approve <digest>|deny <digest>; /reef session share <handle> <session-key>|list|prompt <mount-id> <text>|revoke <mount-id>",
   };
+}
+
+/** Parse and execute a Reef slash command. */
+export async function handleReefCommand({
+  args,
+  senderIsOwner,
+}: {
+  args?: string;
+  senderIsOwner?: boolean;
+}): Promise<{ text: string }> {
+  return await handleReefCommandWords({
+    words: (args ?? "").trim().split(/\s+/).filter(Boolean),
+    senderIsOwner,
+  });
 }

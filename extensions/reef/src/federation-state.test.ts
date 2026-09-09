@@ -286,6 +286,21 @@ describe("Reef federation state", () => {
     expect(state.acceptOutboundOutcome(mount.peer, mount.peerIdentity, outcome)).toBe("duplicate");
   });
 
+  it("lists cloned inbound and outbound proposals for operator status surfaces", () => {
+    const state = new ReefFederationState(createRuntime(stateDir), new AbortController().signal);
+    const proposal = pendingProposal();
+    expect(state.claimProposal(proposal).result).toBe("new");
+    expect(state.registerOutboundProposal(proposal.request)).toBe(true);
+
+    const inbound = state.listPromptProposals();
+    const outbound = state.listOutboundPromptProposals();
+    inbound[0]!.request.frame.text = "mutated inbound copy";
+    outbound[0]!.frame.text = "mutated outbound copy";
+
+    expect(state.listPromptProposals()[0]?.request.frame.text).toBe("Check the build");
+    expect(state.listOutboundPromptProposals()[0]?.frame.text).toBe("Check the build");
+  });
+
   it("finds an unresolved outbound proposal for idempotent command retry", () => {
     const state = new ReefFederationState(createRuntime(stateDir), new AbortController().signal);
     const request = pendingProposal().request;
