@@ -13,6 +13,7 @@ import {
   render,
   runJoined,
   synchronize,
+  verifyComparison,
   verifyGroups,
 } from "./proof.mjs";
 
@@ -33,6 +34,63 @@ const workflow = parse(fs.readFileSync(".github/workflows/vitest-cache-warm.yml"
 const phaseAction = parse(fs.readFileSync(".github/actions/build-cache-proof/action.yml", "utf8"));
 const evaluate = (value, context) =>
   runInNewContext(value.replace(/inputs\.([a-z-]+)/gu, 'inputs["$1"]'), context);
+
+test("B may change declaration bytes, but every phase preserves membership and every A preserves bytes", () => {
+  const root = directory("comparison");
+  const file = path.join(root, "entry.d.ts"),
+    snapshot = path.join(root, "a-dts.json");
+  const previous = {
+    outputs: [[file, "a-hash"]],
+    receipts: [
+      { group: "group", roots: ["src/entry.ts"], inputs: ["src/entry.ts"], signature: "a" },
+    ],
+  };
+  fs.writeFileSync(snapshot, JSON.stringify({ [file]: "export type Value = 'before';\n" }));
+  fs.writeFileSync(file, "export type Value = 'after';\n");
+  const logs = [],
+    emit = (value) => logs.push(JSON.parse(value));
+  const b = structuredClone({ ...previous, phase: "b" });
+  b.outputs[0][1] = "b-hash";
+  b.receipts[0].signature = "b";
+  verifyComparison(b, previous, snapshot, emit);
+  assert.deepEqual(logs.pop().comparison, {
+    phase: "b",
+    membershipMatches: true,
+    signaturesMatch: false,
+    outputsMatch: false,
+  });
+  for (const phase of ["b", "broad", "preferred"])
+    for (const field of ["roots", "inputs"]) {
+      const changed = structuredClone({ ...previous, phase });
+      changed.receipts[0][field].push("src/unexpected.ts");
+      assert.throws(
+        () => verifyComparison(changed, previous, snapshot, emit),
+        /membership changed/,
+      );
+      assert.equal(logs.pop().comparison.membershipMatches, false);
+    }
+  for (const phase of ["broad", "preferred"]) {
+    verifyComparison({ ...previous, phase }, previous, snapshot, emit);
+    const changed = structuredClone({ ...previous, phase });
+    changed.receipts[0].signature = "changed";
+    assert.throws(() => verifyComparison(changed, previous, snapshot, emit), /signatures changed/);
+    for (const outputs of [[[file, "changed"]], [[`${file}.renamed`, "a-hash"]]]) {
+      logs.length = 0;
+      assert.throws(
+        () => verifyComparison({ ...previous, phase, outputs }, previous, snapshot, emit),
+        /DTS bytes changed/,
+      );
+      assert.equal(logs[0].comparison.outputsMatch, false);
+      assert(logs[1].declarationDelta.length <= 2);
+      assert(logs[1].declarationDelta.some(({ before }) => before.includes("'before'")));
+      assert(
+        logs[1].declarationDelta.every(
+          ({ before, after }) => before.length <= 512 && after.length <= 512,
+        ),
+      );
+    }
+  }
+});
 
 test("root cgroup absence is explicit while child, unreadable, and unmapped limits fail closed", () => {
   const root = directory("cgroup");

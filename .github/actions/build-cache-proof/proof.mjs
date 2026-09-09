@@ -197,6 +197,49 @@ export function cgroupLimits(membership, root = "/sys/fs/cgroup", readFile = rea
   }
 }
 
+export function verifyComparison(result, previous, snapshot, emit = console.log) {
+  const membership = ({ receipts }) =>
+    receipts.map(({ group, roots, inputs }) => ({ group, roots, inputs }));
+  const comparison = {
+    phase: result.phase,
+    membershipMatches: digest(membership(result)) === digest(membership(previous)),
+    signaturesMatch:
+      digest(result.receipts.map(({ signature }) => signature)) ===
+      digest(previous.receipts.map(({ signature }) => signature)),
+    outputsMatch: digest(result.outputs) === digest(previous.outputs),
+  };
+  emit(JSON.stringify({ comparison }));
+  // B deliberately changes topology; only the three A generations are byte controls.
+  if (result.phase !== "b" && !comparison.outputsMatch) {
+    const originals = json(snapshot);
+    const expected = Object.fromEntries(previous.outputs),
+      actual = Object.fromEntries(result.outputs);
+    const changed = [...new Set([...Object.keys(expected), ...Object.keys(actual)])]
+      .sort()
+      .filter((name) => expected[name] !== actual[name])
+      .slice(0, 2);
+    emit(
+      JSON.stringify({
+        declarationDelta: changed.map((name) => {
+          const before = originals[name] ?? "",
+            after = fs.existsSync(name) ? read(name) : "";
+          let offset = 0;
+          while (offset < Math.min(before.length, after.length) && before[offset] === after[offset])
+            offset++;
+          offset = Math.max(0, offset - 160);
+          const excerpt = (text) =>
+            text.slice(offset, offset + 512).replaceAll(process.cwd(), "<workspace>");
+          return { name, offset, before: excerpt(before), after: excerpt(after) };
+        }),
+      }),
+    );
+  }
+  assert(comparison.membershipMatches, "Compiler membership changed");
+  if (result.phase === "b") return;
+  assert(comparison.signaturesMatch, "Compiler signatures changed");
+  assert(comparison.outputsMatch, "DTS bytes changed");
+}
+
 async function main() {
   const root = fs.realpathSync(process.cwd());
   const stateRoot = path.join(
@@ -370,6 +413,7 @@ async function main() {
   const stamps = [...files(cache.path)]
     .filter((name) => name.endsWith("/stamp.json"))
     .map((name) => ({ name, record: json(path.join(cache.path, name)) }));
+  const { readDeclarationInputs } = await load("scripts/lib/tsdown-declaration-inputs.mts");
   const receipts = groups.map((group) => {
     const entry = stamps.find(({ record }) =>
       Object.hasOwn(record.outputs, `compiler-inputs/${group}.json`),
@@ -379,7 +423,10 @@ async function main() {
       path.join(cache.path, path.dirname(entry.name), "outputs/compiler-inputs", `${group}.json`),
     );
     assert.deepEqual(receipt.inputs, [...new Set(receipt.inputs)].sort());
-    assert.deepEqual(entry.record.inputs, receipt.inputs);
+    assert.deepEqual(
+      entry.record.inputs,
+      readDeclarationInputs(path.join(cache.path, path.dirname(entry.name), "outputs/dist"), group),
+    );
     return { group, ...receipt, signature: entry.record.signature };
   });
   const outputs = [...files(root)]
@@ -391,15 +438,6 @@ async function main() {
     )
     .map((name) => [name, hash(fs.readFileSync(name))]);
   assert(outputs.length > 0, "Missing DTS inventory");
-  if (state.results.length) {
-    assert.deepEqual(outputs, state.results[0].outputs, "DTS bytes changed");
-    for (const [index, receipt] of receipts.entries()) {
-      const previous = state.results[0].receipts[index];
-      assert.deepEqual(receipt.roots, previous.roots);
-      assert.deepEqual(receipt.inputs, previous.inputs);
-      if (phase !== "b") assert.equal(receipt.signature, previous.signature);
-    }
-  }
   const result = {
     phase,
     key: state.key,
@@ -413,8 +451,7 @@ async function main() {
     receipts,
     outputs,
   };
-  state.results.push(result);
-  state.active = false;
+  state.pending = result;
   save(state);
   console.log(
     JSON.stringify({
@@ -429,6 +466,16 @@ async function main() {
       })),
     }),
   );
+  const snapshot = path.join(stateRoot, "a-dts.json");
+  if (phase === "a") {
+    const bytes = JSON.stringify(Object.fromEntries(outputs.map(([name]) => [name, read(name)])));
+    assert(Buffer.byteLength(bytes) <= 64 * 1024 * 1024, "A declaration snapshot exceeds 64 MiB");
+    fs.writeFileSync(snapshot, bytes, { flag: "wx" });
+  } else verifyComparison(result, state.results[0], snapshot);
+  delete state.pending;
+  state.results.push(result);
+  state.active = false;
+  save(state);
   if (phase === "preferred") {
     assert.equal(inventory(baseline, root, true), state.baselineHash, "Baseline mutated");
     assert(elapsedMs < state.results[2].elapsedMs, "No net elapsed improvement");
