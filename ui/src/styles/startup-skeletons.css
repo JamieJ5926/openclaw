@@ -53,7 +53,7 @@ openclaw-app:has(.shell:not([data-startup-stage="ready"])) {
   visibility: hidden;
 }
 
-.shell[data-startup-stage] :is(.startup-sidebar-skeleton, .startup-chat-skeleton) .skeleton::after {
+.shell[data-startup-stage] .startup-chat-skeleton .skeleton::after {
   animation: none;
   transform: none;
 }
@@ -72,7 +72,19 @@ openclaw-app:has(.shell:not([data-startup-stage="ready"])) {
 }
 
 .startup-sidebar-skeleton .sidebar-recent-sessions__label-text {
-  width: 12ch;
+  flex: 1;
+  --startup-bar-width: 30%;
+  --startup-bar-height: 9px;
+}
+
+.startup-sidebar-skeleton :is(.nav-item__icon, .sidebar-session-group-toggle__lead) {
+  --startup-bar-width: 16px;
+  --startup-bar-height: 16px;
+}
+
+.startup-sidebar-skeleton .sidebar-agent-card__avatar {
+  --startup-bar-height: 100%;
+  --startup-bar-radius: var(--radius-full);
 }
 
 .startup-sidebar-skeleton .sidebar-agent-card__avatar,
@@ -84,8 +96,17 @@ openclaw-app:has(.shell:not([data-startup-stage="ready"])) {
   width: var(--chat-message-column-max);
 }
 
-.startup-transcript-line {
-  min-width: 12ch;
+.startup-transcript-skeleton .user .chat-group-messages {
+  max-width: 100%;
+}
+
+.startup-transcript-skeleton .user .chat-bubble {
+  width: 42%;
+  max-width: var(--chat-message-column-max);
+}
+
+.startup-transcript-skeleton .user ~ .user .chat-bubble {
+  width: 32%;
 }
 
 /* Each region inherits one reveal; its leaves retain their existing boxes. */
@@ -138,14 +159,7 @@ openclaw-app:has(.shell:not([data-startup-stage="ready"])) {
 
 .shell[data-startup-stage]
   :where(
-    .sidebar-agent-card__avatar,
-    .sidebar-agent-card__name-text,
     .assistant-panel-title,
-    .sidebar .nav-item__icon,
-    .sidebar .nav-item__text,
-    .sidebar-recent-sessions__label-text,
-    .sidebar-recent-session__name,
-    .sidebar-session-group-toggle__lead,
     .chat-pane__workspace-chip > span:not(.workspace-icon-fallback),
     .chat-pane__session-title-text,
     .chat-pane__workspace-chip,
@@ -179,6 +193,18 @@ openclaw-app:has(.shell:not([data-startup-stage="ready"])) {
     pointer-events: none;
     transition: var(--startup-mask-transition, opacity 160ms var(--ease-out));
   }
+}
+
+/* Paint text-sized bars without changing the canonical row boxes. */
+.shell[data-startup-stage] .startup-sidebar-skeleton .skeleton::after {
+  inset: 50% auto auto 0;
+  width: var(--startup-bar-width, 100%);
+  height: var(--startup-bar-height, 14px);
+  border-radius: var(--startup-bar-radius, var(--radius-sm));
+  background: var(--skeleton-base, var(--bg-muted));
+  visibility: visible;
+  animation: none;
+  transform: translateY(-50%);
 }
 
 /* These controls contain bare SVGs, so mask their icon box, not the button. */
@@ -251,15 +277,6 @@ openclaw-app:has(.shell:not([data-startup-stage="ready"])) {
 
 .shell[data-startup-stage] .startup-transcript-skeleton .assistant .chat-bubble::after {
   content: none;
-}
-
-.shell[data-startup-stage] .startup-transcript-skeleton .user .chat-bubble::after {
-  inset-inline-start: auto;
-  inset-block-end: auto;
-  width: min(100%, calc(12ch + 32px + 2px));
-  height: min(100%, calc(1lh + 32px + 2px));
-  font-size: var(--chat-text-size);
-  line-height: 1.5;
 }
 
 .shell[data-startup-managed] openclaw-app-sidebar .sidebar,

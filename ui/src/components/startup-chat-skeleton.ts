@@ -29,7 +29,7 @@ export function renderChatTranscriptSkeleton() {
           <div class="chat-bubble">
             ${
               role === "user"
-                ? html`<div class="chat-text skeleton startup-transcript-line">${"\u00a0"}</div>`
+                ? html`<div class="chat-text">${"\u00a0"}</div>`
                 : html`<div class="chat-text startup-transcript-lines">
                     <div class="skeleton skeleton-line"></div>
                     <div class="skeleton skeleton-line skeleton-line--long"></div>
