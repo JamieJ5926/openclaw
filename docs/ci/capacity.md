@@ -26,6 +26,18 @@ concurrent repositories, retries, and burst overlap.
 
 The protected cache warmer has two platform rows: the existing Linux workload and one hosted macOS pnpm-store publisher. Its per-ref concurrency and pending-run coalescing are unchanged. Each admitted warmer run adds one hosted macOS job and no Blacksmith registrations; pull-request CI adds no writers or jobs. Native producer and consumer measurements must include cache transfer, extraction, installation, and archive size before claiming a setup-time saving.
 
+The outer `build-all` cache prefers a matching compiler namespace, then the newest
+broad seed in the same accessible scope.
+Setup captures this namespace after dependency installation and before restoring
+build outputs. The warmer saves that captured key, including its unique run and
+attempt suffix. It does not recompute the namespace after generated trees appear.
+
+Each declaration group still checks its own input signature and complete outputs.
+Source-byte changes can reuse the same outer bucket without accepting stale groups.
+This changes cache selection only: no jobs, runner classes, shards, or concurrency
+limits change. Existing broad seeds remain eligible fallback entries.
+Frozen targets without the namespace snapshot retain the broad cache path.
+
 The published-upgrade PR/main tripwire reuses the reserved `docker-seed-e2e` job,
 so the retained peak envelope stays `4 × 144 + 21 × 200 = 4,776` registrations.
 Docs-only main tips remain excluded by the `**/*.md` and `docs/**` push filters.

@@ -7242,6 +7242,9 @@ server.listen(0, "127.0.0.1", () => {
     const cacheStep = action.runs.steps.find(
       (step: WorkflowStep) => step.name === "Restore build-all cache",
     );
+    const topologyStep = action.runs.steps.find(
+      (step: WorkflowStep) => step.id === "build-all-topology",
+    );
 
     expect(action.inputs["build-all-cache-scope"].default).toBe("");
     expect(cacheStep).toMatchObject({
@@ -7251,14 +7254,23 @@ server.listen(0, "127.0.0.1", () => {
     });
     expect(cacheStep.with.key).toContain("build-all-v1-${{ inputs.build-all-cache-scope }}");
     expect(cacheStep.with.key).toContain("${{ runner.os }}-${{ runner.arch }}");
-    const renderCacheKey = (template: string, runId: number, runAttempt: number) =>
+    const renderCacheKey = (
+      template: string,
+      runId: number,
+      runAttempt: number,
+      topology = "topology-a",
+    ) =>
       template.replace(/\$\{\{([\s\S]*?)\}\}/gu, (_, expression: string) =>
         String(
-          runInNewContext(expression.replace(/inputs\.([a-z-]+)/gu, 'inputs["$1"]'), {
+          runInNewContext(expression.replace(/\b(inputs|steps)\.([a-z-]+)/gu, '$1["$2"]'), {
             github: { repository: "openclaw/openclaw", run_id: runId, run_attempt: runAttempt },
             inputs: { "build-all-cache-scope": "full", "node-version": "24.x" },
             runner: { os: "Linux", arch: "X64" },
-            hashFiles: () => "unchanged-source",
+            steps: {
+              "build-all-topology": {
+                outputs: { prefix: topology ? `topology-${topology}-` : "" },
+              },
+            },
           }),
         ),
       );
@@ -7272,14 +7284,31 @@ server.listen(0, "127.0.0.1", () => {
       ] as const
     ).map(([runId, runAttempt]) => renderCacheKey(cacheStep.with.key, runId, runAttempt));
     expect(new Set(keys).size).toBe(3);
+    const restoreKeys = renderCacheKey(cacheStep.with["restore-keys"], 11, 2).trim().split("\n");
     for (const key of keys) {
-      expect(key.startsWith(renderCacheKey(cacheStep.with["restore-keys"], 11, 2).trim())).toBe(
-        true,
-      );
+      expect(key.startsWith(expectDefined(restoreKeys[0]))).toBe(true);
     }
+    // Within one cache scope, Actions tries prefixes in order, newest generation first.
+    const olderA = renderCacheKey(cacheStep.with.key, 10, 1);
+    const newerB = renderCacheKey(cacheStep.with.key, 11, 1, "topology-b");
+    const available = [newerB, olderA];
+    const select = (prefixes: string[]) =>
+      prefixes.flatMap((prefix) => available.filter((key) => key.startsWith(prefix)))[0];
+    expect(select(restoreKeys)).toBe(olderA);
+    expect(restoreKeys).toHaveLength(2);
+    expect(select(restoreKeys.slice(1))).toBe(newerB);
+    expect(select(restoreKeys.map((key) => key.replace("topology-a", "unknown")))).toBe(newerB);
+    expect(renderCacheKey(cacheStep.with.key, 12, 1, "")).toBe(`${restoreKeys[1]}12-1`);
     expect(cacheStep.with["restore-keys"]).not.toContain("hashFiles");
+    expect(topologyStep.if).toBe(cacheStep.if);
     expect(action.runs.steps.indexOf(installStep)).toBeLessThan(
+      action.runs.steps.indexOf(topologyStep),
+    );
+    expect(action.runs.steps.indexOf(topologyStep)).toBeLessThan(
       action.runs.steps.indexOf(cacheStep),
+    );
+    expect(action.outputs["build-all-cache-key"].value).toBe(
+      "${{ steps.build-all-cache.outputs.cache-primary-key }}",
     );
     const warmer = parse(readFileSync(".github/workflows/vitest-cache-warm.yml", "utf8"));
     const buildSave = warmer.jobs.warm.steps.find(
@@ -7293,6 +7322,9 @@ server.listen(0, "127.0.0.1", () => {
       },
     });
     expect(buildSave.if).toContain("steps.setup-node-env.outputs.cache-mode == 'read-write'");
+    expect(
+      warmer.jobs.warm.steps.findIndex((step: WorkflowStep) => step.name === "Warm build cache"),
+    ).toBeLessThan(warmer.jobs.warm.steps.indexOf(buildSave));
 
     const privateQaWorkflows = [
       ".github/workflows/mantis-discord-smoke.yml",
@@ -7412,6 +7444,92 @@ server.listen(0, "127.0.0.1", () => {
     expect(releaseChecks.jobs.validate_docker_lanes.env.OPENCLAW_UPGRADE_SURVIVOR_SCENARIOS).toBe(
       "${{ matrix.group.published_upgrade_survivor_scenarios || inputs.published_upgrade_survivor_scenarios }}",
     );
+  });
+
+  it("captures the installed prebuild namespace through the owning setup action", () => {
+    const action = parse(readFileSync(".github/actions/setup-node-env/action.yml", "utf8"));
+    const capture = action.runs.steps.find(
+      (step: WorkflowStep) => step.id === "build-all-topology",
+    ) as WorkflowStep;
+    const write = (root: string, file: string, bytes = "export {};") => {
+      const target = path.join(root, file);
+      mkdirSync(path.dirname(target), { recursive: true });
+      writeFileSync(target, bytes);
+    };
+    const fixture = () => {
+      const root = tempDirs.make("build-all-topology-");
+      write(root, "src/input.ts");
+      write(root, "node_modules/installed/dist/input.d.ts");
+      write(root, "packages/sdk/package.json", '{"type":"module"}');
+      symlinkSync("../packages/sdk", path.join(root, "node_modules/sdk"), "dir");
+      for (const file of ["compiler-input-snapshot.mts", "build-artifact-cache.mts"]) {
+        mkdirSync(path.join(root, "scripts/lib"), { recursive: true });
+        copyFileSync(path.join("scripts/lib", file), path.join(root, "scripts/lib", file));
+      }
+      for (const dependency of ["typescript", "@openclaw/fs-safe"]) {
+        const link = path.join(root, "node_modules", dependency);
+        mkdirSync(path.dirname(link), { recursive: true });
+        symlinkSync(
+          path.dirname(fileURLToPath(import.meta.resolve(`${dependency}/package.json`))),
+          link,
+          "dir",
+        );
+      }
+      // CI's trusted sparse harness contains actions, not the compiler snapshot.
+      write(root, ".ci-harness/.github/actions/setup-node-env/action.yml", "");
+      return root;
+    };
+    const digest = (root: string) => {
+      const output = path.join(root, ".artifacts/output");
+      write(root, ".artifacts/output", "");
+      const result = spawnSync("bash", ["-euo", "pipefail", "-c", expectDefined(capture.run)], {
+        cwd: root,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          GITHUB_ACTION_PATH: path.join(root, ".ci-harness/.github/actions/setup-node-env"),
+          GITHUB_OUTPUT: output,
+        },
+      });
+      expect(result.status, result.stdout + result.stderr).toBe(0);
+      const value = readFileSync(output, "utf8").trim();
+      return value;
+    };
+    const root = fixture();
+    const prebuild = digest(root);
+    expect(prebuild).toMatch(/^prefix=topology-[a-f0-9]{64}-$/u);
+    const relocated = fixture();
+    expect(digest(relocated)).toBe(prebuild);
+    write(root, "src/input.ts", "export const changed = true;");
+    write(root, "notes.md", "docs only");
+    write(root, ".artifacts/generated.ts");
+    write(root, "dist/generated.d.ts");
+    expect(digest(root)).toBe(prebuild);
+
+    for (const candidate of [
+      "src/added.mts",
+      "node_modules/installed/dist/added.d.ts",
+      "nested/.ci-harness/candidate.ts",
+    ]) {
+      write(root, candidate);
+      expect(digest(root), candidate).not.toBe(prebuild);
+      rmSync(path.join(root, candidate));
+      expect(digest(root), candidate).toBe(prebuild);
+    }
+    rmSync(path.join(root, "node_modules/sdk"));
+    symlinkSync("installed", path.join(root, "node_modules/sdk"), "dir");
+    expect(digest(root)).not.toBe(prebuild);
+    rmSync(path.join(root, "node_modules/sdk"));
+    symlinkSync("../packages/sdk", path.join(root, "node_modules/sdk"), "dir");
+    expect(digest(root)).toBe(prebuild);
+
+    // An installed workspace alias exposes build output after capture. Saving
+    // setup's original primary key keeps the next clean consumer in this bucket.
+    write(root, "packages/sdk/dist/generated.d.ts");
+    expect(digest(root)).not.toBe(prebuild);
+    expect(digest(relocated)).toBe(prebuild);
+    rmSync(path.join(relocated, "scripts/lib/compiler-input-snapshot.mts"));
+    expect(digest(relocated)).toBe("");
   });
 
   it("persists Node 26 minimum declarations through trusted bounded artifacts", () => {

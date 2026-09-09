@@ -497,6 +497,8 @@ describe("native owner content records", () => {
     (noEmit) => {
       const f = fixture(noEmit);
       const record = f.seal(f.prepare());
+      const namespace = () => new BoundaryInputSnapshot(f.root).namespace(f.outputRoot);
+      const topology = namespace();
       const stamp = path.join(f.root, ".artifacts/record.json");
       writeArtifactRecord(stamp, record);
       expect(record.inputs).toContain("nested/value.js");
@@ -513,12 +515,14 @@ describe("native owner content records", () => {
       expect(matches()).toBe(true);
       f.write("unrelated/source.ts", "export const unrelated = 2;");
       f.write("src/api.test.ts", "export const test = 2;");
+      expect(namespace()).toBe(topology);
       expect(matches()).toBe(true);
       for (const file of Object.keys(record.outputs)) {
         fs.utimesSync(path.join(f.root, file), new Date(2000), new Date(2000));
       }
       expect(matches()).toBe(true);
       f.write("nested/value.js", "export const value = 'changed';");
+      expect(namespace()).toBe(topology);
       expect(matches()).toBe(false);
     },
   );

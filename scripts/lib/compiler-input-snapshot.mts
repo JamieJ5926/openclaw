@@ -95,7 +95,9 @@ export class CompilerInputSnapshot {
     return result;
   }
 
-  private namespace(outputRoot?: string) {
+  // Outer caches may prefer this namespace, but only signatures and complete
+  // output validation can accept a group. Capture before generated trees appear.
+  namespace(outputRoot?: string) {
     if (this.topology === undefined) {
       const names: { name: string; directory: string; file?: string }[] = [];
       const visited = new Map<string, boolean>();

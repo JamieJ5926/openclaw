@@ -370,15 +370,33 @@ runs:
         FROZEN_LOCKFILE: ${{ inputs.frozen-lockfile }}
       run: bash "$GITHUB_ACTION_PATH/install-dependencies.sh"
 
+    - name: Capture build-all topology
+      id: build-all-topology
+      if: inputs.cache-mode != 'off' && inputs.build-all-cache-scope != ''
+      shell: bash
+      run: |
+        # The trusted action can serve frozen targets predating this snapshot.
+        # Their existing broad cache path still validates each restored group.
+        if [[ ! -f scripts/lib/compiler-input-snapshot.mts ]]; then
+          echo "::notice::Selected source has no compiler namespace snapshot; retaining the broad build-all cache seed."
+          exit 0
+        fi
+        node --input-type=module <<'NODE' >> "$GITHUB_OUTPUT"
+        import { CompilerInputSnapshot } from "./scripts/lib/compiler-input-snapshot.mts";
+        const snapshot = new CompilerInputSnapshot(process.cwd(), { toolchainFiles: [], generatorInputs: [] });
+        console.log(`prefix=topology-${snapshot.namespace()}-`);
+        NODE
+
     - name: Restore build-all cache
       id: build-all-cache
       if: inputs.cache-mode != 'off' && inputs.build-all-cache-scope != ''
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: .artifacts/build-all-cache
-        # Each protected warmer attempt publishes a new immutable generation.
-        # Group signatures own validity; an outer input list can strand rebuilt
-        # groups behind an old exact key that Actions cache cannot replace.
-        key: ${{ github.repository }}-build-all-v1-${{ inputs.build-all-cache-scope }}-${{ runner.os }}-${{ runner.arch }}-node-${{ inputs.node-version }}-${{ github.run_id }}-${{ github.run_attempt }}
+        # Prefer the installed prebuild namespace, then retain the broad seed.
+        # Group signatures still own validity. Run/attempt suffixes let rebuilt
+        # groups publish without replacing an immutable cache generation.
+        key: ${{ github.repository }}-build-all-v1-${{ inputs.build-all-cache-scope }}-${{ runner.os }}-${{ runner.arch }}-node-${{ inputs.node-version }}-${{ steps.build-all-topology.outputs.prefix }}${{ github.run_id }}-${{ github.run_attempt }}
         restore-keys: |
+          ${{ github.repository }}-build-all-v1-${{ inputs.build-all-cache-scope }}-${{ runner.os }}-${{ runner.arch }}-node-${{ inputs.node-version }}-${{ steps.build-all-topology.outputs.prefix }}
           ${{ github.repository }}-build-all-v1-${{ inputs.build-all-cache-scope }}-${{ runner.os }}-${{ runner.arch }}-node-${{ inputs.node-version }}-
