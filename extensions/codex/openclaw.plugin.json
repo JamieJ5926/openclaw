@@ -1,6 +1,6 @@
 {
   "id": "codex",
-  "categories": ["developer-tools"],
+  "categories": ["agent-runtimes"],
   "backupResources": [
     {
       "disposition": "regenerable",
