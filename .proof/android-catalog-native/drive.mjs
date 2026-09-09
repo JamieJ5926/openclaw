@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import {execFileSync} from 'node:child_process';
 import {createCaptureOwner, createAdbExecutor} from './capture-owner.mjs';
 import {createStartupWelcome} from './startup-welcome.mjs';
+import {requireEmptyFocusedField, requireHostReadback} from './field-entry.mjs';
 import {readFixtureEndpoint} from './fixture-endpoint.mjs';
 import {nodes, point, applicationNodes} from './startup-surface.mjs';
 
@@ -55,8 +56,16 @@ function typeField(index, text) {
   const xy = point(fields[index]);
   record('type-fixture-field', {index, value: index === 2 ? '[synthetic fixture token]' : text, xy, observation: observation.id});
   owner.input(observation, ['input', 'tap', ...xy]);
-  owner.input(observation, ['input', 'text', text], {secret: index === 2});
-  owner.input(observation, ['input', 'keyevent', 'KEYCODE_BACK']);
+  const focused = capture('focused-field');
+  requireEmptyFocusedField(currentXml(focused), index);
+  record('field-focus-checked', {index, observation: focused.id});
+  owner.input(focused, ['input', 'text', text], {secret: index === 2});
+  const entered = capture('after-field-entry');
+  if (index === 0) {
+    requireHostReadback(currentXml(entered), text);
+    record('host-entry-readback', {observation: entered.id, value: text});
+  }
+  owner.input(entered, ['input', 'keyevent', 'KEYCODE_BACK']);
 }
 
 try {

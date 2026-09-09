@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import {spawn, spawnSync} from 'node:child_process';
 import {createInterface} from 'node:readline';
 
-export const WRITE_LIMIT=72*1024**3;
-export const PRIOR_HOSTED_CARRY=62828216320;
+export const WRITE_LIMIT=80*1024**3;
+export const PRIOR_HOSTED_CARRY=72298582016;
 export const INITIAL_HOLD=PRIOR_HOSTED_CARRY+128*1024**2;
 const CONTROL_LIMIT=65536;
 export function writeControl(path,value){
