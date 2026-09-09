@@ -887,7 +887,7 @@ describe("getApiKeyForModelCore", () => {
       },
     );
 
-    expect(cliCredentialMocks.readCodexCliCredentialsCached).toHaveBeenCalled();
+    expect(cliCredentialMocks.readCodexCliCredentialsCached).not.toHaveBeenCalled();
     expect(cliCredentialMocks.readMiniMaxCliCredentialsCached).not.toHaveBeenCalled();
   });
 

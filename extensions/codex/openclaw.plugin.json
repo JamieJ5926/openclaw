@@ -2,6 +2,7 @@
   "id": "codex",
   "providers": ["codex"],
   "syntheticAuthRefs": ["codex"],
+  "providerCatalogEntry": "./provider-discovery.ts",
   "backupResources": [
     {
       "disposition": "regenerable",
