@@ -113,6 +113,46 @@ def run_git(`,
   );
 }
 
+export function renderWindowsJobDiagnostics(source: string): string {
+  const embedded = /^(run_owner ')([\s\S]*?)('\n# End generated CI Git owner\.)$/mu;
+  if (embedded.test(source)) {
+    return source.replace(embedded, (_match, prefix: string, body: string, suffix: string) => {
+      const adjusted = renderWindowsJobDiagnostics(body.replaceAll("'\\''", "'"));
+      return prefix + adjusted.replaceAll("'", "'\\''") + suffix;
+    });
+  }
+  const drain = source.indexOf("def drain(child, job):");
+  assert(drain >= 0, "Missing copied drain function");
+  const start = source.indexOf('    if os.name == "nt":', drain);
+  const end = source.indexOf("    else:\n        # The group remains ours", start);
+  assert(start >= 0 && end > start, "Missing copied Windows drain boundary");
+  const original = source.slice(start, end);
+  assert.equal(original.split("        terminate_job(job, 1)\n").length, 2);
+  assert.equal(original.split("            if accounting.ActiveProcesses == 0:\n").length, 2);
+  const observed = original
+    .slice('    if os.name == "nt":\n'.length)
+    .replace(
+      "        terminate_job(job, 1)\n",
+      '        diagnostic.sample("before-terminate")\n        terminate_job(job, 1)\n        diagnostic.sample("after-terminate")\n',
+    )
+    .replace(
+      "            if accounting.ActiveProcesses == 0:\n",
+      '            if accounting.ActiveProcesses == 0:\n                diagnostic.sample("accounting-zero", accounting.ActiveProcesses)\n',
+    )
+    .replace(/^/gmu, "    ");
+  const diagnostic = readFileSync(
+    new URL("./fixtures/ci-windows-job-diagnostics.py", import.meta.url),
+    "utf8",
+  );
+  return (
+    source.slice(0, start) +
+    '    if os.name == "nt":\n        with FixtureWindowsJobDiagnostics(child.pid, job, deadline) as diagnostic:\n' +
+    observed.trimEnd() +
+    "\n" +
+    source.slice(end)
+  ).replace("def drain(child, job):", `${diagnostic}\n\ndef drain(child, job):`);
+}
+
 export function expectCiCheckoutCleanup(report: Report) {
   assert.deepEqual(report.cleanupRemaining, [], "fixture cleanup left owned processes");
   assert.equal(report.boundaries.at(-1)?.name, "exit");
