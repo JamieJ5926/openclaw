@@ -7,6 +7,7 @@ import {
   createContext,
   createGateway,
   createInspectResult,
+  createPlugin,
   createPluginsRouteData,
   createPluginsRouteLocation,
   createResult,
