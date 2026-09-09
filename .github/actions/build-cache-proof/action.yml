@@ -1,0 +1,39 @@
+name: Isolated build cache phase
+description: Proof-branch-only reset, official cache transfer, and full-source build.
+inputs:
+  phase:
+    description: Ordered proof phase.
+    required: true
+  cache-mode:
+    description: Only the two seed phases may publish.
+    default: off
+runs:
+  using: composite
+  steps:
+    - name: Reset source and capture canonical key
+      id: prepare
+      shell: bash
+      env:
+        PROOF_PHASE: ${{ inputs.phase }}
+      run: node "$GITHUB_ACTION_PATH/proof.mjs" prepare
+    - name: Restore isolated generation
+      id: restore
+      if: inputs.phase != 'a'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.prepare.outputs.path }}
+        key: ${{ steps.prepare.outputs.key }}
+        restore-keys: ${{ fromJSON(steps.prepare.outputs.restore) }}
+        fail-on-cache-miss: true
+    - name: Build and verify complete generation
+      shell: bash
+      env:
+        PROOF_PHASE: ${{ inputs.phase }}
+        PROOF_MATCHED_KEY: ${{ steps.restore.outputs.cache-matched-key }}
+      run: node "$GITHUB_ACTION_PATH/proof.mjs" build
+    - name: Save isolated seed
+      if: inputs.cache-mode == 'read-write' && (inputs.phase == 'a' || inputs.phase == 'b')
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.prepare.outputs.path }}
+        key: ${{ steps.prepare.outputs.key }}

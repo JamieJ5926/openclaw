@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      topology-proof:
+        description: Run the isolated four-phase topology proof instead of normal warming.
+        type: boolean
+        default: false
   repository_dispatch:
     types: [vitest-cache-warm]
   schedule:
@@ -20,7 +25,7 @@ jobs:
   warm:
     # Shared CI cache publication is isolated from pull-request execution.
     # Trusted release/proof workflows may save only through the same authority contract.
-    if: github.repository == 'openclaw/openclaw'
+    if: github.repository == 'openclaw/openclaw' && !inputs.topology-proof
     runs-on: ${{ matrix.platform == 'macos' && 'macos-15' || (vars.OPENCLAW_CI_RUNNER_BACKEND == 'github' && 'ubuntu-24.04' || 'blacksmith-8vcpu-ubuntu-2404') }}
     timeout-minutes: 60
     strategy:
@@ -213,3 +218,47 @@ jobs:
             echo "::error::Vitest cache warming failed"
             exit 1
           fi
+
+  topology-proof:
+    if: github.repository == 'openclaw/openclaw' && github.event_name == 'workflow_dispatch' && inputs.topology-proof && github.run_attempt == 1 && github.ref == 'refs/heads/perf/ci-build-cache-topology-proof-34354161815'
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 30
+    env:
+      PROOF_SOURCE_SHA: 5fdf2105db2bfb2ff9569cbf953b1632b8bd6c7c
+      PROOF_WORKFLOW_SHA: ${{ github.workflow_sha }}
+    steps:
+      - name: Bound proof lifetime
+        run: echo "PROOF_DEADLINE=$(( $(date +%s) + 1740 ))" >> "$GITHUB_ENV"
+      - name: Checkout exact build source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.PROOF_SOURCE_SHA }}
+          persist-credentials: false
+      - name: Stage proof harness without changing build source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .ci-harness
+          sparse-checkout: /.github/actions/build-cache-proof/
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Install exact source dependencies
+        uses: ./.github/actions/setup-node-env
+        with:
+          cache-mode: restore
+          dependency-cache: "true"
+          install-bun: "false"
+      - name: Capture independent post-install baseline
+        run: node .ci-harness/.github/actions/build-cache-proof/proof.mjs init
+      - name: Seed A
+        uses: ./.ci-harness/.github/actions/build-cache-proof
+        with: { phase: a, cache-mode: read-write }
+      - name: Seed newer B
+        uses: ./.ci-harness/.github/actions/build-cache-proof
+        with: { phase: b, cache-mode: read-write }
+      - name: Broad A consumer
+        uses: ./.ci-harness/.github/actions/build-cache-proof
+        with: { phase: broad, cache-mode: off }
+      - name: Preferred A consumer
+        uses: ./.ci-harness/.github/actions/build-cache-proof
+        with: { phase: preferred, cache-mode: off }
