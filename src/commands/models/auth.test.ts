@@ -1651,6 +1651,7 @@ describe("modelsAuthLoginCommand", () => {
         key: "sk-openai-chatgpt-api-key-value",
       },
       agentDir: "/tmp/openclaw/agents/coder",
+      preserveApiKeyMetadata: true,
     });
     expect(lastUpdatedConfig?.auth?.profiles?.["openai:manual"]).toEqual({
       provider: "openai",
@@ -1680,6 +1681,7 @@ describe("modelsAuthLoginCommand", () => {
         key: "sk-openai-chatgpt-api-key-value",
       },
       agentDir: "/tmp/openclaw/agents/main",
+      preserveApiKeyMetadata: true,
     });
     expect(lastUpdatedConfig?.auth?.profiles?.["openai:manual"]).toEqual({
       provider: "openai",
@@ -1703,6 +1705,7 @@ describe("modelsAuthLoginCommand", () => {
         key: "sk-openai-chat-api-key-value",
       },
       agentDir: "/tmp/openclaw/agents/main",
+      preserveApiKeyMetadata: true,
     });
     expect(lastUpdatedConfig?.auth?.profiles?.["openai:manual"]).toEqual({
       provider: "openai",

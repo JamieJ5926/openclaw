@@ -147,6 +147,57 @@ describe("API-key storage and selection owners", () => {
     });
   });
 
+  it("reuses a configured shared profile while preserving its copy restriction and configured account metadata", async () => {
+    const profileId = "sample:configured";
+    await upsertAuthProfileWithLockOrThrow({
+      profileId,
+      credential: {
+        type: "api_key",
+        provider: "sample",
+        key: "old-shared-key",
+        copyToAgents: false,
+        displayName: "Stored old label",
+        email: "old@example.test",
+      },
+    });
+    const configuredProfile = {
+      provider: "sample",
+      mode: "api_key" as const,
+      displayName: "Configured account label",
+      email: "current@example.test",
+    };
+    writeConfig({
+      auth: { profiles: { [profileId]: configuredProfile } },
+      models: { providers: { sample: { ...providerConnection, apiKey: profileId } } },
+    });
+    await expect(
+      saveModelProviderApiKey({
+        provider: "sample",
+        apiKey: "replacement-shared-key",
+        agentDir: agentDir("writer"),
+        bindProviderConfig: true,
+      }),
+    ).resolves.toBe(profileId);
+    const config = await loadValidConfigOrThrow();
+    expect(config.auth?.profiles?.[profileId]).toEqual(configuredProfile);
+    expect(config.models?.providers?.sample?.apiKey).toBe(profileId);
+    const stored = loadPersistedAuthProfileStore();
+    expect(stored?.profiles[profileId]).toMatchObject({
+      key: "replacement-shared-key",
+      copyToAgents: false,
+    });
+    expect(stored?.profiles["sample:manual-api-key"]).toBeUndefined();
+    const readerStore = ensureAuthProfileStoreWithoutExternalProfiles(agentDir("reader"));
+    await expect(
+      resolveApiKeyForProfile({
+        cfg: config,
+        store: readerStore,
+        profileId,
+        agentDir: agentDir("reader"),
+      }),
+    ).resolves.toMatchObject({ apiKey: "replacement-shared-key" });
+  });
+
   it("keeps a global provider binding resolvable by another agent after a key edit", async () => {
     writeConfig({
       models: { providers: { sample: { ...providerConnection, apiKey: "old-inline" } } },

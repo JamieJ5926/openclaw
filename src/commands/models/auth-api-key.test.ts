@@ -125,12 +125,20 @@ describe("saveModelProviderApiKey", () => {
       "sample:backup": { type: "api_key", provider: "sample", key: "kept-backup" },
     };
     store.order = { sample: ["sample:work", "sample:backup"] };
+    const configuredProfile = {
+      provider: "sample",
+      mode: "api_key" as const,
+      displayName: "Current work account",
+      email: "work@example.test",
+    };
+    currentConfig.auth = { profiles: { "sample:work": configuredProfile } };
     await expect(
       saveModelProviderApiKey({ ...request, config: currentConfig, bindProviderConfig: true }),
     ).resolves.toBe("sample:work");
     expect(store.profiles["sample:work"]).toMatchObject({ key: "synthetic-new-key" });
     expect(store.profiles["sample:backup"]).toMatchObject({ key: "kept-backup" });
     expect(store.order).toEqual({ sample: ["sample:work", "sample:backup"] });
+    expect(currentConfig.auth?.profiles?.["sample:work"]).toEqual(configuredProfile);
     expect(currentConfig.models).toBeUndefined();
   });
 

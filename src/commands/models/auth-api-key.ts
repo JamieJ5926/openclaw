@@ -14,6 +14,7 @@ import {
 import { resolveSharedAuthStorePath } from "../../agents/auth-profiles/path-resolve.js";
 import { upsertAuthProfileWithLockOrThrow } from "../../agents/auth-profiles/profiles.js";
 import type { AuthProfileCredential } from "../../agents/auth-profiles/types.js";
+import { resolveProviderEntryApiKeyProfileReference } from "../../agents/model-auth-provider-config.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { resolvePathViaExistingAncestorSync } from "../../infra/boundary-path.js";
 import { registerSecretValueForRedaction } from "../../logging/secret-redaction-registry.js";
@@ -78,8 +79,17 @@ export async function saveModelProviderApiKey(params: {
           return credential?.type === "api_key" && !credential.keyRef;
         })
       : undefined;
+  const configuredReference =
+    connectionId && store
+      ? resolveProviderEntryApiKeyProfileReference({ cfg: config, provider: connectionId, store })
+      : undefined;
+  const configuredProfileId =
+    configuredReference?.kind === "profile" || configuredReference?.kind === "profile-incompatible"
+      ? configuredReference.profileId
+      : undefined;
   const profileId =
     params.profileId ??
+    configuredProfileId ??
     replacementId ??
     (params.bindProviderConfig
       ? provider + ":manual-api-key"
@@ -129,7 +139,12 @@ export async function saveModelProviderApiKey(params: {
       );
     }
     validateSharedBinding();
-    const next = applyAuthProfileConfig(current, { profileId, provider, mode: "api_key" });
+    const next = applyAuthProfileConfig(current, {
+      ...current.auth?.profiles?.[profileId],
+      profileId,
+      provider,
+      mode: "api_key",
+    });
     if (!id || !next.models?.providers?.[id]) {
       return next;
     }
