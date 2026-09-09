@@ -1471,7 +1471,7 @@ describe("Discord model picker interactions", () => {
       );
       mockModelCommandPipeline(createModelCommandDefinition());
       const interaction = createInteraction();
-      interaction.editReply.mockImplementation(async () => {
+      interaction.editReply = vi.fn(async (_payload?: unknown): Promise<{ ok: boolean }> => {
         current = false;
         return { ok: true };
       });
