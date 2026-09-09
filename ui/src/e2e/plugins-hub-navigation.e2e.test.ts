@@ -203,7 +203,7 @@ suite.define(() => {
         const pluginsHeader = await headerGeometry(page);
         expect(pluginsHeader.title).toBe("Plugins");
         await expectHeaderCopy(page, "plugins");
-        expect(await page.getByRole("tab").count()).toBe(2);
+        expect(await page.locator(".plugins-hub-tabs").getByRole("tab").count()).toBe(2);
         expect(
           await page.getByRole("tab", { name: "Plugins", exact: true }).getAttribute("active"),
         ).not.toBeNull();
