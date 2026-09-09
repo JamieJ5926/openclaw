@@ -406,7 +406,7 @@ Current limits:
 
 - The traffic allowlist constrains only cooperating clients that honor the proxy environment (`HTTPS_PROXY` and the CA variables). A subprocess can ignore those variables and open raw sockets, so the allowlist is defense in depth; destination-bound sentinels remain the primary defense because they survive proxy bypass.
 - HTTP/2 upstream connections are not supported; the proxy uses HTTP/1.1 upstream.
-- WebSocket rewriting is not supported.
+- WebSocket upgrades support secret substitution in the handshake URL and headers. Message frames pass through unchanged; sentinels inside WebSocket messages are not substituted.
 - Non-443 HTTPS substitution is not a supported compatibility target.
 - Identity-scoped secrets are not supported; only the team store participates.
 - Allowed-host policy is exact-hostname authorization only. It does not validate the resolved IP or prevent an allowed origin from reflecting credentials.
@@ -787,7 +787,7 @@ When reload-time activation fails after a healthy state, OpenClaw enters degrade
 Behavior:
 
 - Degraded: healthy owners refresh, stale owners keep last-known-good, and cold owners remain unavailable.
-- Recovered: emitted once after the next successful activation.
+- Recovered: emitted once after the next successful activation. It confirms recovery, including cold owners that had no usable previous credential.
 - Repeated failures while already degraded log warnings but do not re-emit the event.
 - A strict startup failure never emits a degraded event, because runtime never became active. A successful startup with cold owners logs the owner degradation but does not emit a reloader event.
 - Ref-scoped startup and reload failures emit a structured `SECRETS_DEGRADED` warning for each affected owner. Provider-scoped outages emit one `SECRETS_PROVIDER_DEGRADED` warning with the provider and complete affected-owner list instead of repeating the provider failure per owner. Warnings include a redacted reason, `cold` or `stale` owner state, and the `openclaw secrets reload` retry hint. They never include resolved values or SecretRef ids.
