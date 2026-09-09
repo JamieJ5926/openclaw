@@ -22,6 +22,7 @@ import { GatewayPageController } from "../../lit/gateway-page-controller.ts";
 import { OpenClawLightDomElement } from "../../lit/openclaw-element.ts";
 import { SubscriptionsController } from "../../lit/subscriptions-controller.ts";
 import { UsageRefreshPolicy } from "../usage/refresh-policy.ts";
+import type { ModelAccountUsage } from "./account-usage.ts";
 import {
   modelProviderErrorMessage,
   runModelProviderConfigMutation,
@@ -341,6 +342,13 @@ export class ModelProvidersPage extends OpenClawLightDomElement {
     }
     // Cancel the old supplemental generation before it can publish during core loading.
     this.supplemental.beginCoreRefresh(opts.force);
+    if (opts.force) {
+      for (const account of this.querySelectorAll<ModelAccountUsage>(
+        "openclaw-model-account-usage",
+      )) {
+        account.refreshUsage();
+      }
+    }
     this.loadClient = client;
     return this.refreshTask.run([client, this.selectedAgentId, opts.force]);
   }

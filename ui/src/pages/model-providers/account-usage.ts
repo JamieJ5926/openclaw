@@ -27,6 +27,10 @@ export class ModelAccountUsage extends OpenClawLightDomElement {
         : initialState,
   });
 
+  refreshUsage(): void {
+    this.refresh += 1;
+  }
+
   override render() {
     if (!this.client) {
       return nothing;
@@ -39,9 +43,7 @@ export class ModelAccountUsage extends OpenClawLightDomElement {
           aria-label=${t("common.refresh")}
           title=${t("common.refresh")}
           ?disabled=${this.usage.status === TaskStatus.PENDING}
-          @click=${() => {
-            this.refresh += 1;
-          }}
+          @click=${() => this.refreshUsage()}
         >
           ${icons.refresh}
         </button>

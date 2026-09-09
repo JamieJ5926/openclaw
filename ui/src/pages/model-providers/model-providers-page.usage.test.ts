@@ -6,6 +6,7 @@ import {
   advanceUsageRetries,
   appendPage,
   createHarness,
+  createAuthStatus,
   deferred,
   focusDocument,
   requestCount,
@@ -19,6 +20,33 @@ afterEach(() => {
 });
 
 describe("ModelProvidersPage usage convergence", () => {
+  it("refreshes account quotas from the page Refresh button", async () => {
+    const { context, request, snapshot } = createHarness("main");
+    snapshot.hello = {
+      type: "hello-ok",
+      protocol: 3,
+      auth: { role: "operator", scopes: ["operator.admin"] },
+    };
+    const original = request.getMockImplementation()!;
+    let usedPercent = 10;
+    request.mockImplementation(async (method) => {
+      if (method === "models.authStatus") return createAuthStatus();
+      if (method === "models.authUsage")
+        return {
+          updatedAt: 1,
+          providers: [
+            { provider: "openai", displayName: "OpenAI", windows: [{ label: "5h", usedPercent }] },
+          ],
+        };
+      return original(method);
+    });
+    const page = appendPage(context);
+    await vi.waitFor(() => expect(page.textContent).toContain("90% left"));
+    usedPercent = 90;
+    page.querySelector<HTMLButtonElement>(".settings-section__actions button")?.click();
+    await vi.waitFor(() => expect(page.textContent).toContain("10% left"));
+  });
+
   it("waits for the route loader before starting provider requests, including after reconnect", async () => {
     const harness = createHarness("main");
     const page = document.createElement(
