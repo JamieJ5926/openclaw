@@ -510,7 +510,11 @@ describeControlUiE2e("Control UI Plugins mocked Gateway E2E", () => {
     });
     try {
       await page.goto(`${server.baseUrl}plugins`);
-      await page.getByText("Local Calendar", { exact: true }).waitFor();
+      await page
+        .locator(`[data-plugin-id="${localOnlyDiscoveryPlugin.id}"]`)
+        .first()
+        .getByText("Local Calendar", { exact: true })
+        .waitFor();
       expect(await page.getByText(/ClawHub is unavailable/u).count()).toBe(1);
     } finally {
       await context.close();
