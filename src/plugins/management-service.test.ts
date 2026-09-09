@@ -332,8 +332,8 @@ describe("plugin management service", () => {
 
     expect(catalog.plugins[0]).toMatchObject({
       categories: ["memory", "tools"],
-      category: "memory",
     });
+    expect(catalog.plugins[0]).not.toHaveProperty("category");
     expect(mocks.pluginVersionCategories).not.toHaveBeenCalled();
   });
 
@@ -379,11 +379,35 @@ describe("plugin management service", () => {
     });
     expect(catalog.plugins[0]).toMatchObject({
       categories: ["memory", "tools"],
-      category: "memory",
     });
     expect(cached.plugins[0]).toMatchObject({
       categories: ["memory", "tools"],
-      category: "memory",
+    });
+    expect(catalog.plugins[0]).not.toHaveProperty("category");
+    expect(cached.plugins[0]).not.toHaveProperty("category");
+  });
+
+  it("preserves the shipped category projection alongside package categories", async () => {
+    mocks.metadata.mockReturnValue(
+      metadataSnapshot({
+        enabled: true,
+        id: "chat-bridge",
+        name: "Chat Bridge",
+        origin: "global",
+        categories: ["channels", "tools"],
+        channels: ["chat-bridge"],
+      }),
+    );
+
+    const catalog = await listManagedPlugins({
+      config: {},
+      env: {},
+      officialCatalog: { entries: [] },
+    });
+
+    expect(catalog.plugins[0]).toMatchObject({
+      categories: ["channels", "tools"],
+      category: "channel",
     });
   });
 

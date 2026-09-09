@@ -30,6 +30,7 @@ export function metadataSnapshot(params: {
   categories?: PluginCategorySlug[];
   packageVersion?: string;
   configSchema?: PluginManifestRecord["configSchema"];
+  channels?: string[];
 }) {
   const id = params.id ?? "workboard";
   const origin = params.origin ?? "bundled";
@@ -44,7 +45,7 @@ export function metadataSnapshot(params: {
     ...(params.categories ? { categories: params.categories } : {}),
     ...(params.packageDependencies ? { packageDependencies: params.packageDependencies } : {}),
     ...(params.iconPath ? { iconPath: params.iconPath } : {}),
-    channels: [],
+    channels: params.channels ?? [],
     providers: [],
     cliBackends: [],
     skills: [],
