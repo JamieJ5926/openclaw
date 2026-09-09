@@ -14,6 +14,11 @@ import * as proxyCa from "../../proxy-capture/ca.js";
 import { createDeferredCore } from "../../shared/deferred.js";
 import { mintSecretSentinel } from "../sentinel.js";
 import { startSecretEgressProxyServer, type SecretEgressProxyHandle } from "./proxy-server.js";
+import {
+  clearSecretEgressProxy,
+  publishSecretEgressProxy,
+  registerSecretEgressProxyRun,
+} from "./registry.js";
 
 const run = { instanceId: "instance-1", runId: "run-1" };
 const sibling = { instanceId: "instance-2", runId: "run-2" };
@@ -146,6 +151,7 @@ afterEach(async () => {
     socket.destroy();
   }
   sockets.clear();
+  clearSecretEgressProxy(proxy);
   await proxy?.stop();
   if (origin) {
     await new Promise<void>((resolve) => {
@@ -156,6 +162,36 @@ afterEach(async () => {
 });
 
 describe("secret egress registration lifecycle", () => {
+  it("keeps existing authorized traffic and revocation intact across a no-secret command", async () => {
+    publishSecretEgressProxy(proxy);
+    const existing = await openTlsTunnel();
+    expect(registerSecretEgressProxyRun(run, [], { secretEgress: false })).toEqual({});
+    await sendCredential(existing);
+    const later = await openTlsTunnel();
+    await sendCredential(later);
+    expect(observed.map(({ authorization }) => authorization)).toEqual([
+      `Bearer ${value}`,
+      `Bearer ${value}`,
+    ]);
+    proxy.revokeRun(run);
+    expect((await connectTunnel()).status).toBe(407);
+  });
+
+  it.each([
+    { allowedHosts: [] },
+    { allowedHosts: ["api.example.com"] },
+    { bypassHosts: ["api.example.com"] },
+  ])("refuses no-secret execution under captured routing policy %j", async (policy) => {
+    await proxy.stop();
+    proxy = await startSecretEgressProxyServer({ caDir, ...policy, onAudit: () => {} });
+    publishSecretEgressProxy(proxy);
+    expect(() => registerSecretEgressProxyRun(run, [], { secretEgress: false })).toThrow(
+      /requires managed routing/,
+    );
+    // Refusal must not create a usable registration or relax authentication.
+    expect((await connectTunnel({ HTTPS_PROXY: proxy.proxyOrigin })).status).toBe(407);
+  });
+
   it("keeps the process CA trusted beyond the first day", () => {
     const cert = new X509Certificate(fs.readFileSync(proxy.caCertPath));
     const afterOneDay = Math.floor(cert.validFromDate.getTime() / 1000) + 25 * 60 * 60;

@@ -2,6 +2,10 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { withInstallationTarget } from "../infra/installation-target-context.js";
+import {
+  clearSecretEgressProxy,
+  publishSecretEgressProxy,
+} from "../secrets/egress-proxy/registry.js";
 import { looksLikeSecretSentinel, resolveSecretSentinel } from "../secrets/sentinel.js";
 import { writeSecretStoreEntry } from "../secrets/store/secret-store.js";
 import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
@@ -10,7 +14,6 @@ import type { ExecuteNodeHostCommandParams } from "./bash-tools.exec-host-node.t
 import type { BashSandboxConfig } from "./bash-tools.shared.js";
 
 const mocks = vi.hoisted(() => ({
-  egressActive: false,
   proxyUrl: ["http://openclaw:", "fixture-password", "@127.0.0.1:19090"].join(""),
   gatewayParams: [] as Array<{
     env: Record<string, string>;
@@ -29,21 +32,18 @@ vi.mock("../plugins/hook-runner-global.js", () => ({
   getGlobalHookRunnerRegistry: () => null,
 }));
 
-vi.mock("../secrets/egress-proxy/registry.js", () => ({
-  isSecretEgressProxyActive: () => mocks.egressActive,
-  registerSecretEgressProxyRun: (_run: unknown, bindings: unknown) => {
+const proxy = {
+  caCertPath: "/state/secret-egress/root-ca.pem",
+  proxyOrigin: "http://127.0.0.1:19090",
+  requiresProxyWithoutBindings: false,
+  getCertificateStatus: vi.fn(),
+  revokeRun: vi.fn(),
+  stop: vi.fn(async () => {}),
+  registerRun: (_run: unknown, bindings: unknown) => {
     mocks.proxyBindings.push(bindings);
-    return {
-      HTTPS_PROXY: mocks.proxyUrl,
-      HTTP_PROXY: mocks.proxyUrl,
-      NODE_USE_ENV_PROXY: "1",
-      NODE_EXTRA_CA_CERTS: "/state/secret-egress/root-ca.pem",
-      SSL_CERT_FILE: "/state/secret-egress/root-ca.pem",
-      CURL_CA_BUNDLE: "/state/secret-egress/root-ca.pem",
-      REQUESTS_CA_BUNDLE: "/state/secret-egress/root-ca.pem",
-    };
+    return { ...EGRESS_ENV };
   },
-}));
+};
 
 vi.mock("../infra/shell-env.js", () => ({
   getShellEnvAppliedKeys: vi.fn(() => []),
@@ -251,7 +251,10 @@ describe("exec store environment", () => {
       });
     },
   );
-  afterEach(() => vi.unstubAllEnvs());
+  afterEach(() => {
+    clearSecretEgressProxy(proxy);
+    vi.unstubAllEnvs();
+  });
   beforeAll(async () => {
     ({ createExecTool } = await import("./bash-tools.exec-run.js"));
     ({ createLazyExecTool } = await import("./lazy-exec-tool.js"));
@@ -259,7 +262,7 @@ describe("exec store environment", () => {
 
   beforeEach(() => {
     vi.stubEnv("AWS_REGION", undefined);
-    mocks.egressActive = false;
+    proxy.requiresProxyWithoutBindings = false;
     mocks.gatewayParams.length = 0;
     mocks.nodeHostParams.length = 0;
     mocks.spawnInputs.length = 0;
@@ -478,7 +481,7 @@ describe("exec store environment", () => {
           },
         ],
         async () => {
-          mocks.egressActive = true;
+          publishSecretEgressProxy(proxy);
           const env = await captureStoreExecEnvironment({
             host,
             callId: `call-egress-enabled-${host}`,
@@ -516,4 +519,112 @@ describe("exec store environment", () => {
       );
     },
   );
+  it("omits managed secrets for one command without changing the run's other commands", async () => {
+    for (const key of Object.keys(EGRESS_ENV)) {
+      vi.stubEnv(key, undefined);
+    }
+    await withTeamStoreEntries(
+      [
+        { name: "AWS_REGION", value: "us-west-2", kind: "env" },
+        {
+          name: "SERVICE_API_KEY",
+          value: "fixture-secret",
+          kind: "secret",
+          allowedHosts: ["api.example.com"],
+        },
+      ],
+      async () => {
+        publishSecretEgressProxy(proxy);
+        const tool = createExecTool({
+          host: "gateway",
+          security: "full",
+          ask: "off",
+          operationalRunInstance: { instanceId: "instance-1", runId: "run-1" },
+        });
+        await tool.execute("default-before", { command: "echo ok", yieldMs: 120_000 });
+        expect(mocks.proxyBindings).toHaveLength(1);
+        await tool.execute("no-secret", {
+          command: "echo ok",
+          secretEgress: false,
+          yieldMs: 120_000,
+        });
+        for (const env of [mocks.gatewayParams[1]?.env, mocks.spawnInputs[1]?.env]) {
+          expect(env?.AWS_REGION).toBe("us-west-2");
+          expect(env?.SERVICE_API_KEY === undefined).toBe(true);
+          for (const key of Object.keys(EGRESS_ENV)) {
+            expect(env?.[key] === undefined).toBe(true);
+          }
+        }
+        expect(mocks.proxyBindings).toHaveLength(1);
+        await tool.execute("default-after", { command: "echo ok", yieldMs: 120_000 });
+        expect(mocks.proxyBindings).toHaveLength(2);
+        expect(mocks.gatewayParams[2]?.env.SERVICE_API_KEY).toBe(
+          mocks.gatewayParams[0]?.env.SERVICE_API_KEY,
+        );
+        expect(mocks.gatewayParams[2]?.env).toMatchObject(EGRESS_ENV);
+      },
+    );
+  });
+
+  it("preserves inherited proxy and trust settings when secret injection is disabled", async () => {
+    const inherited = {
+      HTTP_PROXY: "http://operator-proxy.test:8080",
+      HTTPS_PROXY: "http://operator-proxy.test:8080",
+      NODE_EXTRA_CA_CERTS: "/operator/ca.pem",
+    };
+    for (const [key, value] of Object.entries(inherited)) vi.stubEnv(key, value);
+    await withTeamStoreEntries([], async () => {
+      publishSecretEgressProxy(proxy);
+      const tool = createExecTool({
+        host: "gateway",
+        security: "full",
+        ask: "off",
+        operationalRunInstance: { instanceId: "instance-1", runId: "run-1" },
+      });
+      await tool.execute("inherited", {
+        command: "echo ok",
+        secretEgress: false,
+        yieldMs: 120_000,
+      });
+      expect(mocks.gatewayParams[0]?.env).toMatchObject(inherited);
+      expect(mocks.spawnInputs[0]?.env).toMatchObject(inherited);
+      expect(mocks.proxyBindings).toHaveLength(0);
+    });
+  });
+
+  it("refuses secretEgress false before approval or spawn when the live proxy requires routing", async () => {
+    await withTeamStoreEntries([], async () => {
+      proxy.requiresProxyWithoutBindings = true;
+      publishSecretEgressProxy(proxy);
+      const tool = createExecTool({
+        host: "gateway",
+        security: "full",
+        ask: "off",
+        operationalRunInstance: { instanceId: "instance-1", runId: "run-1" },
+        config: { secrets: { egressProxy: { enabled: false } } },
+      });
+      await expect(
+        tool.execute("policy", { command: "echo ok", secretEgress: false }),
+      ).rejects.toThrow(/requires managed routing/);
+      expect(mocks.gatewayParams).toHaveLength(0);
+      expect(mocks.spawnInputs).toHaveLength(0);
+      expect(mocks.proxyBindings).toHaveLength(0);
+    });
+  });
+
+  it.each(["false", 0, null])("rejects invalid secretEgress input %j", async (secretEgress) => {
+    const tool = createExecTool({ host: "gateway", security: "full", ask: "off" });
+    await expect(
+      Reflect.apply(tool.execute, tool, ["invalid", { command: "echo ok", secretEgress }]),
+    ).rejects.toThrow(/must be a boolean/);
+    expect(mocks.spawnInputs).toHaveLength(0);
+  });
+
+  it("rejects the Gateway-only option on a node execution", async () => {
+    const tool = createExecTool({ host: "node", security: "full", ask: "off" });
+    await expect(tool.execute("node", { command: "echo ok", secretEgress: false })).rejects.toThrow(
+      /only supported for host=gateway/,
+    );
+    expect(mocks.nodeHostParams).toHaveLength(0);
+  });
 });

@@ -39,10 +39,20 @@ export function getSecretEgressCertificateStatus() {
 export function registerSecretEgressProxyRun(
   run: Readonly<{ instanceId: string; runId: string }>,
   bindings: readonly SecretEgressSentinelBinding[],
+  options?: { secretEgress?: boolean },
 ): Record<string, string> {
   const proxy = getSecretEgressProxyRegistry().activeProxy;
   if (!proxy) {
     throw new Error("Secret egress proxy is not active in this Gateway process");
+  }
+  if (options?.secretEgress === false) {
+    if (proxy.requiresProxyWithoutBindings) {
+      throw new Error(
+        "This Gateway requires managed routing; secretEgress: false is unavailable under its active proxy policy. Omit secretEgress to use the authorized proxy.",
+      );
+    }
+    // Registration is shared by the run. Do not replace bindings used by sibling commands.
+    return {};
   }
   return proxy.registerRun(run, bindings);
 }

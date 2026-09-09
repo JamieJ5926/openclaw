@@ -37,6 +37,7 @@ export type ExecToolArgs = Record<string, unknown> & {
   command: string;
   workdir?: string;
   env?: Record<string, string>;
+  secretEgress?: boolean;
   yieldMs?: number;
   background?: boolean;
   timeoutSeconds?: number;
@@ -67,6 +68,9 @@ const resolvedExecWorkdirPreparedStates = new WeakMap<
 const XML_ARG_VALUE_EXEC_PARAM_KEYS = ["command", "workdir", "host", "ask", "node"] as const;
 
 export function assertSupportedExecParams(args: unknown): void {
+  if (isRecord(args) && args.secretEgress !== undefined && typeof args.secretEgress !== "boolean") {
+    throw new ToolInputError('exec parameter "secretEgress" must be a boolean');
+  }
   if (isRecord(args) && Object.hasOwn(args, "timeout")) {
     throw new ToolInputError(
       'exec parameter "timeout" is unsupported; use "timeoutSeconds" instead',

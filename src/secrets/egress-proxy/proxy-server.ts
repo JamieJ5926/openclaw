@@ -55,6 +55,7 @@ export type SecretEgressSentinelBinding = Readonly<{
 export type SecretEgressProxyHandle = {
   caCertPath: string;
   proxyOrigin: string;
+  readonly requiresProxyWithoutBindings: boolean;
   getCertificateStatus: () => SecretEgressCertificateStatus;
   registerRun: (
     run: Readonly<{ instanceId: string; runId: string }>,
@@ -652,6 +653,8 @@ export async function startSecretEgressProxyServer(params: {
   return {
     caCertPath: certificates.caCertPath,
     proxyOrigin,
+    // Capture routing policy with the live proxy, including an explicit empty allowlist.
+    requiresProxyWithoutBindings: allowedHosts !== undefined || bypassHosts.size > 0,
     getCertificateStatus: certificates.getStatus,
     registerRun: (run, bindings = []) => {
       if (stopped) {

@@ -24,6 +24,14 @@ Working directory for the command.
 Key/value environment overrides merged on top of the inherited environment.
 </ParamField>
 
+<ParamField path="secretEgress" type="boolean">
+Gateway only. Set `false` when this command needs no protected shared-store secrets:
+OpenClaw omits their sentinels and its secret-egress proxy credentials for this call.
+The call is refused if the running proxy has an explicit traffic allowlist (including
+`[]`) or bypass-host routing. Omitted/`true` keeps the default behavior. Ordinary
+store environment, inherited proxy/CA settings, and other authentication are unchanged.
+</ParamField>
+
 <ParamField path="yieldMs" type="number" default="10000">
 Auto-background the command after this delay (ms).
 </ParamField>

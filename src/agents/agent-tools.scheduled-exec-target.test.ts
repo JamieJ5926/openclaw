@@ -104,17 +104,40 @@ describe("createOpenClawCodingTools scheduled exec target", () => {
 
     const pinned = pinExecToolTarget(source, { host: "gateway", ask: "always" });
     await pinned.prepareBeforeToolCallParams?.(
-      { command: "echo hi", host: "node", node: "remote", security: "full", ask: "off" },
+      {
+        command: "echo hi",
+        secretEgress: false,
+        host: "node",
+        node: "remote",
+        security: "full",
+        ask: "off",
+      },
       { hookContext: undefined },
     );
-    pinned.finalizeBeforeToolCallParams?.({ command: "echo hi", host: "node", ask: "off" }, {});
+    pinned.finalizeBeforeToolCallParams?.(
+      { command: "echo hi", secretEgress: false, host: "node", ask: "off" },
+      {},
+    );
+
+    await pinned.execute("scope", {
+      command: "echo hi",
+      secretEgress: false,
+      host: "node",
+      ask: "off",
+    });
+    expect(execute).toHaveBeenCalledWith(
+      "scope",
+      { command: "echo hi", secretEgress: false, host: "gateway", ask: "always" },
+      undefined,
+      undefined,
+    );
 
     expect(prepare).toHaveBeenCalledWith(
-      { command: "echo hi", host: "gateway", ask: "always" },
+      { command: "echo hi", secretEgress: false, host: "gateway", ask: "always" },
       { hookContext: undefined },
     );
     expect(finalize).toHaveBeenCalledWith(
-      { command: "echo hi", host: "gateway", ask: "always" },
+      { command: "echo hi", secretEgress: false, host: "gateway", ask: "always" },
       {},
     );
   });

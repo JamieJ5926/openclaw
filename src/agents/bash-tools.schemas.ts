@@ -35,6 +35,12 @@ export const execSchema = Type.Object({
       description: "Literal overrides; no expansion. Omit to inherit.",
     }),
   ),
+  secretEgress: Type.Optional(
+    Type.Boolean({
+      description:
+        "Gateway only: false omits protected store secrets and managed proxy injection for this command. Refused if proxy routing policy requires it. Inherited environment and other credentials are unchanged. Omit for default behavior.",
+    }),
+  ),
   yieldMs: Type.Optional(
     Type.Number({
       description: "Milliseconds before backgrounding; default 10000.",
