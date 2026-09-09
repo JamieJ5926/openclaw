@@ -572,7 +572,9 @@ describe("exec store environment", () => {
       HTTPS_PROXY: "http://operator-proxy.test:8080",
       NODE_EXTRA_CA_CERTS: "/operator/ca.pem",
     };
-    for (const [key, value] of Object.entries(inherited)) vi.stubEnv(key, value);
+    for (const [key, value] of Object.entries(inherited)) {
+      vi.stubEnv(key, value);
+    }
     await withTeamStoreEntries([], async () => {
       publishSecretEgressProxy(proxy);
       const tool = createExecTool({

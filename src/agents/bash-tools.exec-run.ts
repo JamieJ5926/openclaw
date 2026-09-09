@@ -309,9 +309,6 @@ export function createExecTool(
         sandboxRequired: defaults?.sandboxRequired,
       });
       const host: ExecHost = target.effectiveHost;
-      if (params.secretEgress !== undefined && host !== "gateway") {
-        throw new Error('exec parameter "secretEgress" is only supported for host=gateway');
-      }
 
       const explicitSecurity = defaults?.security;
       const configuredSecurity = explicitSecurity ?? (host === "sandbox" ? "deny" : "full");
@@ -455,8 +452,7 @@ export function createExecTool(
           defaultPathPrepend,
           pluginEnv: resolvedExecEnvState?.pluginEnv,
           storeEnv: host === "gateway" ? storeEnv.env : undefined,
-          storeSecretEnv:
-            useSecretEgress && params.secretEgress !== false ? storeEnv.secretSentinels : undefined,
+          storeSecretEnv: useSecretEgress ? storeEnv.secretSentinels : undefined,
           secretEgressEnv,
           ...preparedRunEnvironment,
           warnings,

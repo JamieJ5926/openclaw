@@ -384,6 +384,11 @@ export function resolvePreparedExecEnvironment(params: {
   if (params.localProcessEnv && params.host !== "gateway") {
     throw new Error(LOCAL_INSTALLATION_TARGET_UNSUPPORTED);
   }
+  if (params.execParams.secretEgress !== undefined && params.host !== "gateway") {
+    throw new ToolInputError('exec parameter "secretEgress" is only supported for host=gateway');
+  }
+  const storeSecretEnv =
+    params.execParams.secretEgress === false ? undefined : params.storeSecretEnv;
   const inheritedBaseEnv = coerceEnv(process.env);
   if (params.secretEgressEnv) {
     Object.assign(inheritedBaseEnv, params.secretEgressEnv);
@@ -432,8 +437,8 @@ export function resolvePreparedExecEnvironment(params: {
   const untrustedRequestedEnv: Record<string, string> | undefined = hasStoreEnv
     ? { ...storeEnv, ...explicitEnv }
     : explicitEnv;
-  const requestedEnv: Record<string, string> | undefined = params.storeSecretEnv
-    ? { ...storeEnv, ...params.storeSecretEnv, ...explicitEnv }
+  const requestedEnv: Record<string, string> | undefined = storeSecretEnv
+    ? { ...storeEnv, ...storeSecretEnv, ...explicitEnv }
     : untrustedRequestedEnv;
   const hostEnvResult =
     params.host === "sandbox"
@@ -516,10 +521,10 @@ export function resolvePreparedExecEnvironment(params: {
       }
     }
   }
-  if (params.storeSecretEnv) {
+  if (storeSecretEnv) {
     // Secret-kind entries are authenticated ciphertext, not active credentials.
     // Inject them after ordinary env filtering so names such as GH_TOKEN remain usable.
-    for (const [key, value] of Object.entries(params.storeSecretEnv)) {
+    for (const [key, value] of Object.entries(storeSecretEnv)) {
       if (!explicitEnv || !Object.hasOwn(explicitEnv, key)) {
         env[key] = value;
       }
