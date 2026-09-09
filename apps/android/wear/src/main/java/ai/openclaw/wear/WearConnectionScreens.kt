@@ -292,13 +292,18 @@ private fun WearDirectContent(
       state.streamText?.let { text -> item { StreamingBubble(text) } }
       state.pendingSend?.let { pending -> item { MessageBubble(WearChatMessage(pending.key, "user", pending.message, null)) } }
       item {
-        SecondaryButton(messageLabel, state.connected && state.sessionKey != null && !state.sending && !state.sendUnknown) {
+        SecondaryButton(messageLabel, state.connected && state.sessionKey != null && state.pendingSend == null && !state.sending && !state.sendUnknown) {
           inputOwner = runtime.inputOwner()
           messageLauncher.launch(input("message", messageLabel))
         }
       }
-      if (state.pendingSend != null && !state.sending) {
+      val pending = state.pendingSend
+      if (pending != null && !state.sending) {
+        item { DirectText(stringResource(if (state.sendUnknown) R.string.watch_message_unconfirmed else R.string.message_not_sent)) }
         item { SecondaryButton(stringResource(R.string.retry), state.connected, runtime::retrySend) }
+        if (!state.sendUnknown) {
+          item { SecondaryButton(stringResource(R.string.watch_discard_message), true) { runtime.discardPendingSend(pending) } }
+        }
       }
       if (state.runId != null) item { SecondaryButton(stringResource(R.string.watch_stop), state.connected, runtime::abort) }
     }

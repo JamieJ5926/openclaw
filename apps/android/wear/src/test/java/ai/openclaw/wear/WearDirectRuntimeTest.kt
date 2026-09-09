@@ -30,6 +30,7 @@ import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -218,6 +219,233 @@ class WearDirectRuntimeTest {
     }
 
   @Test
+  fun inputCallbackBeforeReconnectReadyRetainsOneUnsentAttemptUntilExplicitRetry() = verifyInputCallbackBeforeReady(restartBeforeCallback = false)
+
+  @Test
+  fun inputCallbackDuringOperatorHelloRetainsOneUnsentAttemptUntilExplicitRetry() = verifyInputCallbackBeforeReady(restartBeforeCallback = true)
+
+  private fun verifyInputCallbackBeforeReady(restartBeforeCallback: Boolean) =
+    runBlocking {
+      val gateway = Gateway()
+      val job = SupervisorJob()
+      val scope = CoroutineScope(job + Dispatchers.Default)
+      val runtime = runtime(scope)
+      var releaseHello: (() -> Unit)? = null
+      try {
+        runtime.setVisible(true)
+        runtime.setup(gateway.setupCode())
+        withTimeout(8000) { runtime.state.first { it.connected && it.approvalsReady } }
+        val input = runtime.inputOwner()
+        runtime.setVisible(false)
+        withTimeout(8000) { runtime.state.first { !it.busy } }
+
+        gateway.holdOperatorHello = true
+        if (restartBeforeCallback) {
+          runtime.setVisible(true)
+          releaseHello = withTimeout(8000) { gateway.operatorHellos.receive() }
+        }
+        assertEquals(null, runtime.state.value.pendingSend)
+        runtime.send("A returned dictation", input)
+        val pending = runtime.state.value.pendingSend
+        assertNotNull("Input returned before reconnect readiness must remain pending", pending)
+        assertEquals("A returned dictation", pending?.message)
+        assertEquals("agent:main:main", pending?.sessionKey)
+        assertFalse(runtime.state.value.connected)
+        assertFalse(runtime.state.value.sending)
+        assertFalse(runtime.state.value.sendUnknown)
+        assertTrue(gateway.sends.tryReceive().isFailure)
+        runtime.send("Do not replace the returned dictation", input)
+        assertEquals(pending, runtime.state.value.pendingSend)
+
+        if (!restartBeforeCallback) {
+          runtime.setVisible(true)
+          releaseHello = withTimeout(8000) { gateway.operatorHellos.receive() }
+        }
+        runtime.refresh()
+        runtime.retrySend()
+        runtime.send("Do not replace while connecting", runtime.inputOwner())
+        assertFalse(runtime.state.value.connected)
+        assertFalse(runtime.state.value.sending)
+        assertFalse(runtime.state.value.sendUnknown)
+        assertEquals(pending, runtime.state.value.pendingSend)
+        assertTrue(gateway.sends.tryReceive().isFailure)
+
+        gateway.historyMessage = "History after reconnect"
+        gateway.holdOperatorHello = false
+        checkNotNull(releaseHello).invoke()
+        releaseHello = null
+        withTimeout(8000) {
+          runtime.state.first {
+            it.connected && it.approvalsReady && it.messages.singleOrNull()?.text == "History after reconnect"
+          }
+        }
+        runtime.send("Do not replace after reconnect", runtime.inputOwner())
+        assertEquals(pending, runtime.state.value.pendingSend)
+        gateway.historyMessage = "Explicit history refresh"
+        runtime.refresh()
+        withTimeout(8000) { runtime.state.first { it.messages.singleOrNull()?.text == "Explicit history refresh" } }
+        assertFalse(runtime.state.value.sending)
+        assertFalse(runtime.state.value.sendUnknown)
+        assertEquals(pending, runtime.state.value.pendingSend)
+        assertTrue("Reconnect and refresh must not send retained input", gateway.sends.tryReceive().isFailure)
+
+        runtime.retrySend()
+        val sent = withTimeout(8000) { gateway.sends.receive() }
+        assertEquals(pending?.key, sent.text("idempotencyKey"))
+        assertEquals(pending?.message, sent.text("message"))
+        assertEquals(pending?.sessionKey, sent.text("sessionKey"))
+        assertEquals(false, sent.flag("deliver"))
+        withTimeout(8000) { runtime.state.first { !it.sending && it.pendingSend == null } }
+        runtime.retrySend()
+        gateway.historyMessage = "History after retry"
+        runtime.refresh()
+        withTimeout(8000) { runtime.state.first { it.messages.singleOrNull()?.text == "History after retry" } }
+        assertFalse(runtime.state.value.sendUnknown)
+        assertTrue("The retained attempt must be sent only once", gateway.sends.tryReceive().isFailure)
+      } finally {
+        releaseHello?.invoke()
+        runtime.disconnect()
+        runtime.setVisible(false)
+        withTimeout(8000) { job.cancelAndJoin() }
+        gateway.server.shutdown()
+      }
+    }
+
+  @Test
+  fun inputCallbackFromRetiredSelectionCannotCreatePendingSend() =
+    runBlocking {
+      val gateway = Gateway()
+      val job = SupervisorJob()
+      val scope = CoroutineScope(job + Dispatchers.Default)
+      val runtime = runtime(scope)
+      try {
+        runtime.setVisible(true)
+        runtime.setup(gateway.setupCode())
+        withTimeout(8000) { runtime.state.first { it.connected && it.approvalsReady } }
+        val input = runtime.inputOwner()
+        runtime.setVisible(false)
+        runtime.disconnect()
+        withTimeout(8000) { runtime.state.first { !it.busy } }
+        runtime.send("Retired input while paused", input)
+        assertEquals(null, runtime.state.value.pendingSend)
+        assertFalse(runtime.state.value.sending)
+        assertFalse(runtime.state.value.sendUnknown)
+        assertTrue(gateway.sends.tryReceive().isFailure)
+
+        runtime.setVisible(true)
+        runtime.reconnect()
+        withTimeout(8000) { runtime.state.first { it.connected && it.approvalsReady } }
+        runtime.send("Retired input after reconnect", input)
+        assertEquals(null, runtime.state.value.pendingSend)
+        assertTrue(gateway.sends.tryReceive().isFailure)
+        runtime.send("Current input", runtime.inputOwner())
+        val sent = withTimeout(8000) { gateway.sends.receive() }
+        assertEquals("Current input", sent.text("message"))
+        withTimeout(8000) { runtime.state.first { !it.sending && it.pendingSend == null } }
+        assertTrue(gateway.sends.tryReceive().isFailure)
+      } finally {
+        runtime.disconnect()
+        runtime.setVisible(false)
+        withTimeout(8000) { job.cancelAndJoin() }
+        gateway.server.shutdown()
+      }
+    }
+
+  @Test
+  fun discardBeforeReadinessNeverSendsAndStaleDiscardPreservesReplacement() =
+    runBlocking {
+      val gateway = Gateway()
+      val job = SupervisorJob()
+      val scope = CoroutineScope(job + Dispatchers.Default)
+      val runtime = runtime(scope)
+      var releaseHello: (() -> Unit)? = null
+      try {
+        runtime.setVisible(true)
+        runtime.setup(gateway.setupCode())
+        withTimeout(8000) { runtime.state.first { it.connected && it.approvalsReady } }
+        val input = runtime.inputOwner()
+        runtime.setVisible(false)
+        withTimeout(8000) { runtime.state.first { !it.busy } }
+        runtime.send("Discard while paused", input)
+        val first = checkNotNull(runtime.state.value.pendingSend)
+        runtime.discardPendingSend(first)
+        assertEquals(null, runtime.state.value.pendingSend)
+        runtime.send("A replacement message", input)
+        val replacement = checkNotNull(runtime.state.value.pendingSend)
+        assertFalse(first.key == replacement.key)
+        runtime.discardPendingSend(first)
+        assertEquals(replacement, runtime.state.value.pendingSend)
+
+        gateway.holdOperatorHello = true
+        runtime.setVisible(true)
+        releaseHello = withTimeout(8000) { gateway.operatorHellos.receive() }
+        runtime.discardPendingSend(replacement)
+        assertEquals(null, runtime.state.value.pendingSend)
+        assertFalse(runtime.state.value.sending)
+        assertFalse(runtime.state.value.sendUnknown)
+        runtime.retrySend()
+        gateway.historyMessage = "History after discard"
+        gateway.holdOperatorHello = false
+        releaseHello.invoke()
+        releaseHello = null
+        withTimeout(8000) {
+          runtime.state.first {
+            it.connected && it.approvalsReady && it.messages.singleOrNull()?.text == "History after discard"
+          }
+        }
+        runtime.retrySend()
+        gateway.historyMessage = "Refresh after discard"
+        runtime.refresh()
+        withTimeout(8000) { runtime.state.first { it.messages.singleOrNull()?.text == "Refresh after discard" } }
+        assertEquals(null, runtime.state.value.pendingSend)
+        assertTrue("Discarded input must never be sent", gateway.sends.tryReceive().isFailure)
+      } finally {
+        releaseHello?.invoke()
+        runtime.disconnect()
+        runtime.setVisible(false)
+        withTimeout(8000) { job.cancelAndJoin() }
+        gateway.server.shutdown()
+      }
+    }
+
+  @Test
+  fun discardDefinitivelyRejectedMessagePreservesErrorAndAllowsNewInput() =
+    runBlocking {
+      val gateway = Gateway()
+      gateway.rejectSend = true
+      val job = SupervisorJob()
+      val scope = CoroutineScope(job + Dispatchers.Default)
+      val runtime = runtime(scope)
+      try {
+        runtime.setVisible(true)
+        runtime.setup(gateway.setupCode())
+        withTimeout(8000) { runtime.state.first { it.connected && it.approvalsReady } }
+        runtime.send("Rejected message", runtime.inputOwner())
+        val rejected = withTimeout(8000) { gateway.sends.receive() }
+        val state = withTimeout(8000) { runtime.state.first { it.pendingSend != null && !it.sending } }
+        assertFalse(state.sendUnknown)
+        assertNotNull(state.error)
+        runtime.discardPendingSend(checkNotNull(state.pendingSend))
+        assertEquals(null, runtime.state.value.pendingSend)
+        assertEquals(state.error, runtime.state.value.error)
+        assertTrue(runtime.state.value.connected)
+
+        gateway.rejectSend = false
+        runtime.send("New input after rejection", runtime.inputOwner())
+        val sent = withTimeout(8000) { gateway.sends.receive() }
+        assertEquals("New input after rejection", sent.text("message"))
+        assertFalse(rejected.text("idempotencyKey") == sent.text("idempotencyKey"))
+        withTimeout(8000) { runtime.state.first { !it.sending && it.pendingSend == null } }
+        assertTrue(gateway.sends.tryReceive().isFailure)
+      } finally {
+        runtime.disconnect()
+        runtime.setVisible(false)
+        withTimeout(8000) { job.cancelAndJoin() }
+        gateway.server.shutdown()
+      }
+    }
+
+  @Test
   fun lostChatAcknowledgementRequiresExplicitRetryWithTheSameAttemptKey() =
     runBlocking {
       val gateway = Gateway()
@@ -231,12 +459,22 @@ class WearDirectRuntimeTest {
         runtime.send("A watch message", runtime.inputOwner())
         val sent = withTimeout(8000) { gateway.sends.receive() }
         assertEquals(false, sent.flag("deliver"))
+        val pending = checkNotNull(runtime.state.value.pendingSend)
+        runtime.send("Do not replace an in-flight message", runtime.inputOwner())
+        runtime.retrySend()
+        runtime.discardPendingSend(pending)
+        assertEquals(pending, runtime.state.value.pendingSend)
         runtime.disconnect()
         withTimeout(8000) { runtime.state.first { !it.busy } }
+        assertTrue(runtime.state.value.sendUnknown)
+        runtime.discardPendingSend(pending)
+        assertEquals(pending, runtime.state.value.pendingSend)
         assertTrue(runtime.state.value.sendUnknown)
         gateway.answerSend = true
         runtime.reconnect()
         withTimeout(8000) { runtime.state.first { it.connected && it.approvalsReady } }
+        runtime.send("Do not replace an unconfirmed message", runtime.inputOwner())
+        assertEquals(pending, runtime.state.value.pendingSend)
         assertTrue(gateway.sends.tryReceive().isFailure)
         runtime.retrySend()
         val retried = withTimeout(8000) { gateway.sends.receive() }
@@ -259,8 +497,15 @@ class WearDirectRuntimeTest {
   private class Gateway {
     val connects = Channel<JsonObject>(Channel.UNLIMITED)
     val sends = Channel<JsonObject>(Channel.UNLIMITED)
+    val operatorHellos = Channel<() -> Unit>(Channel.UNLIMITED)
 
     @Volatile var answerSend = true
+
+    @Volatile var rejectSend = false
+
+    @Volatile var holdOperatorHello = false
+
+    @Volatile var historyMessage: String? = null
     val server =
       MockWebServer().apply {
         dispatcher =
@@ -316,7 +561,21 @@ class WearDirectRuntimeTest {
                         }
 
                         "chat.history" -> {
-                          Json.parseToJsonElement("""{"messages":[]}""")
+                          buildJsonObject {
+                            put(
+                              "messages",
+                              JsonArray(
+                                listOfNotNull(
+                                  historyMessage?.let { message ->
+                                    buildJsonObject {
+                                      put("role", "assistant")
+                                      put("content", message)
+                                    }
+                                  },
+                                ),
+                              ),
+                            )
+                          }
                         }
 
                         "chat.send" -> {
@@ -329,14 +588,29 @@ class WearDirectRuntimeTest {
                           buildJsonObject {}
                         }
                       }
-                    webSocket.send(
+                    val rejected = frame.text("method") == "chat.send" && rejectSend
+                    val response =
                       buildJsonObject {
                         put("type", "res")
                         put("id", frame["id"]!!)
-                        put("ok", true)
-                        put("payload", result)
-                      }.toString(),
-                    )
+                        put("ok", !rejected)
+                        if (rejected) {
+                          put(
+                            "error",
+                            buildJsonObject {
+                              put("code", "INVALID_REQUEST")
+                              put("message", "Rejected fixture message")
+                            },
+                          )
+                        } else {
+                          put("payload", result)
+                        }
+                      }.toString()
+                    if (frame.text("method") == "connect" && params.text("role") == "operator" && holdOperatorHello) {
+                      operatorHellos.trySend { webSocket.send(response) }
+                    } else {
+                      webSocket.send(response)
+                    }
                   }
 
                   override fun onClosing(

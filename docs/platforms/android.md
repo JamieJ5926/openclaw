@@ -109,7 +109,11 @@ Gateway unless you chose **Disconnect** during the current app session.
 **Reconnect** starts a fresh attempt without forgetting the pairing.
 
 Direct sends have no persistent offline outbox and are not automatically
-replayed or sent through the phone. If delivery is unconfirmed, reconnect as
+replayed or sent through the phone. Input returned before reconnection finishes
+remains as one unsent message until you choose **Retry** after the connection
+is ready. Use **Discard message** to remove an unsent or rejected message, even
+while offline; unconfirmed messages cannot be discarded.
+If delivery is unconfirmed, reconnect as
 needed and **Refresh** history before choosing **Retry**. Retry reuses the
 pending send's idempotency key. Switching sessions or Gateways, or restarting
 the app, discards that in-memory pending state. An unconfirmed **Stop** also

@@ -605,33 +605,41 @@ internal class WearDirectRuntime(
     input: WearInputOwner,
   ) {
     val text = message.trim().takeIf { it.isNotEmpty() && it.length <= 4000 } ?: return
-    val request = capture() ?: return
     val attempt =
       synchronized(lock) {
         val state = mutableState.value
-        if (input != inputOwner() || state.sending || state.sendUnknown) return
+        if (input != inputOwner() || state.pendingSend != null || state.sending || state.sendUnknown) return
+        // Input can return before foreground reconnection is ready. Retain it without automatic replay.
         WearDirectSend(state.sessionKey ?: return, text).also {
-          mutableState.value = state.copy(pendingSend = it, sending = true, error = null)
+          mutableState.value = state.copy(pendingSend = it, error = null)
         }
       }
-    send(request, attempt)
+    send(attempt)
   }
 
   fun retrySend() {
-    val request = capture() ?: return
-    val attempt =
-      synchronized(lock) {
-        val state = mutableState.value
-        if (state.sending) return
-        state.pendingSend?.also { mutableState.value = state.copy(sending = true, error = null) }
-      } ?: return
-    send(request, attempt)
+    val attempt = synchronized(lock) { mutableState.value.pendingSend } ?: return
+    send(attempt)
   }
 
-  private fun send(
-    request: RequestContext,
-    attempt: WearDirectSend,
-  ) {
+  fun discardPendingSend(expected: WearDirectSend) {
+    synchronized(lock) {
+      val state = mutableState.value
+      if (state.pendingSend !== expected || state.sending || state.sendUnknown) return
+      mutableState.value = state.copy(pendingSend = null)
+    }
+  }
+
+  private fun send(attempt: WearDirectSend) {
+    val request = capture() ?: return
+    var admitted = false
+    commit(request) {
+      val state = mutableState.value
+      if (state.pendingSend !== attempt || state.sending) return@commit
+      mutableState.value = state.copy(sending = true, error = null)
+      admitted = true
+    }
+    if (!admitted) return
     scope.launch {
       try {
         val result =

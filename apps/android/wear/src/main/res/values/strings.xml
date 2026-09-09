@@ -137,6 +137,8 @@
     <string name="watch_trust_certificate" tools:ignore="MissingTranslation">Trust certificate</string>
     <string name="watch_reject_certificate" tools:ignore="MissingTranslation">Reject certificate</string>
     <string name="watch_sessions" tools:ignore="MissingTranslation">Sessions</string>
+    <string name="watch_message_unconfirmed" tools:ignore="MissingTranslation">Delivery unconfirmed. Refresh history before retrying.</string>
+    <string name="watch_discard_message" tools:ignore="MissingTranslation">Discard message</string>
     <string name="watch_approval" tools:ignore="MissingTranslation">Approval</string>
     <string name="watch_approvals" tools:ignore="MissingTranslation">Approvals</string>
     <string name="watch_approval_unconfirmed" tools:ignore="MissingTranslation">Outcome unconfirmed. Refresh before deciding again.</string>
