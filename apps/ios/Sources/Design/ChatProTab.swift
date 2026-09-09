@@ -122,7 +122,7 @@ struct ChatProTab: View {
                 self.viewModel?.attachmentOwnerActivityChanged()
                 self.syncChatViewModel()
             }
-            .onChange(of: self.viewModel?.isAttachmentOwnerPinned) { _, pinned in
+            .onChange(of: self.viewModel?.isAttachmentOwnerPinned) { (_: Bool?, pinned: Bool?) in
                 guard pinned == false else { return }
                 self.syncChatViewModel()
             }
