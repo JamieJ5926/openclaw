@@ -102,10 +102,11 @@ export class PositionRailGutterController implements ReactiveController {
     if (!viewport?.isConnected || inner?.parentElement !== viewport) {
       return;
     }
-    const left = viewport.getBoundingClientRect().left + viewport.clientLeft;
-    const gutter = inner.getBoundingClientRect().left - left;
-    // Reserve room for the compact left rail and breathing space, including
-    // when a saved width fills the pane.
-    viewport.toggleAttribute("data-position-rail-gutter", gutter >= 68);
+    const right =
+      viewport.getBoundingClientRect().left + viewport.clientLeft + viewport.clientWidth;
+    const gutter = right - inner.getBoundingClientRect().right;
+    // Reserve the right-side dot/tick footprint and breathing room, including
+    // when a saved message width fills the pane.
+    viewport.toggleAttribute("data-position-rail-gutter", gutter >= 80);
   }
 }

@@ -3,6 +3,7 @@
 import { html, nothing, render } from "lit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestTranscript } from "../chat-view.test-helpers.ts";
+import { renderChatPositionRail } from "./chat-position-rail.ts";
 import { getTranscriptState } from "./chat-thread-interactions.ts";
 import { renderChatThread } from "./chat-thread.ts";
 import { ChatTranscriptController } from "./chat-transcript-controller.ts";
@@ -55,7 +56,22 @@ describe("conversation position rail", () => {
       }
       const ids = rows.map((row) => row.key);
       session.syncMessageRows(new Map(ids.map((id) => [id, id])));
-      const currentId = () => session.activeMessageId(["row-2", "row-3"]);
+      const rail = document.body.appendChild(document.createElement("div"));
+      const renderRail = () =>
+        render(
+          renderChatPositionRail({
+            messages: [
+              message("row-2", "user", "Second", 2),
+              message("row-3", "assistant", "Third", 3),
+            ],
+            transcript: session,
+            requestUpdate,
+          }),
+          rail,
+        );
+      requestUpdate.mockImplementation(renderRail);
+      const currentId = () =>
+        rail.querySelector('[aria-current="true"]')?.getAttribute("data-position-marker-id");
       container.scrollTop = 50;
       container.dispatchEvent(new Event("scroll"));
       expect(currentId()).toBe("row-2");
@@ -127,7 +143,7 @@ describe("conversation position rail", () => {
   });
 
   it("keeps focused previews after pointer exit and resets interaction when the session changes", () => {
-    const messages = Array.from({ length: 40 }, (_, index) =>
+    const messages = Array.from({ length: 12 }, (_, index) =>
       message(
         `message-${index}`,
         index % 2 ? "assistant" : "user",
@@ -152,11 +168,13 @@ describe("conversation position rail", () => {
     try {
       rerender();
       transcript.hostConnected();
-      expect(markers()).toHaveLength(40);
-      // Rail wheel input belongs to its scrollport, never transcript history.
+      expect(markers()).toHaveLength(10);
+      expect(markers()[0]!.dataset.positionMarkerId).toBe("message-0");
+      expect(markers().at(-1)!.dataset.positionMarkerId).toBe("message-11");
+      // Exploring the rail must not become transcript history input.
       for (const type of ["wheel", "touchstart", "touchmove"]) {
         container
-          .querySelector(".chat-position-rail__marks")!
+          .querySelector(".chat-position-rail__track")!
           .dispatchEvent(new Event(type, { bubbles: true }));
       }
       for (const key of ["PageUp", "PageDown"]) {
@@ -177,26 +195,26 @@ describe("conversation position rail", () => {
       expect(historyIntent).toHaveBeenCalledTimes(2);
       expect(preview()).toBeUndefined();
       markers()[4]!.focus();
-      expect(preview()).toContain("Checkpoint 4");
+      expect(preview()).toContain("Checkpoint 5");
       markers()[2]!.dispatchEvent(new Event("pointerenter"));
       expect(preview()).toContain("Checkpoint 2");
       container.querySelector(".chat-position-rail")!.dispatchEvent(new Event("pointerleave"));
-      expect(preview()).toContain("Checkpoint 4");
+      expect(preview()).toContain("Checkpoint 5");
       markers()[4]!.dispatchEvent(
         new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }),
       );
       expect(document.activeElement).toBe(markers()[5]);
-      expect(preview()).toContain("Checkpoint 5");
+      expect(preview()).toContain("Checkpoint 6");
       const focused = document.activeElement;
-      props.messages = [
-        ...messages,
-        message("message-40", "user", "Checkpoint 40", 41),
-        message("message-41", "assistant", "Checkpoint 41", 42),
-      ];
+      // The new uniform sample omits message-6; retaining focus must replace
+      // an interior sample, not an endpoint or the focused DOM node.
+      props.messages = [...messages, message("message-12", "user", "Checkpoint 12", 13)];
       rerender();
-      expect(markers()).toHaveLength(42);
+      expect(markers()).toHaveLength(10);
+      expect(markers()[0]!.dataset.positionMarkerId).toBe("message-0");
+      expect(markers().at(-1)!.dataset.positionMarkerId).toBe("message-12");
       expect(document.activeElement).toBe(focused);
-      expect(preview()).toContain("Checkpoint 5");
+      expect(preview()).toContain("Checkpoint 6");
       focused!.dispatchEvent(
         new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
       );
