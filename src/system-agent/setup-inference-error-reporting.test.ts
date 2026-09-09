@@ -23,6 +23,14 @@ import { captureSystemAgentOwnerPluginArtifacts } from "./verified-inference.js"
 const runtimeLoader = vi.hoisted(() => vi.fn());
 vi.mock("../agents/runtime-plugins.js", () => ({
   loadAgentRuntimePluginRegistryHandle: runtimeLoader,
+  acquireAgentRuntimePluginRegistry: async (
+    params: Parameters<
+      typeof import("../agents/runtime-plugins.js").acquireAgentRuntimePluginRegistry
+    >[0],
+  ) => {
+    const registry = runtimeLoader(params);
+    return { registry, primaryRegistry: registry };
+  },
 }));
 
 type FailurePhase = "capture" | "revalidate" | "callback";

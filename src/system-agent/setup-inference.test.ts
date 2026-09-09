@@ -105,6 +105,14 @@ vi.mock("./audit.js", () => ({
 
 vi.mock("../agents/runtime-plugins.js", () => ({
   loadAgentRuntimePluginRegistryHandle: mocks.loadAgentRuntimePluginRegistryHandle,
+  acquireAgentRuntimePluginRegistry: async (
+    params: Parameters<
+      typeof import("../agents/runtime-plugins.js").acquireAgentRuntimePluginRegistry
+    >[0],
+  ) => {
+    const registry = mocks.loadAgentRuntimePluginRegistryHandle(params);
+    return { registry, primaryRegistry: registry };
+  },
 }));
 
 vi.mock("../plugins/registry-refresh.js", () => ({

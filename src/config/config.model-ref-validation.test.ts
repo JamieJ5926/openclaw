@@ -57,6 +57,24 @@ function createModelNormalizationRegistry(): PluginManifestRegistry {
             },
           },
         },
+        modelCatalog: {
+          providers: {
+            myproxy: {
+              api: "openai-completions",
+              baseUrl: "https://proxy.example/v1",
+              models: [
+                {
+                  id: "vendor/modern-model",
+                  name: "Modern model",
+                  reasoning: true,
+                  input: ["text", "image"],
+                  contextWindow: 320_000,
+                  maxTokens: 16384,
+                },
+              ],
+            },
+          },
+        },
       },
     ],
   };
@@ -137,7 +155,7 @@ describe("config model reference validation", () => {
     expect(res.ok).toBe(true);
   });
 
-  it("loads model normalization policies when plugin validation is skipped", () => {
+  it("applies model policies to catalog defaults without rewriting IDs when plugin validation is skipped", () => {
     const res = validateConfigObjectWithPlugins(
       {
         models: {
@@ -146,17 +164,7 @@ describe("config model reference validation", () => {
               baseUrl: "https://proxy.example/v1",
               apiKey: "sk-test",
               api: "openai-completions",
-              models: [
-                {
-                  id: "latest",
-                  name: "Custom latest",
-                  reasoning: false,
-                  input: ["text"],
-                  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-                  contextWindow: 200_000,
-                  maxTokens: 8192,
-                },
-              ],
+              models: [{ id: "latest", name: "Custom latest" }],
             },
           },
         },
@@ -171,7 +179,16 @@ describe("config model reference validation", () => {
 
     expect(res.ok).toBe(true);
     if (res.ok) {
-      expect(res.config.models?.providers?.myproxy?.models?.[0]?.id).toBe("vendor/modern-model");
+      expect(res.config.models?.providers?.myproxy?.models).toEqual([
+        expect.objectContaining({
+          id: "latest",
+          name: "Custom latest",
+          reasoning: true,
+          input: ["text", "image"],
+          contextWindow: 320_000,
+          maxTokens: 16384,
+        }),
+      ]);
     }
   });
 

@@ -237,11 +237,13 @@ describe("bundled static model catalog snapshot cache", () => {
         contextWindow: 64000,
       });
 
+      // Authored latest publishes middle; the exact middle row still owns its metadata.
+      const authoredModels = [{ ...base, id: "latest", contextWindow: 16000 }, ...models];
       for (const api of ["openai-completions", undefined] as const) {
         const providerConfig = {
           baseUrl: "https://proxy.example/v1",
           ...(api ? { api } : {}),
-          models: plugin.modelCatalog.providers.mistral.models.map(
+          models: (reverse ? authoredModels.toReversed() : authoredModels).map(
             ({ id, name, contextWindow, maxTokens }) => ({
               id,
               name,
