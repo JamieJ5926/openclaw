@@ -54,6 +54,8 @@ A friendship you requested is adopted automatically once the peer accepts; inbou
 
 Two paired Gateways can test host-approved prompts against one host session. This prototype carries text prompts only. It does not mirror the transcript, stream output to the guest, or transfer attachments.
 
+Session federation frames do not pass through the ordinary Reef chat guard. They use pinned peer identity, a session mount, and host approval or a standing grant instead. Configuring a guard is still required to start Reef; do not assume it screens guest session prompts.
+
 On the host Gateway, send this owner command in a channel that supports `/reef`:
 
 ```text
