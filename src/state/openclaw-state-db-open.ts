@@ -21,7 +21,9 @@ import {
   OPENCLAW_STATE_SCHEMA_VERSION,
   type OpenClawStateDatabase,
 } from "./openclaw-state-db-contract.js";
+import { hasDanglingSkillWorkshopCollectionReviewIndex } from "./openclaw-state-db-maintenance.js";
 import { ensureOpenClawStatePermissions } from "./openclaw-state-db-permissions.js";
+import { OpenClawStateDatabaseSchemaMigrationRequiredError } from "./openclaw-state-db-schema-migration-required.js";
 import {
   assertSupportedStateSchemaVersion,
   readStateSchemaMigrationVersion,
@@ -72,6 +74,12 @@ export function openUnpublishedStateDatabase(params: {
     () => {
       let maintenance: SqliteWalMaintenance | undefined;
       try {
+        if (hasDanglingSkillWorkshopCollectionReviewIndex(db)) {
+          throw new OpenClawStateDatabaseSchemaMigrationRequiredError(
+            "legacy-workshop-review-index",
+            params.pathname,
+          );
+        }
         assertSupportedStateSchemaVersion(db, params.pathname);
         assertStateDatabaseIntegrityBeforeMutation(db, params.pathname);
         configureSqlitePreSchemaPragmas(db, { busyTimeoutMs });

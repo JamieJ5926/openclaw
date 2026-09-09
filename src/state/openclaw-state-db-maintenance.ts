@@ -26,7 +26,10 @@ import {
 } from "./openclaw-state-db-schema-version.js";
 import type { DB } from "./openclaw-state-db.generated.js";
 import { resolveOpenClawStateSqlitePath } from "./openclaw-state-db.paths.js";
-import { OpenClawStateOwnershipError } from "./openclaw-state-ownership.js";
+import {
+  assertOpenClawStateWriteAllowed,
+  OpenClawStateOwnershipError,
+} from "./openclaw-state-ownership.js";
 import {
   getOpenClawStateRuntimeSchema,
   OPENCLAW_STATE_MAINTENANCE_SCHEMA_COMPATIBILITY,
@@ -37,6 +40,143 @@ import {
 } from "./openclaw-state-schema-publication.js";
 import { OPENCLAW_STATE_SCHEMA_SQL } from "./openclaw-state-schema.js";
 import { UpdateSchemaRefusalError } from "./openclaw-update-schema-refusal.js";
+
+const LEGACY_SKILL_WORKSHOP_COLLECTION_REVIEWS_INDEX =
+  "idx_skill_workshop_collection_reviews_workspace_time";
+const LEGACY_SKILL_WORKSHOP_COLLECTION_REVIEWS_INDEX_SQL =
+  "CREATE INDEX idx_skill_workshop_collection_reviews_workspace_time ON skill_workshop_collection_reviews(workspace_dir, create_time DESC, review_id DESC)";
+
+function normalizeSqliteCatalogSql(sql: string): string {
+  return sql
+    .replace(/\s+/gu, " ")
+    .replace(/\s*([(),])\s*/gu, "$1")
+    .trim();
+}
+
+function withWritableSchema<T>(database: DatabaseSync, operation: () => T): T {
+  database.enableDefensive?.(false);
+  database.exec("PRAGMA writable_schema = ON;");
+  try {
+    return operation();
+  } finally {
+    try {
+      database.exec("PRAGMA writable_schema = OFF;");
+    } finally {
+      database.enableDefensive?.(true);
+    }
+  }
+}
+
+/** Detect only the known v15 review index left behind after its column was retired. */
+export function hasDanglingSkillWorkshopCollectionReviewIndex(database: DatabaseSync): boolean {
+  return withWritableSchema(database, () => {
+    const rawIndex = database
+      .prepare(
+        "SELECT tbl_name, rootpage, sql FROM sqlite_schema WHERE type = 'index' AND name = ?",
+      )
+      .get(LEGACY_SKILL_WORKSHOP_COLLECTION_REVIEWS_INDEX);
+    // SAFETY: the narrow catalog projection is validated field-by-field below.
+    const index = rawIndex as { tbl_name?: unknown; rootpage?: unknown; sql?: unknown } | undefined;
+    if (
+      index?.tbl_name !== "skill_workshop_collection_reviews" ||
+      typeof index.rootpage !== "number" ||
+      index.rootpage <= 0 ||
+      typeof index.sql !== "string" ||
+      normalizeSqliteCatalogSql(index.sql) !==
+        normalizeSqliteCatalogSql(LEGACY_SKILL_WORKSHOP_COLLECTION_REVIEWS_INDEX_SQL)
+    ) {
+      return false;
+    }
+    const rawColumns = database
+      .prepare("PRAGMA table_info(skill_workshop_collection_reviews)")
+      .all();
+    // SAFETY: PRAGMA table_info rows expose optional names compared as unknown values.
+    const columns = rawColumns as Array<{ name?: unknown }>;
+    return (
+      columns.some((column) => column.name === "owner_agent_id") &&
+      !columns.some((column) => column.name === "workspace_dir")
+    );
+  });
+}
+
+/**
+ * Make the known malformed index parseable, then let SQLite drop and reclaim it
+ * in the caller's transaction. A failed repair rolls both catalog edits back.
+ */
+export function repairDanglingSkillWorkshopCollectionReviewIndex(database: DatabaseSync): boolean {
+  if (!hasDanglingSkillWorkshopCollectionReviewIndex(database)) {
+    return false;
+  }
+  return withWritableSchema(database, () => {
+    database
+      .prepare("UPDATE sqlite_schema SET sql = ? WHERE type = 'index' AND name = ?")
+      .run(
+        `CREATE INDEX ${LEGACY_SKILL_WORKSHOP_COLLECTION_REVIEWS_INDEX} ON skill_workshop_collection_reviews(create_time DESC, review_id DESC)`,
+        LEGACY_SKILL_WORKSHOP_COLLECTION_REVIEWS_INDEX,
+      );
+    // SAFETY: the pragma result is treated as unknown and validated before arithmetic.
+    const row = database.prepare("PRAGMA schema_version").get() as {
+      schema_version?: unknown;
+    };
+    const schemaVersion = typeof row.schema_version === "number" ? row.schema_version : 0;
+    database.exec(`PRAGMA schema_version = ${schemaVersion + 1}; PRAGMA writable_schema = OFF;`);
+    database.exec(`DROP INDEX ${LEGACY_SKILL_WORKSHOP_COLLECTION_REVIEWS_INDEX};`);
+    return true;
+  });
+}
+
+export function repairDanglingSkillWorkshopCollectionReviewIndexChanges(
+  database: DatabaseSync,
+): string[] {
+  return repairDanglingSkillWorkshopCollectionReviewIndex(database)
+    ? ["Removed dangling legacy Skill Workshop review index"]
+    : [];
+}
+
+/** Run read-only schema admission while SQLite ignores malformed catalog rows. */
+function admitStateDatabaseWithDanglingWorkshopIndex<T>(
+  database: DatabaseSync,
+  operation: () => T,
+): T {
+  return withWritableSchema(database, operation);
+}
+
+/** Admit the schema before Doctor begins its write transaction. */
+export function admitStateDatabaseForSchemaRepair(
+  database: DatabaseSync,
+  pathname: string,
+  env: NodeJS.ProcessEnv,
+): boolean {
+  const danglingWorkshopIndex = hasDanglingSkillWorkshopCollectionReviewIndex(database);
+  const admit = () => {
+    assertSupportedStateSchemaVersion(database, pathname);
+    if (danglingWorkshopIndex) {
+      assertOpenClawStateWriteAllowed({ database, databasePath: pathname, env });
+    }
+  };
+  if (danglingWorkshopIndex) {
+    admitStateDatabaseWithDanglingWorkshopIndex(database, admit);
+  } else {
+    admit();
+  }
+  return danglingWorkshopIndex;
+}
+
+/** Recheck write ownership after BEGIN IMMEDIATE and before catalog mutation. */
+export function assertStateDatabaseSchemaRepairWriteAllowed(
+  database: DatabaseSync,
+  pathname: string,
+  env: NodeJS.ProcessEnv,
+  danglingWorkshopIndex: boolean,
+): void {
+  const assertAllowed = () =>
+    assertOpenClawStateWriteAllowed({ database, databasePath: pathname, env });
+  if (danglingWorkshopIndex) {
+    admitStateDatabaseWithDanglingWorkshopIndex(database, assertAllowed);
+  } else {
+    assertAllowed();
+  }
+}
 
 const STATE_V6_ADDITIVE_TABLES = [
   // v6-v12 databases may predate this former same-version lazy table.

@@ -119,19 +119,29 @@ export function inspectOpenClawStateOwnershipFromDatabase(
   databasePath: string,
   configMachineStateTableReady = false,
 ): OpenClawExternalStateOwnership | null {
-  if (!configMachineStateTableReady && !tableExists(database, "config_machine_state")) {
-    return null;
+  database.enableDefensive?.(false);
+  database.exec("PRAGMA writable_schema = ON;");
+  try {
+    if (!configMachineStateTableReady && !tableExists(database, "config_machine_state")) {
+      return null;
+    }
+    const row = database
+      .prepare("SELECT value_json FROM config_machine_state WHERE state_key = ? LIMIT 1")
+      .get(STATE_SUPERVISION_KEY) as { value_json?: unknown } | undefined;
+    if (!row) {
+      return null;
+    }
+    if (typeof row.value_json !== "string") {
+      throw new OpenClawStateOwnershipMetadataError(databasePath, "reserved value is not text");
+    }
+    return parseExternalOwnership(row.value_json, databasePath);
+  } finally {
+    try {
+      database.exec("PRAGMA writable_schema = OFF;");
+    } finally {
+      database.enableDefensive?.(true);
+    }
   }
-  const row = database
-    .prepare("SELECT value_json FROM config_machine_state WHERE state_key = ? LIMIT 1")
-    .get(STATE_SUPERVISION_KEY) as { value_json?: unknown } | undefined;
-  if (!row) {
-    return null;
-  }
-  if (typeof row.value_json !== "string") {
-    throw new OpenClawStateOwnershipMetadataError(databasePath, "reserved value is not text");
-  }
-  return parseExternalOwnership(row.value_json, databasePath);
 }
 
 function inspectOwnershipThroughConnection(
