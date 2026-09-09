@@ -713,10 +713,10 @@ export async function prepareSlackMessage(params: {
   const observeStage = (
     stage: SlackIngressPreparationStage,
     blocker: SlackIngressPreparationBlocker = "none",
-    progress: "meaningful" | "waiting" = "meaningful",
+    progress: "meaningful" | "waiting" = "waiting",
   ) => observeSlackIngressStage(observation, { stage, blocker, progress });
   const drop = (reason: SlackInboundDropReason, parentUserId?: string): null => {
-    observeStage("settlement");
+    observeStage("settlement", "none", "meaningful");
     // Record this preparation attempt; a later message/app_mention twin can still dispatch.
     // Logical-message deduplication remains owned by the handler's dispatch claim.
     ctx.logger.info(
@@ -748,7 +748,7 @@ export async function prepareSlackMessage(params: {
     eventScope: opts.eventScope,
     observation,
   });
-  observeStage("user_channel_lookup");
+  observeStage("user_channel_lookup", "none", "meaningful");
   const {
     channelInfo,
     channelName,
@@ -1296,7 +1296,7 @@ export async function prepareSlackMessage(params: {
       await discardSlackPreflightMedia(preflightMedia);
       preloadedDirectMedia = undefined;
     }
-    observeStage("media_preparation");
+    observeStage("media_preparation", "none", "meaningful");
   }
 
   // Runtime bindings already pin the root and later thread replies to the same
@@ -1400,10 +1400,10 @@ export async function prepareSlackMessage(params: {
   });
   observeStage("thread_history", "slack_api", "waiting");
   const threadStarter = await getThreadStarter();
-  observeStage("thread_history");
+  observeStage("thread_history", "none", "meaningful");
   observeStage("media_preparation", "unknown", "waiting");
   const resolvedMessageContent = await getMessageContent();
-  observeStage("media_preparation");
+  observeStage("media_preparation", "none", "meaningful");
   if (!resolvedMessageContent) {
     return drop("empty-content");
   }
@@ -1646,7 +1646,7 @@ export async function prepareSlackMessage(params: {
     eventScope: opts.eventScope,
     observation,
   });
-  observeStage("thread_history");
+  observeStage("thread_history", "none", "meaningful");
 
   // Use direct media (including forwarded attachment media) if available, else thread starter media
   const effectiveMedia = effectiveDirectMedia ?? threadStarterMedia;

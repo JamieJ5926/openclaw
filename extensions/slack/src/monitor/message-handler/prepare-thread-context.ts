@@ -330,13 +330,13 @@ export async function resolveSlackThreadContextData(params: {
   if (threadInitialHistoryLimit > 0 && shouldLoadInitialThreadHistory) {
     const currentBotRootTs = starter?.ts ?? params.threadTs;
     const threadHistory = await resolveSlackThreadHistory({
-        channelId: params.message.channel,
-        threadTs: params.threadTs,
-        client: params.eventScope?.client ?? params.ctx.app.client,
-        currentMessageTs: params.message.ts,
-        limit: threadInitialHistoryLimit,
-        observation: params.observation,
-      });
+      channelId: params.message.channel,
+      threadTs: params.threadTs,
+      client: params.eventScope?.client ?? params.ctx.app.client,
+      currentMessageTs: params.message.ts,
+      limit: threadInitialHistoryLimit,
+      observation: params.observation,
+    });
 
     const enrichedStarter =
       starter && threadStarterBody && threadStarterBody !== starter.text

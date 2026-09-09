@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildSlackIngressCorrelation,
   createSlackIngressScopedObserver,
-  normalizeSlackIngressApiMethod,
   observeSlackIngressApiCall,
   observeSlackIngressStage,
 } from "./ingress-observability.js";
@@ -90,16 +89,23 @@ describe("Slack ingress observability adapter", () => {
     expect(JSON.stringify(correlation)).not.toContain("U111");
   });
 
+  it.each(["conversations.members", "files.download", "usergroups.users.list"] as const)(
+    "keeps %s as a fixed observed API method",
+    async (method) => {
+      const observer = createIngressObserver();
 
-  it.each([
-    "conversations.members",
-    "files.download",
-    "usergroups.users.list",
-  ] as const)("keeps %s as a fixed observed API method", (method) => {
-    expect(normalizeSlackIngressApiMethod(method)).toBe(method);
-  });
+      await observeSlackIngressApiCall({ ingressObserver: observer }, { method }, async () => "ok");
 
-  it("applies scoped correlation before delegated observation", () => {    const observer = createIngressObserver();
+      expect(observer.begin).toHaveBeenCalledWith({
+        kind: "api",
+        method,
+        profile: "pooled_listener",
+      });
+    },
+  );
+
+  it("applies scoped correlation before delegated observation", () => {
+    const observer = createIngressObserver();
     const scoped = createSlackIngressScopedObserver(observer, {
       providerEventType: "app_mention",
       teamId: "T111",

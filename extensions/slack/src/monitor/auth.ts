@@ -29,11 +29,11 @@ import {
   slackIngressIdentity,
   SLACK_USER_NAME_KIND,
 } from "./ingress-identity.js";
-import { isTransientSlackThreadLookupError } from "./thread-resolution.js";
 import {
   observeSlackIngressApiCall,
   type SlackIngressApiObservationOptions,
 } from "./ingress-observability.js";
+import { isTransientSlackThreadLookupError } from "./thread-resolution.js";
 
 type SlackChannelMembersCacheEntry = {
   expiresAtMs: number;

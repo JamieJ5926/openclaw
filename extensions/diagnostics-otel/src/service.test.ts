@@ -63,12 +63,16 @@ const telemetryState = vi.hoisted(() => {
       const gauge: TestObservableGauge = {
         observe: vi.fn(),
         callbacks: new Set(),
-        addCallback: vi.fn((callback: (observable: { observe: ReturnType<typeof vi.fn> }) => void) => {
-          gauge.callbacks.add(callback);
-        }),
-        removeCallback: vi.fn((callback: (observable: { observe: ReturnType<typeof vi.fn> }) => void) => {
-          gauge.callbacks.delete(callback);
-        }),
+        addCallback: vi.fn(
+          (callback: (observable: { observe: ReturnType<typeof vi.fn> }) => void) => {
+            gauge.callbacks.add(callback);
+          },
+        ),
+        removeCallback: vi.fn(
+          (callback: (observable: { observe: ReturnType<typeof vi.fn> }) => void) => {
+            gauge.callbacks.delete(callback);
+          },
+        ),
       };
       observableGauges.set(name, gauge);
       return gauge;
@@ -1294,15 +1298,11 @@ describe("diagnostics-otel service", () => {
     expect(observeGauge("openclaw.ingress.operation.active.max_age_ms")).toEqual(
       expect.arrayContaining([[9_000, { "openclaw.ingress.operation.kind": "api" }]]),
     );
-    expect(observeGauge("openclaw.ingress.snapshot.known")).toEqual([
-      [1, {}],
-    ]);
+    expect(observeGauge("openclaw.ingress.snapshot.known")).toEqual([[1, {}]]);
     expect(observeGauge("openclaw.ingress.snapshot.sampled_at_seconds")).toEqual([
       [Math.floor(sampledAt / 1000), {}],
     ]);
-    expect(observeGauge("openclaw.ingress.snapshot.freshness_ms")).toEqual([
-      [2_000, {}],
-    ]);
+    expect(observeGauge("openclaw.ingress.snapshot.freshness_ms")).toEqual([[2_000, {}]]);
   });
 
   test("keeps snapshot gauges on stable no-label series when status changes", async () => {
@@ -1349,9 +1349,7 @@ describe("diagnostics-otel service", () => {
     emitInternalDiagnosticEventForTest(snapshot);
     await waitForDiagnosticEventsDrained();
 
-    expect(observeGauge("openclaw.ingress.snapshot.known")).toEqual([
-      [0, {}],
-    ]);
+    expect(observeGauge("openclaw.ingress.snapshot.known")).toEqual([[0, {}]]);
     expect(observeGauge("openclaw.ingress.snapshot.sampled_at_seconds")).toEqual([]);
     expect(observeGauge("openclaw.ingress.outstanding.count")).toEqual([]);
     expect(observeGauge("openclaw.ingress.operation.active.count")).toEqual([]);
@@ -1368,9 +1366,7 @@ describe("diagnostics-otel service", () => {
     emitInternalDiagnosticEventForTest(futureSnapshot);
     await waitForDiagnosticEventsDrained();
 
-    expect(observeGauge("openclaw.ingress.snapshot.known")).toEqual([
-      [0, {}],
-    ]);
+    expect(observeGauge("openclaw.ingress.snapshot.known")).toEqual([[0, {}]]);
     expect(observeGauge("openclaw.ingress.failed.count")).toEqual([]);
 
     const freshSnapshot = createIngressSnapshot(now);
@@ -1417,9 +1413,7 @@ describe("diagnostics-otel service", () => {
     emitSnapshot(snapshot);
     await waitForDiagnosticEventsDrained();
 
-    expect(observeGauge("openclaw.ingress.snapshot.known")).toEqual([
-      [0, {}],
-    ]);
+    expect(observeGauge("openclaw.ingress.snapshot.known")).toEqual([[0, {}]]);
     expect(observeGauge("openclaw.ingress.outstanding.count")).toEqual([]);
     expect(observeGauge("openclaw.ingress.failed.count")).toEqual([]);
   });
@@ -1463,9 +1457,7 @@ describe("diagnostics-otel service", () => {
       expect.arrayContaining([[1, { "openclaw.ingress.operation.kind": "api" }]]),
     );
     expect(observeGauge("openclaw.ingress.operation.active.count")).not.toEqual(
-      expect.arrayContaining([
-        [99, { "openclaw.ingress.operation.kind": "unexpected-operation" }],
-      ]),
+      expect.arrayContaining([[99, { "openclaw.ingress.operation.kind": "unexpected-operation" }]]),
     );
   });
 

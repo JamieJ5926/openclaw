@@ -68,6 +68,7 @@ openclaw doctor
     payload cleanup. It does not retain full message content or a complete
     stage-by-stage history. For metrics and freshness handling, see
     [Ingress preparation](/gateway/opentelemetry#ingress-preparation).
+
   </Accordion>
 
   <Accordion title="DM messages ignored">

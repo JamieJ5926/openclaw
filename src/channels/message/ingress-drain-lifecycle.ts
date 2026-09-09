@@ -1,4 +1,4 @@
-import type { ChannelIngressLifecycleObserver } from "./ingress-observability.js";
+import type { ChannelIngressLifecycleObserver } from "./ingress-observability-contract.js";
 
 /** Full pre-adoption -> adoption ownership lifecycle for one claimed event. */
 export type ChannelIngressDispatchLifecycle = {

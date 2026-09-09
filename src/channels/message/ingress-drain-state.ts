@@ -1,5 +1,5 @@
+import type { ChannelIngressObserverController } from "./ingress-observability-contract.js";
 import type { ChannelIngressQueueClaim, ChannelIngressQueueRecord } from "./ingress-queue.js";
-import type { ChannelIngressObserverController } from "./ingress-observability.js";
 
 export class IngressAdoptionLostError extends Error {
   readonly code: "guillotined" | "superseded" | "reclaimed";

@@ -13,6 +13,10 @@ import {
 } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { formatSlackFileReference } from "../file-reference.js";
 import type { SlackAttachment, SlackFile } from "../types.js";
+import {
+  observeSlackIngressApiCall,
+  type SlackIngressApiObservationOptions,
+} from "./ingress-observability.js";
 import { MAX_SLACK_MEDIA_FILES, type SlackMediaResult } from "./media-types.js";
 import {
   type FetchLike,
@@ -20,10 +24,6 @@ import {
   saveRemoteMedia,
   slackMediaLog,
 } from "./media.runtime.js";
-import {
-  observeSlackIngressApiCall,
-  type SlackIngressApiObservationOptions,
-} from "./ingress-observability.js";
 import { isGovSlackClient } from "./slack-client-kind.js";
 import { logVerbose } from "./thread.runtime.js";
 export type { SlackMediaResult } from "./media-types.js";

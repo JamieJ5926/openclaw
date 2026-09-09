@@ -4,8 +4,8 @@ import type {
   DiagnosticEventPrivateData,
 } from "../api.js";
 import { formatError } from "./service-exporter.js";
-import type { createDiagnosticsLogExporter } from "./service-logs.js";
 import type { createIngressSnapshotRecorder } from "./service-ingress.js";
+import type { createDiagnosticsLogExporter } from "./service-logs.js";
 import type { createHarnessRecorders } from "./service-recorders-harness.js";
 import type { createModelRecorders } from "./service-recorders-model.js";
 import type { createOperationsRecorders } from "./service-recorders-operations.js";

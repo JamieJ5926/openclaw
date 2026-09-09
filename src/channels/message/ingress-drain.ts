@@ -30,11 +30,12 @@ import {
   type ActiveHandlerState,
   type ChannelIngressDrainDispatchResult,
 } from "./ingress-drain-state.js";
-import {
-  createChannelIngressLifecycleObserver,
-  type ChannelIngressActiveOperationsSnapshot,
-} from "./ingress-observability.js";
 import { supersedeActiveStatesIfNeeded } from "./ingress-drain-supersede.js";
+import {
+  CHANNEL_INGRESS_OPERATION_KINDS,
+  type ChannelIngressActiveOperationsSnapshot,
+} from "./ingress-observability-contract.js";
+import { createChannelIngressLifecycleObserver } from "./ingress-observability-lifecycle.js";
 import type {
   ChannelIngressQueue,
   ChannelIngressQueueClaim,
@@ -738,9 +739,8 @@ export function createChannelIngressDrain<
       const unknownProgressEvents: NonNullable<
         ChannelIngressActiveOperationsSnapshot["unknownProgressEvents"]
       >[number][] = [];
-      const overflowByKind: NonNullable<
-        ChannelIngressActiveOperationsSnapshot["overflowByKind"]
-      > = {};
+      const overflowByKind: NonNullable<ChannelIngressActiveOperationsSnapshot["overflowByKind"]> =
+        {};
       for (const state of activeByClaim.values()) {
         const snapshot = state.observer?.getActiveOperationSnapshot();
         if (!snapshot) {
@@ -748,18 +748,21 @@ export function createChannelIngressDrain<
         }
         operations.push(...snapshot.operations);
         unknownProgressEvents.push(...(snapshot.unknownProgressEvents ?? []));
-        for (const kind of Object.keys(snapshot.overflowByKind ?? {}) as Array<
-          keyof NonNullable<ChannelIngressActiveOperationsSnapshot["overflowByKind"]>
-        >) {
+        for (const kind of CHANNEL_INGRESS_OPERATION_KINDS) {
           const count = snapshot.overflowByKind?.[kind] ?? 0;
-          overflowByKind[kind] = (overflowByKind[kind] ?? 0) + count;
+          if (count > 0) {
+            overflowByKind[kind] = (overflowByKind[kind] ?? 0) + count;
+          }
         }
       }
-      return {
-        operations,
-        ...(unknownProgressEvents.length === 0 ? {} : { unknownProgressEvents }),
-        ...(Object.keys(overflowByKind).length === 0 ? {} : { overflowByKind }),
-      };
+      const activeOperations: ChannelIngressActiveOperationsSnapshot = { operations };
+      if (unknownProgressEvents.length > 0) {
+        activeOperations.unknownProgressEvents = unknownProgressEvents;
+      }
+      if (Object.keys(overflowByKind).length > 0) {
+        activeOperations.overflowByKind = overflowByKind;
+      }
+      return activeOperations;
     },
     waitForIdle: async () => {
       const tasks = [...activeByClaim.values()].map((state) => state.task);

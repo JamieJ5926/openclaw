@@ -47,9 +47,9 @@ import {
   resolveSampleRate,
   resolveSignalOtelUrl,
 } from "./service-exporter.js";
+import { createIngressSnapshotRecorder } from "./service-ingress.js";
 import { createDiagnosticsLogExporter } from "./service-logs.js";
 import { createDiagnosticsMetrics } from "./service-metrics.js";
-import { createIngressSnapshotRecorder } from "./service-ingress.js";
 import { registerOwnedSdkRuntime } from "./service-propagation.js";
 import { createDiagnosticsRecorderRuntime } from "./service-recorder-runtime.js";
 import { createHarnessRecorders } from "./service-recorders-harness.js";

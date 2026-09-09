@@ -20,16 +20,18 @@ import {
   openOpenClawStateDatabase,
   runOpenClawStateWriteTransaction,
 } from "../../state/openclaw-state-db.js";
+import { registerChannelIngressDiagnosticSource } from "./ingress-diagnostic-registry.js";
+import type {
+  ChannelIngressActiveOperationsSnapshot,
+  ChannelIngressObservabilitySnapshot,
+  ChannelIngressProgressUpdate,
+} from "./ingress-observability-contract.js";
+import { buildChannelIngressObservabilitySnapshot } from "./ingress-observability-snapshot.js";
 import {
-  buildChannelIngressObservabilitySnapshot,
   clearChannelIngressProgressMetadata,
   freezeChannelIngressProgressMetadata,
   initializeChannelIngressProgressMetadata,
   mergeChannelIngressProgressMetadata,
-  type ChannelIngressActiveOperationSnapshot,
-  type ChannelIngressActiveOperationsSnapshot,
-  type ChannelIngressObservabilitySnapshot,
-  type ChannelIngressProgressUpdate,
 } from "./ingress-observability.js";
 
 /** Pending or retryable inbound channel event stored in the durable ingress queue. */
@@ -288,136 +290,6 @@ export type CreateChannelIngressQueueOptions = {
    */
   access?: "read-write" | "read-only";
 };
-
-
-type ChannelIngressDiagnosticSource = {
-  id: symbol;
-  stateDir?: string;
-  getActiveOperations: () =>
-    | ChannelIngressActiveOperationsSnapshot["operations"]
-    | ChannelIngressActiveOperationsSnapshot;
-};
-
-type ChannelIngressDiagnosticRegistry = {
-  sources: Map<symbol, ChannelIngressDiagnosticSource>;
-};
-
-const CHANNEL_INGRESS_DIAGNOSTIC_REGISTRY_KEY = Symbol.for(
-  "openclaw.channelIngress.diagnosticRegistry.v1",
-);
-
-function getChannelIngressDiagnosticRegistry(): ChannelIngressDiagnosticRegistry {
-  const globalRecord = globalThis as Record<PropertyKey, unknown>;
-  const existing = globalRecord[CHANNEL_INGRESS_DIAGNOSTIC_REGISTRY_KEY];
-  if (
-    existing &&
-    typeof existing === "object" &&
-    (existing as Partial<ChannelIngressDiagnosticRegistry>).sources instanceof Map
-  ) {
-    return existing as ChannelIngressDiagnosticRegistry;
-  }
-  const registry: ChannelIngressDiagnosticRegistry = { sources: new Map() };
-  Object.defineProperty(globalThis, CHANNEL_INGRESS_DIAGNOSTIC_REGISTRY_KEY, {
-    configurable: true,
-    enumerable: false,
-    value: registry,
-    writable: false,
-  });
-  return registry;
-}
-
-function appendActiveOperations(
-  target: ChannelIngressActiveOperationsSnapshot,
-  source:
-    | ChannelIngressActiveOperationsSnapshot["operations"]
-    | ChannelIngressActiveOperationsSnapshot,
-): void {
-  if (Array.isArray(source)) {
-    (target.operations as ChannelIngressActiveOperationSnapshot[]).push(...source);
-    return;
-  }
-  (target.operations as ChannelIngressActiveOperationSnapshot[]).push(...source.operations);
-  if (source.unknownProgressEvents?.length) {
-    target.unknownProgressEvents = [
-      ...(target.unknownProgressEvents ?? []),
-      ...source.unknownProgressEvents,
-    ];
-  }
-  for (const kind of Object.keys(source.overflowByKind ?? {}) as Array<
-    keyof NonNullable<ChannelIngressActiveOperationsSnapshot["overflowByKind"]>
-  >) {
-    const count = source.overflowByKind?.[kind] ?? 0;
-    if (count <= 0) {
-      continue;
-    }
-    target.overflowByKind = {
-      ...(target.overflowByKind ?? {}),
-      [kind]: (target.overflowByKind?.[kind] ?? 0) + count,
-    };
-  }
-}
-
-function stateDirKey(stateDir: string | undefined): string {
-  return stateDir ?? "";
-}
-
-export function registerChannelIngressDiagnosticSource(params: {
-  stateDir?: string;
-  getActiveOperations: () =>
-    | ChannelIngressActiveOperationsSnapshot["operations"]
-    | ChannelIngressActiveOperationsSnapshot;
-}): () => void {
-  const id = Symbol("channel-ingress-diagnostic-source");
-  getChannelIngressDiagnosticRegistry().sources.set(id, { id, ...params });
-  return () => {
-    getChannelIngressDiagnosticRegistry().sources.delete(id);
-  };
-}
-
-export async function getRegisteredChannelIngressDiagnosticSnapshot(
-  now: number,
-): Promise<ChannelIngressObservabilitySnapshot> {
-  const sources = [...getChannelIngressDiagnosticRegistry().sources.values()];
-  if (sources.length === 0) {
-    return buildChannelIngressObservabilitySnapshot({ rows: [], sampledAt: now, status: "unknown" });
-  }
-  const activeOperations: ChannelIngressActiveOperationsSnapshot = { operations: [] };
-  for (const source of sources) {
-    try {
-      appendActiveOperations(activeOperations, source.getActiveOperations());
-    } catch {
-      return buildChannelIngressObservabilitySnapshot({ rows: [], sampledAt: now, status: "unknown" });
-    }
-  }
-  const stateDirs = [...new Map(sources.map((source) => [stateDirKey(source.stateDir), source.stateDir])).values()];
-  if (stateDirs.length !== 1) {
-    return buildChannelIngressObservabilitySnapshot({
-      rows: [],
-      sampledAt: now,
-      activeOperations,
-      status: "unknown",
-    });
-  }
-  try {
-    return await getChannelIngressDiagnosticSnapshot(now, {
-      stateDir: stateDirs[0],
-      access: "read-only",
-      expected: true,
-      activeOperations,
-    });
-  } catch {
-    return buildChannelIngressObservabilitySnapshot({
-      rows: [],
-      sampledAt: now,
-      activeOperations,
-      status: "unknown",
-    });
-  }
-}
-
-export function resetRegisteredChannelIngressDiagnosticSourcesForTest(): void {
-  getChannelIngressDiagnosticRegistry().sources.clear();
-}
 
 type ChannelIngressDatabase = Pick<OpenClawStateKyselyDatabase, "channel_ingress_events">;
 type ChannelIngressRow = Selectable<ChannelIngressEvents>;
@@ -1856,8 +1728,8 @@ export function createChannelIngressQueue<
     claim,
     refreshClaim,
     updateProgress,
-    getDiagnosticSnapshot: (sampledAt = now(), snapshotOptions) =>
-      getChannelIngressDiagnosticSnapshot(sampledAt, {
+    getDiagnosticSnapshot: (sampledAt, snapshotOptions) =>
+      getChannelIngressDiagnosticSnapshot(sampledAt ?? now(), {
         stateDir: options.stateDir,
         queueName,
         access: "read-only",
@@ -1866,8 +1738,15 @@ export function createChannelIngressQueue<
       }),
     registerDiagnosticSource: (getActiveOperations) =>
       registerChannelIngressDiagnosticSource({
-        stateDir: options.stateDir,
+        scopeKey: options.stateDir ?? "",
         getActiveOperations,
+        getSnapshot: (sampledAt, activeOperations) =>
+          getChannelIngressDiagnosticSnapshot(sampledAt, {
+            stateDir: options.stateDir,
+            access: "read-only",
+            expected: true,
+            activeOperations,
+          }),
       }),
     complete,
     release,

@@ -33,18 +33,19 @@ export function normalizeDiagnosticLane(value: string | undefined, fallback = "u
 
 export { isDiagnosticFlagEnabled } from "../infra/diagnostic-flags.js";
 export type {
-  DiagnosticEventMetadata,
-  DiagnosticEventPayload,
-  DiagnosticEventPrivateData,
   ChannelIngressBlocker,
   ChannelIngressBlockerSnapshot,
   ChannelIngressObservabilitySnapshot,
   ChannelIngressOperationAggregate,
   ChannelIngressOperationKind,
   ChannelIngressPreparationStage,
-  ChannelIngressSnapshotEvent,
   ChannelIngressStageSnapshot,
   ChannelIngressUnknownProgressSnapshot,
+} from "../channels/message/ingress-observability-contract.js";
+export type {
+  DiagnosticEventMetadata,
+  DiagnosticEventPayload,
+  DiagnosticEventPrivateData,
   DiagnosticModelCallContent,
 } from "../infra/diagnostic-events.js";
 export type { DiagnosticModelContentCapturePolicy } from "../infra/diagnostic-llm-content.js";
@@ -53,7 +54,8 @@ export {
   CHANNEL_INGRESS_OPERATION_KINDS,
   CHANNEL_INGRESS_PREPARATION_STAGES,
   CHANNEL_INGRESS_OBSERVABILITY_SCHEMA_VERSION,
-  createUnknownDiagnosticIngressSnapshot,
+} from "../channels/message/ingress-observability-contract.js";
+export {
   emitDiagnosticEvent,
   emitTrustedDiagnosticEvent,
   emitTrustedDiagnosticEventWithPrivateData,

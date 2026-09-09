@@ -537,18 +537,18 @@ Ingress gauges describe durable events waiting for preparation or adoption,
 including a call that has not returned. They are observable gauges: ages advance
 at collection time while work remains pending.
 
-| Metric | Unit | Attributes |
-| --- | --- | --- |
-| `openclaw.ingress.outstanding.count` | events | stage, blocker |
-| `openclaw.ingress.outstanding.oldest_receipt_age_ms` | ms | stage, blocker |
-| `openclaw.ingress.outstanding.max_no_progress_age_ms` | ms | stage |
-| `openclaw.ingress.outstanding.unknown_progress_count` | events | stage |
-| `openclaw.ingress.failed.count` | events | none |
-| `openclaw.ingress.operation.active.count` | operations | operation kind |
-| `openclaw.ingress.operation.active.max_age_ms` | ms | operation kind |
-| `openclaw.ingress.snapshot.known` | 1 | none |
-| `openclaw.ingress.snapshot.sampled_at_seconds` | Unix seconds | none |
-| `openclaw.ingress.snapshot.freshness_ms` | ms | none |
+| Metric                                                | Unit         | Attributes     |
+| ----------------------------------------------------- | ------------ | -------------- |
+| `openclaw.ingress.outstanding.count`                  | events       | stage, blocker |
+| `openclaw.ingress.outstanding.oldest_receipt_age_ms`  | ms           | stage, blocker |
+| `openclaw.ingress.outstanding.max_no_progress_age_ms` | ms           | stage          |
+| `openclaw.ingress.outstanding.unknown_progress_count` | events       | stage          |
+| `openclaw.ingress.failed.count`                       | events       | none           |
+| `openclaw.ingress.operation.active.count`             | operations   | operation kind |
+| `openclaw.ingress.operation.active.max_age_ms`        | ms           | operation kind |
+| `openclaw.ingress.snapshot.known`                     | 1            | none           |
+| `openclaw.ingress.snapshot.sampled_at_seconds`        | Unix seconds | none           |
+| `openclaw.ingress.snapshot.freshness_ms`              | ms           | none           |
 
 Attribute keys use the `openclaw.ingress.` prefix: `stage`, `blocker`,
 and `operation.kind`. Their values come from fixed buckets.

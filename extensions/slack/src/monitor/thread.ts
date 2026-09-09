@@ -10,15 +10,15 @@ import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runti
 import { formatSlackFileReferenceList } from "../file-reference.js";
 import type { SlackAttachment, SlackFile } from "../types.js";
 import {
-  observeSlackIngressApiCall,
-  type SlackIngressApiObservationOptions,
-} from "./ingress-observability.js";
-import {
   hasSlackTableBlock,
   isSlackUnfurlAttachment,
   resolveSlackBlocksText,
   resolveSlackMessageText as resolveSharedSlackMessageText,
 } from "./block-text.js";
+import {
+  observeSlackIngressApiCall,
+  type SlackIngressApiObservationOptions,
+} from "./ingress-observability.js";
 import { logVerbose } from "./thread.runtime.js";
 
 export type SlackThreadStarter = {

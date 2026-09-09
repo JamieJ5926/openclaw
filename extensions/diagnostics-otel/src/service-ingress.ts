@@ -141,43 +141,52 @@ export function createIngressSnapshotRecorder(runtime: DiagnosticsRecorderRuntim
         } satisfies Attributes);
       }
     }),
-    runtime.registerObservableGaugeCallback(runtime.ingressUnknownProgressCountGauge, (observable) => {
-      const snapshot = latestFreshKnownSnapshot();
-      if (!snapshot) {
-        return;
-      }
-      for (const stageName of CHANNEL_INGRESS_PREPARATION_STAGES) {
-        const stage = snapshot.stages?.[stageName];
-        observable.observe(nonNegativeFiniteCount(stage?.unknownProgress), {
-          "openclaw.ingress.stage": stageName,
-        } satisfies Attributes);
-      }
-      observable.observe(nonNegativeFiniteCount(snapshot.unknown?.unknownProgress), {
-        "openclaw.ingress.stage": "unknown",
-      } satisfies Attributes);
-    }),
-    runtime.registerObservableGaugeCallback(runtime.ingressFailedRecordsCountGauge, (observable) => {
-      const snapshot = latestFreshKnownSnapshot();
-      if (!snapshot) {
-        return;
-      }
-      observable.observe(nonNegativeFiniteCount(snapshot.failedCount), {} satisfies Attributes);
-    }),
-    runtime.registerObservableGaugeCallback(runtime.ingressOperationActiveCountGauge, (observable) => {
-      const snapshot = latestFreshKnownSnapshot();
-      if (!snapshot) {
-        return;
-      }
-      for (const kind of CHANNEL_INGRESS_OPERATION_KINDS) {
-        const operation = snapshot.operations?.[kind];
-        if (operation?.known !== true) {
-          continue;
+    runtime.registerObservableGaugeCallback(
+      runtime.ingressUnknownProgressCountGauge,
+      (observable) => {
+        const snapshot = latestFreshKnownSnapshot();
+        if (!snapshot) {
+          return;
         }
-        observable.observe(nonNegativeFiniteCount(operation?.total), {
-          "openclaw.ingress.operation.kind": kind,
+        for (const stageName of CHANNEL_INGRESS_PREPARATION_STAGES) {
+          const stage = snapshot.stages?.[stageName];
+          observable.observe(nonNegativeFiniteCount(stage?.unknownProgress), {
+            "openclaw.ingress.stage": stageName,
+          } satisfies Attributes);
+        }
+        observable.observe(nonNegativeFiniteCount(snapshot.unknown?.unknownProgress), {
+          "openclaw.ingress.stage": "unknown",
         } satisfies Attributes);
-      }
-    }),
+      },
+    ),
+    runtime.registerObservableGaugeCallback(
+      runtime.ingressFailedRecordsCountGauge,
+      (observable) => {
+        const snapshot = latestFreshKnownSnapshot();
+        if (!snapshot) {
+          return;
+        }
+        observable.observe(nonNegativeFiniteCount(snapshot.failedCount), {} satisfies Attributes);
+      },
+    ),
+    runtime.registerObservableGaugeCallback(
+      runtime.ingressOperationActiveCountGauge,
+      (observable) => {
+        const snapshot = latestFreshKnownSnapshot();
+        if (!snapshot) {
+          return;
+        }
+        for (const kind of CHANNEL_INGRESS_OPERATION_KINDS) {
+          const operation = snapshot.operations?.[kind];
+          if (operation?.known !== true) {
+            continue;
+          }
+          observable.observe(nonNegativeFiniteCount(operation?.total), {
+            "openclaw.ingress.operation.kind": kind,
+          } satisfies Attributes);
+        }
+      },
+    ),
     runtime.registerObservableGaugeCallback(runtime.ingressOperationMaxAgeGauge, (observable) => {
       const now = Date.now();
       const snapshot = latestFreshKnownSnapshot(now);

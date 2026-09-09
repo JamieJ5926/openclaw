@@ -1,6 +1,7 @@
 // Slack tests cover message handler plugin behavior.
 import { createTestInboundDebounceFlush } from "openclaw/plugin-sdk/channel-test-helpers";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 import {
   clearRuntimeConfigSnapshot,
   setRuntimeConfigSnapshot,
@@ -445,6 +446,42 @@ describe("createSlackMessageHandler", () => {
     expect(enqueueMock).toHaveBeenCalledTimes(1);
   });
 
+  it("does not advance progress when a durable retry enters the handler before routing resolves", async () => {
+    const routingStarted = createDeferred<void>();
+    resolveThreadTsMock.mockImplementationOnce(
+      async ({ message }: { message: Record<string, unknown> }) => {
+        await routingStarted.promise;
+        return { ...message };
+      },
+    );
+    const ingressObserver = createIngressObserver();
+    const { handler } = createHandlerWithTracker();
+    const message: Parameters<typeof handler>[0] = {
+      type: "message",
+      team: "T111",
+      channel: "C111",
+      user: "U111",
+      ts: "1709000000.000559",
+      text: "retry body",
+    };
+    const turnAdoptionLifecycle = {
+      admission: "exclusive",
+      observer: ingressObserver,
+      abortSignal: new AbortController().signal,
+      onAdopted: vi.fn(),
+      onDeferred: vi.fn(),
+      onAbandoned: vi.fn(),
+    } satisfies NonNullable<Parameters<typeof handler>[1]["turnAdoptionLifecycle"]>;
+
+    const handled = handler(message, { source: "message", turnAdoptionLifecycle });
+
+    await vi.waitFor(() => expect(ingressObserver.stage).toHaveBeenCalledWith("queued", "none"));
+    expect(ingressObserver.progress).not.toHaveBeenCalled();
+
+    routingStarted.resolve();
+    await handled;
+  });
+
   it("records explicit channel type before thread resolution", async () => {
     let settleThreadResolution: (() => void) | undefined;
     resolveThreadTsMock.mockImplementationOnce(
@@ -767,6 +804,7 @@ describe("createSlackMessageHandler", () => {
       threadTs: "1709000000.000560",
     });
     expect(ingressObserver.stage).toHaveBeenCalledWith("queued", "none");
+    expect(ingressObserver.progress).not.toHaveBeenCalledWith("queued", "none");
     expect(ingressObserver.stage).toHaveBeenCalledWith("dedupe_wait", "none");
     expect(JSON.stringify(ingressObserver.correlate.mock.calls)).not.toContain("secret body");
   });

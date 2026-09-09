@@ -1,9 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  buildChannelIngressObservabilitySnapshot,
+  CHANNEL_INGRESS_OBSERVABILITY_METADATA_KEY,
+  CHANNEL_INGRESS_OBSERVABILITY_OWNER,
+} from "./ingress-observability-contract.js";
+import {
   createChannelIngressLifecycleObserver,
   observeChannelIngressDedupeWait,
-} from "./ingress-observability.js";
+} from "./ingress-observability-lifecycle.js";
+import { buildChannelIngressObservabilitySnapshot } from "./ingress-observability-snapshot.js";
 
 describe("channel ingress observability", () => {
   it("keeps same-millisecond live operations distinct and revokes them on lost ownership", async () => {
@@ -38,7 +42,12 @@ describe("channel ingress observability", () => {
     expect(observer.getActiveOperationSnapshot()).toEqual({
       operations: [],
       unknownProgressEvents: [
-        { eventId: "event-1", queueName: '["slack","workspace"]', channelId: "slack", accountId: "workspace" },
+        {
+          eventId: "event-1",
+          queueName: '["slack","workspace"]',
+          channelId: "slack",
+          accountId: "workspace",
+        },
       ],
     });
 
@@ -63,15 +72,11 @@ describe("channel ingress observability", () => {
       },
     });
 
-    await expect(observeChannelIngressDedupeWait(observer, Promise.resolve("claimed"))).resolves.toBe(
-      "claimed",
-    );
+    await expect(
+      observeChannelIngressDedupeWait(observer, Promise.resolve("claimed")),
+    ).resolves.toBe("claimed");
     await vi.waitFor(() =>
-      expect(calls).toEqual([
-        "dedupe_wait:dedupe_owner",
-        "begin:dedupe",
-        "finish:completed",
-      ]),
+      expect(calls).toEqual(["dedupe_wait:dedupe_owner", "begin:dedupe", "finish:completed"]),
     );
   });
 
@@ -108,5 +113,77 @@ describe("channel ingress observability", () => {
 
     overflowed?.finish();
     expect(observer.getActiveOperationSnapshot().overflowByKind).toBeUndefined();
+  });
+
+  it("treats owned progress without lastProgressAt as unknown", () => {
+    const metadataJson = JSON.stringify({
+      [CHANNEL_INGRESS_OBSERVABILITY_METADATA_KEY]: {
+        owner: CHANNEL_INGRESS_OBSERVABILITY_OWNER,
+        schemaVersion: 1,
+        stage: "thread_history",
+        blocker: "slack_api",
+        stageStartedAt: 100,
+        updatedAt: 100,
+      },
+    });
+
+    const snapshot = buildChannelIngressObservabilitySnapshot({
+      sampledAt: 200,
+      rows: [
+        {
+          event_id: "event-without-progress",
+          channel_id: "slack",
+          account_id: "workspace",
+          queue_name: '["slack","workspace"]',
+          status: "pending",
+          metadata_json: metadataJson,
+          received_at: 50,
+          updated_at: 100,
+          claimed_at: null,
+        },
+      ],
+    });
+
+    expect(snapshot.stages.thread_history.total).toBe(0);
+    expect(snapshot.unknown).toMatchObject({
+      total: 1,
+      pending: 1,
+      unknownProgress: 1,
+      oldest: { id: "event-without-progress", progressKnown: false, stage: "unknown" },
+    });
+  });
+
+  it("marks operation aggregates unknown after an observation write failure", () => {
+    const snapshot = buildChannelIngressObservabilitySnapshot({
+      sampledAt: 200,
+      rows: [
+        {
+          event_id: "event-1",
+          channel_id: "slack",
+          account_id: "workspace",
+          queue_name: '["slack","workspace"]',
+          status: "claimed",
+          metadata_json: null,
+          received_at: 50,
+          updated_at: 100,
+          claimed_at: 100,
+        },
+      ],
+      activeOperations: {
+        operations: [],
+        unknownProgressEvents: [
+          {
+            eventId: "event-1",
+            queueName: '["slack","workspace"]',
+            channelId: "slack",
+            accountId: "workspace",
+          },
+        ],
+      },
+    });
+
+    expect(snapshot.operations.api).toMatchObject({ total: 0, known: false });
+    expect(snapshot.operations.dedupe).toMatchObject({ total: 0, known: false });
+    expect(snapshot.operations.sleep).toMatchObject({ total: 0, known: false });
   });
 });

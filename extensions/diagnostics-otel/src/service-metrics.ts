@@ -337,14 +337,16 @@ export function createDiagnosticsMetrics(
       "openclaw.ingress.outstanding.oldest_receipt_age_ms",
       {
         unit: "ms",
-        description: "Oldest receipt age among outstanding ingress events by fixed stage and blocker",
+        description:
+          "Oldest receipt age among outstanding ingress events by fixed stage and blocker",
       },
     ),
     ingressMaxNoProgressAgeGauge: createObservableGauge(
       "openclaw.ingress.outstanding.max_no_progress_age_ms",
       {
         unit: "ms",
-        description: "Maximum eligible no-progress age among outstanding ingress events by fixed stage",
+        description:
+          "Maximum eligible no-progress age among outstanding ingress events by fixed stage",
       },
     ),
     ingressUnknownProgressCountGauge: createObservableGauge(
@@ -354,13 +356,10 @@ export function createDiagnosticsMetrics(
         description: "Current outstanding ingress events whose progress stage is unknown",
       },
     ),
-    ingressFailedRecordsCountGauge: createObservableGauge(
-      "openclaw.ingress.failed.count",
-      {
-        unit: "{event}",
-        description: "Current retained failed ingress records from the ingress snapshot",
-      },
-    ),
+    ingressFailedRecordsCountGauge: createObservableGauge("openclaw.ingress.failed.count", {
+      unit: "{event}",
+      description: "Current retained failed ingress records from the ingress snapshot",
+    }),
     ingressOperationActiveCountGauge: createObservableGauge(
       "openclaw.ingress.operation.active.count",
       {
@@ -386,13 +385,10 @@ export function createDiagnosticsMetrics(
         description: "Unix timestamp of the latest ingress diagnostic snapshot sample",
       },
     ),
-    ingressSnapshotFreshnessGauge: createObservableGauge(
-      "openclaw.ingress.snapshot.freshness_ms",
-      {
-        unit: "ms",
-        description: "Age of the latest ingress diagnostic snapshot consumed by the OTEL recorder",
-      },
-    ),
+    ingressSnapshotFreshnessGauge: createObservableGauge("openclaw.ingress.snapshot.freshness_ms", {
+      unit: "ms",
+      description: "Age of the latest ingress diagnostic snapshot consumed by the OTEL recorder",
+    }),
     registerObservableGaugeCallback,
   };
 }

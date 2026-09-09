@@ -4,13 +4,18 @@ import { recordCommandPoll } from "../agents/command-poll-backoff.js";
 import { detectToolCallLoop, recordToolCall } from "../agents/tool-loop-detection.js";
 import {
   createUnknownDiagnosticIngressSnapshot,
-  onDiagnosticEvent,
   setDiagnosticIngressSnapshotProvider,
+} from "../channels/message/ingress-diagnostic-registry.js";
+import { createChannelIngressMonitor } from "../channels/message/ingress-monitor.js";
+import type { ChannelIngressObservabilitySnapshot } from "../channels/message/ingress-observability-contract.js";
+import { createChannelIngressQueue } from "../channels/message/ingress-queue.js";
+import {
+  onDiagnosticEvent,
   setDiagnosticsEnabledForProcess,
   waitForDiagnosticEventsDrained,
-  type ChannelIngressObservabilitySnapshot,
   type DiagnosticEventPayload,
 } from "../infra/diagnostic-events.js";
+import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
 import {
   getDiagnosticSessionState,
   isDiagnosticSessionStateCurrent,
@@ -24,9 +29,6 @@ import {
   startDiagnosticHeartbeat,
   stopDiagnosticHeartbeat,
 } from "./diagnostic.js";
-import { createChannelIngressMonitor } from "../channels/message/ingress-monitor.js";
-import { createChannelIngressQueue } from "../channels/message/ingress-queue.js";
-import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
 import { resetDiagnosticStateForTest } from "./diagnostic.test-support.js";
 
 type Deferred<T> = {
@@ -73,7 +75,6 @@ it("preserves independent tool-loop and poll-backoff policy when diagnostic obse
   expect(detectToolCallLoop(current, "read", args, { enabled: true })).toEqual(before);
   expect(recordCommandPoll(current, "fixture-command", false)).toBe(30_000);
 });
-
 
 it("emits ingress snapshots before idle heartbeat returns", async () => {
   vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
@@ -261,8 +262,7 @@ it("emits ingress snapshots from the registered channel ingress monitor", async 
   const monitor = createChannelIngressMonitor<
     { id: string; lane: string; text: string },
     string,
-    { version: 1; rawEvent: string },
-    unknown
+    { version: 1; rawEvent: string }
   >({
     queue,
     inspect: (raw) => ({ eventId: raw.id, laneKey: `lane:${raw.lane}` }),
@@ -292,9 +292,12 @@ it("emits ingress snapshots from the registered channel ingress monitor", async 
   });
   try {
     monitor.start();
-    await monitor.admit({ id: "event-1", lane: "thread", text: "hello" }, {
-      receivedAt: sampledAt,
-    });
+    await monitor.admit(
+      { id: "event-1", lane: "thread", text: "hello" },
+      {
+        receivedAt: sampledAt,
+      },
+    );
     await vi.waitFor(async () => {
       await deliveryStarted;
     });
@@ -395,20 +398,23 @@ it("does not publish or unblock a restarted heartbeat from an obsolete async ing
         sampledAt: startedAt + 45_000,
         status: "unknown",
       }),
+    ]);
+    expect(ingressSnapshots).not.toContainEqual(
       expect.objectContaining({
-        sampledAt: requestedSampleTimes[1],
+        failedCount: 1,
+        status: "known",
+      }),
+    );
+    expect(ingressSnapshots).not.toContainEqual(
+      expect.objectContaining({
         failedCount: 2,
         status: "known",
       }),
-    ]);
-    expect(ingressSnapshots).not.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          failedCount: 1,
-          status: "known",
-        }),
-      ]),
     );
+
+    await vi.advanceTimersByTimeAsync(15_000);
+    await flushMicrotasks();
+    expect(deferredSnapshots).toHaveLength(3);
   } finally {
     cleanupProvider();
     unsubscribe();

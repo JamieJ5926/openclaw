@@ -13,7 +13,6 @@ import {
   type ChannelIngressDrain,
   type CreateChannelIngressDrainOptions,
 } from "./ingress-drain.js";
-import { createUnknownChannelIngressObservabilitySnapshot } from "./ingress-observability.js";
 import type {
   ChannelIngressMonitorDeliveryResult,
   ChannelIngressMonitorFacts,
@@ -22,7 +21,7 @@ import type {
   ChannelIngressMonitorPayloadCodec,
   ChannelIngressMonitorRetention,
 } from "./ingress-monitor-types.js";
-import { type ChannelIngressQueue, type ChannelIngressQueueClaim } from "./ingress-queue.js";
+import type { ChannelIngressQueue, ChannelIngressQueueClaim } from "./ingress-queue.js";
 import {
   DEFAULT_INGRESS_RETRY_DEAD_LETTER_MIN_AGE_MS,
   DEFAULT_INGRESS_RETRY_MAX_ATTEMPTS,
@@ -730,15 +729,6 @@ export function createChannelIngressMonitor<TRaw, TBody, TStoredPayload, TMetada
     },
     ensureQueueAvailable,
     requestDrain,
-    getDiagnosticSnapshot: async (sampledAt = now()) => {
-      const snapshot = await getQueue().getDiagnosticSnapshot?.(sampledAt, {
-        activeOperations: drain?.activeOperations() ?? [],
-      });
-      if (snapshot) {
-        return snapshot;
-      }
-      return createUnknownChannelIngressObservabilitySnapshot(sampledAt);
-    },
     pause,
     stop: () => {
       stopTask ??= (async () => {
@@ -747,7 +737,6 @@ export function createChannelIngressMonitor<TRaw, TBody, TStoredPayload, TMetada
         requested = false;
         clearSuspensionSubscription();
         unregisterDiagnosticSource?.();
-        unregisterDiagnosticSource = undefined;
         releaseRestartFenceWake();
         clearPollTimer();
         publishActivity();

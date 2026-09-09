@@ -251,7 +251,10 @@ export function createSlackMessageHandler(params: {
                     key: replayKey,
                     ...(entry.opts.ingressObserver ? { observer: entry.opts.ingressObserver } : {}),
                   });
-                  observeSlackIngressStage(entryObservation, { stage: "dedupe_wait" });
+                  observeSlackIngressStage(entryObservation, {
+                    stage: "dedupe_wait",
+                    progress: "meaningful",
+                  });
                   if (claim.kind === "claimed") {
                     claims.push(claim.handle);
                     claimedKeys.set(replayKey, surviving.length);
@@ -349,7 +352,10 @@ export function createSlackMessageHandler(params: {
                       await commitClaims();
                       await turnAdoptionLifecycle?.onAdopted();
                       await admissionLifecycle.onAdopted();
-                      observeSlackIngressStage(observation, { stage: "adoption" });
+                      observeSlackIngressStage(observation, {
+                        stage: "adoption",
+                        progress: "meaningful",
+                      });
                     },
                     onDeferred: () => {
                       turnAdoptionLifecycle?.onDeferred();
@@ -372,7 +378,10 @@ export function createSlackMessageHandler(params: {
                     onAbandoned: () => {
                       settlementHandedOff = true;
                       releaseClaims();
-                      observeSlackIngressStage(observation, { stage: "settlement" });
+                      observeSlackIngressStage(observation, {
+                        stage: "settlement",
+                        progress: "meaningful",
+                      });
                       // Slack has no owner-local teardown gated on core claim release.
                       void turnAdoptionLifecycle?.onAbandoned();
                       void admissionLifecycle.onAbandoned();
@@ -458,7 +467,7 @@ export function createSlackMessageHandler(params: {
     const observation: SlackIngressObservationOptions | undefined = ingressObserver
       ? { ingressObserver }
       : undefined;
-    observeSlackIngressStage(observation, { stage: "queued" });
+    observeSlackIngressStage(observation, { stage: "queued", progress: "waiting" });
     // Record Slack's explicit type before thread-resolution awaits.
     // Relay and native events can overlap; a following typeless bot event must see it.
     ctx.rememberSlackChannelType(message.channel, message.channel_type, opts.eventScope);
@@ -480,7 +489,7 @@ export function createSlackMessageHandler(params: {
       ...(observation ? { observation } : {}),
       ...(opts.turnAdoptionLifecycle ? { turnAdoptionLifecycle: opts.turnAdoptionLifecycle } : {}),
     });
-    observeSlackIngressStage(observation, { stage: "routing" });
+    observeSlackIngressStage(observation, { stage: "routing", progress: "meaningful" });
     const teamId = opts.eventScope?.teamId;
     const debounceKey = buildSlackDebounceKey(resolvedMessage, ctx.accountId, teamId);
     const conversationKey = buildTopLevelSlackConversationKey(

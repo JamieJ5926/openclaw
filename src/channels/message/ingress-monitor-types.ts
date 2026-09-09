@@ -1,5 +1,5 @@
+import type { ChannelIngressLifecycleObserver } from "./ingress-observability-contract.js";
 import type { ChannelIngressQueueClaim } from "./ingress-queue.js";
-import type { ChannelIngressLifecycleObserver } from "./ingress-observability.js";
 
 /** Stable identity and serialization lane extracted before durable admission. */
 export type ChannelIngressMonitorFacts = { eventId: string; laneKey: string };

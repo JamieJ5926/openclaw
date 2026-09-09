@@ -48,7 +48,6 @@ function resolveTestSlackThreadStarter(
   });
 }
 
-
 function createIngressObserver() {
   const finish = vi.fn();
   return {
@@ -1552,7 +1551,6 @@ describe("resolveSlackAttachmentContent", () => {
       );
     },
   );
-
 
   it("observes forwarded Slack image downloads without recording the URL", async () => {
     const observer = createIngressObserver();

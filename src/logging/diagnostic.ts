@@ -2,15 +2,17 @@
 import { monitorEventLoopDelay, performance } from "node:perf_hooks";
 import { resolveCompactionTimeoutMs } from "../agents/embedded-agent-runner/compaction-safety-timeout.js";
 import { resolveActiveEmbeddedRunRecoveryBlocker } from "../agents/embedded-agent-runner/run-state.js";
+import {
+  createUnknownDiagnosticIngressSnapshot,
+  getDiagnosticIngressSnapshot,
+  resetDiagnosticIngressSnapshotProviderForTest,
+} from "../channels/message/ingress-diagnostic-registry.js";
 import { getRuntimeConfig } from "../config/config.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
   areDiagnosticsEnabledForProcess,
-  createUnknownDiagnosticIngressSnapshot,
   emitInternalDiagnosticEvent,
-  getDiagnosticIngressSnapshot,
   isDiagnosticsEnabled,
-  resetDiagnosticIngressSnapshotProviderForTest,
   type DiagnosticPhaseSnapshot,
   type DiagnosticLivenessWarningReason,
 } from "../infra/diagnostic-events.js";
@@ -1235,7 +1237,7 @@ export function startDiagnosticHeartbeat(
         emitSample: shouldRecordMemorySample,
       });
     }
-    void emitDiagnosticIngressSnapshot(now);
+    emitDiagnosticIngressSnapshot(now);
 
     if (!shouldRecordMemorySample) {
       return;

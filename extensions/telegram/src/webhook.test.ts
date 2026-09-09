@@ -686,7 +686,7 @@ describe("startTelegramWebhook", () => {
         logWebhookReceived({ channel: "host" });
         await vi.advanceTimersByTimeAsync(30_000);
         await waitForDiagnosticEventsDrained();
-        expect(events.filter((event) => event === "diagnostic.heartbeat")).toHaveLength(1);
+        expect(events.filter((event) => event === "diagnostic.heartbeat")).toHaveLength(2);
       } finally {
         clearRuntimeConfigSnapshot();
         stopDiagnosticHeartbeat();

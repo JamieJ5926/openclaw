@@ -95,7 +95,7 @@ export function observeSlackIngressStage(
   }
   const blocker = params.blocker ?? "none";
   safeCall(() => observer.stage(params.stage, blocker));
-  if (params.progress !== "waiting") {
+  if (params.progress === "meaningful") {
     safeCall(() => observer.progress(params.stage, blocker));
   }
 }
@@ -226,7 +226,7 @@ export function buildSlackIngressCorrelation(params: {
   };
 }
 
-export function normalizeSlackIngressApiMethod(method: string): SlackIngressApiMethod {
+function normalizeSlackIngressApiMethod(method: string): SlackIngressApiMethod {
   switch (method) {
     case "auth.test":
     case "chat.postEphemeral":

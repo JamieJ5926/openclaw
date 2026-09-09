@@ -5,7 +5,6 @@ import os from "node:os";
 import path from "node:path";
 import { App, type Receiver, type ReceiverEvent } from "@slack/bolt";
 import type { WebClientOptions } from "@slack/web-api";
-import { CHANNEL_INGRESS_OBSERVABILITY_METADATA_KEY } from "openclaw/plugin-sdk/channel-ingress-runtime";
 import {
   closeOpenClawStateDatabaseForTest,
   createChannelIngressQueueForTests,
@@ -232,7 +231,7 @@ function readIngressProgressMetadata(record: { metadata?: unknown } | undefined)
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
     return undefined;
   }
-  return (metadata as Record<string, unknown>)[CHANNEL_INGRESS_OBSERVABILITY_METADATA_KEY];
+  return (metadata as Record<string, unknown>).ingressProgress;
 }
 
 async function expectClaimIngressProgress(
