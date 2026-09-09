@@ -4,7 +4,6 @@ export type StartupPresentation = {
   stage: "pending" | "chrome" | "ready";
   placeholderVisible: boolean;
   initialAssistantName?: string;
-  initialSidebarEntries?: readonly string[];
 };
 
 export const READY_STARTUP_PRESENTATION: StartupPresentation = {
@@ -27,7 +26,7 @@ export class StartupPresentationController {
 
   constructor(private readonly publish: (snapshot: StartupPresentation) => void) {}
 
-  start(initialAssistantName?: string, initialSidebarEntries?: readonly string[]) {
+  start(initialAssistantName?: string) {
     this.dispose();
     this.started = true;
     this.retainSkeletons = true;
@@ -38,7 +37,6 @@ export class StartupPresentationController {
       stage: "pending",
       placeholderVisible: false,
       initialAssistantName,
-      initialSidebarEntries: initialSidebarEntries?.slice(),
     });
     this.showAfterDelay();
   }

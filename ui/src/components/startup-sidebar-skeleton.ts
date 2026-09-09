@@ -1,24 +1,9 @@
 import { html, nothing } from "lit";
 import type { StartupPresentation } from "../app/startup-presentation.ts";
 
-function renderSectionHeader(width: number) {
+function renderSessionRow(width: number, avatar: boolean) {
   return html`
-    <div class="sidebar-recent-sessions__head">
-      <div class="sidebar-session-group-toggle">
-        <span class="sidebar-session-group-toggle__lead"></span>
-        <span
-          class="sidebar-recent-sessions__label-text skeleton"
-          style="--startup-bar-width: ${width}px"
-          >${"\u00a0"}</span
-        >
-      </div>
-    </div>
-  `;
-}
-
-function renderSessionRow(width: string, avatar = false, detail = false) {
-  return html`
-    <div class="sidebar-recent-session ${detail ? "" : "sidebar-recent-session--single-line"}">
+    <div class="sidebar-recent-session sidebar-recent-session--single-line">
       <div class="sidebar-recent-session__link">
         <span class="sidebar-session-indicator"
           >${avatar ? html`<span class="nav-item__icon skeleton"></span>` : nothing}</span
@@ -27,11 +12,10 @@ function renderSessionRow(width: string, avatar = false, detail = false) {
           <span class="sidebar-recent-session__title-row">
             <span
               class="sidebar-recent-session__name skeleton"
-              style="--startup-bar-width: ${width}"
+              style="--startup-bar-width: ${width}%"
               >${"\u00a0"}</span
             >
           </span>
-          ${detail ? html`<span class="sidebar-recent-session__details"></span>` : nothing}
         </span>
       </div>
     </div>
@@ -39,7 +23,6 @@ function renderSessionRow(width: string, avatar = false, detail = false) {
 }
 
 export function renderStartupSidebarSkeleton(presentation: StartupPresentation | undefined) {
-  const sidebarEntries = presentation?.initialSidebarEntries ?? [];
   const assistantName = presentation?.initialAssistantName ?? "";
   return html`
     <aside class="sidebar startup-sidebar-skeleton" aria-hidden="true" inert>
@@ -70,40 +53,18 @@ export function renderStartupSidebarSkeleton(presentation: StartupPresentation |
             <div class="sidebar-nav">
               <div class="sidebar-nav__head"></div>
               <div class="nav-section__items">
-                ${["home", ...sidebarEntries].map(
-                  (_, index) => html`
+                ${[44, 84, 88, 56].map(
+                  (width) => html`
                     <div class="nav-item">
                       <span class="nav-item__icon skeleton"></span>
-                      <span
-                        class="nav-item__text skeleton"
-                        style="--startup-bar-width: ${[44, 84, 88, 56][index % 4]}px"
+                      <span class="nav-item__text skeleton" style="--startup-bar-width: ${width}px"
                         >${"\u00a0"}</span
                       >
                     </div>
                   `,
                 )}
-                ${[110, 140].map((width) => html`<div class="sidebar-zone-entry">${renderSessionRow(`${width}px`)}</div>`)}
               </div>
             </div>
-            <section class="sidebar-online">
-              ${renderSectionHeader(52)}
-              <div class="sidebar-online__list">
-                ${[40, 120].map(
-                  (width) => html`
-                    <div class="sidebar-online__row">
-                      <div class="sidebar-online__person">
-                        <span class="viewer-avatar viewer-avatar--footer skeleton"></span>
-                        <span
-                          class="sidebar-online__person-name skeleton"
-                          style="--startup-bar-width: ${width}px"
-                          >${"\u00a0"}</span
-                        >
-                      </div>
-                    </div>
-                  `,
-                )}
-              </div>
-            </section>
             <section class="sidebar-sessions">
               <div class="sidebar-session-toolbar">
                 <span
@@ -116,15 +77,18 @@ export function renderStartupSidebarSkeleton(presentation: StartupPresentation |
               </div>
               <div class="sidebar-recent-sessions">
                 <div class="sidebar-recent-sessions__group">
-                  ${renderSectionHeader(64)}
-                  <div class="sidebar-recent-sessions__list">
-                    ${renderSessionRow("88%", true)} ${renderSessionRow("70%", false, true)}
+                  <div class="sidebar-recent-sessions__head">
+                    <div class="sidebar-session-group-toggle">
+                      <span class="sidebar-session-group-toggle__lead"></span>
+                      <span
+                        class="sidebar-recent-sessions__label-text skeleton"
+                        style="--startup-bar-width: 64px"
+                        >${"\u00a0"}</span
+                      >
+                    </div>
                   </div>
-                </div>
-                <div class="sidebar-recent-sessions__group">
-                  ${renderSectionHeader(40)}
                   <div class="sidebar-recent-sessions__list">
-                    ${[62, 78, 84, 92, 74, 84].map((width, index) => renderSessionRow(`${width}%`, index === 1 || index === 4))}
+                    ${[78, 62, 88, 70, 84, 92, 66, 80].map((width, index) => renderSessionRow(width, index === 1 || index === 5))}
                   </div>
                 </div>
               </div>
@@ -136,14 +100,14 @@ export function renderStartupSidebarSkeleton(presentation: StartupPresentation |
             <div class="sidebar-identity-card">
               <span class="viewer-avatar viewer-avatar--footer skeleton"></span>
               <span class="sidebar-identity-card__text">
-                <span class="sidebar-identity-card__name skeleton" style="--startup-bar-width: 36px"
+                <span class="sidebar-identity-card__name skeleton" style="--startup-bar-width: 72px"
                   >${"\u00a0"}</span
                 >
               </span>
             </div>
             <span class="sidebar-footer-actions">
               <span class="sidebar-brand__icon sidebar-footer-bar__home"
-                ><span class="nav-item__icon skeleton"></span
+                ><span class="sidebar-issues-button__icon skeleton"></span
               ></span>
               <span class="sidebar-issues-button"
                 ><span class="sidebar-issues-button__icon skeleton"></span

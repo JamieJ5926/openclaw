@@ -75,7 +75,7 @@ openclaw-app:has(.shell:not([data-startup-stage="ready"])) {
   flex: 1;
 }
 
-.startup-sidebar-skeleton :is(.nav-item__icon, .sidebar-issues-button__icon) {
+.startup-sidebar-skeleton .nav-item__icon {
   --startup-bar-width: 16px;
   --startup-bar-height: 16px;
 }
@@ -199,12 +199,20 @@ openclaw-app:has(.shell:not([data-startup-stage="ready"])) {
   --startup-bar-radius: var(--radius-full);
 }
 
-.startup-sidebar-skeleton :is(.sidebar-identity-card__name, .sidebar-online__person-name) {
+.startup-sidebar-skeleton .sidebar-identity-card__name {
   flex: 1;
 }
 
-.startup-sidebar-skeleton .sidebar-session-indicator .skeleton {
+.startup-sidebar-skeleton :is(.sidebar-session-indicator, .sidebar-footer-actions) .skeleton {
   border-radius: var(--radius-sm);
+}
+
+.startup-sidebar-skeleton .sidebar-issues-button__icon {
+  --startup-bar-height: 18px;
+}
+
+.startup-sidebar-skeleton .sidebar-identity-card .viewer-avatar {
+  border: 0;
 }
 
 /* Paint text-sized bars without changing the canonical row boxes. */
