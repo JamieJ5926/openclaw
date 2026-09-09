@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { fork, type ChildProcess } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
@@ -113,13 +113,26 @@ def run_git(`,
   );
 }
 
-export function renderWindowsJobDiagnostics(source: string): string {
+export function renderWindowsJobDiagnostics(source: string, ownerPath?: string): string {
   const embedded = /^(run_owner ')([\s\S]*?)('\n# End generated CI Git owner\.)$/mu;
   if (embedded.test(source)) {
-    return source.replace(embedded, (_match, prefix: string, body: string, suffix: string) => {
-      const adjusted = renderWindowsJobDiagnostics(body.replaceAll("'\\''", "'"));
-      return prefix + adjusted.replaceAll("'", "'\\''") + suffix;
-    });
+    assert(ownerPath, "Missing copied diagnostic owner path");
+    const invocation = '  exec "$python_command" -I -S -c "$1"';
+    assert.equal(source.split(invocation).length, 2, "Missing platform owner invocation");
+    const rendered = source.replace(
+      embedded,
+      (_match, prefix: string, body: string, suffix: string) => {
+        const adjusted = renderWindowsJobDiagnostics(body.replaceAll("'\\''", "'"));
+        return prefix + adjusted.replaceAll("'", "'\\''") + suffix;
+      },
+    );
+    const quotedPath = `'${ownerPath.split(path.sep).join("/").replaceAll("'", "'\\''")}'`;
+    // Keep the large source inside Bash; Windows cannot pass it as Python's -c argument.
+    writeFileSync(ownerPath, "", { flag: "wx", mode: 0o600 });
+    return rendered.replace(
+      invocation,
+      `  printf '%s' "$1" > ${quotedPath}\n  exec "$python_command" -I -S ${quotedPath}`,
+    );
   }
   const drain = source.indexOf("def drain(child, job):");
   assert(drain >= 0, "Missing copied drain function");

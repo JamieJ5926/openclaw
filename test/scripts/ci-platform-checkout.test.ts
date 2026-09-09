@@ -116,7 +116,10 @@ it.concurrent.each([
           setupFailure
             ? "printf 'unexpected workflow invocation\\n' >&2\nexit 99\n"
             : process.platform === "win32" && scenario === "timeouts-exhausted"
-              ? renderWindowsJobDiagnostics(accelerated)
+              ? renderWindowsJobDiagnostics(
+                  accelerated,
+                  path.join(root, "windows-git-owner-diagnostic.py"),
+                )
               : accelerated,
         );
         if (process.platform === "win32") {
