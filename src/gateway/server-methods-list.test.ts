@@ -384,7 +384,7 @@ describe("listGatewayMethods", () => {
     expect(methods.indexOf("session.members.listEvidence")).toBe(
       methods.indexOf("diagnostics.lanes") + 1,
     );
-    expect(methods.indexOf("plugins.catalog.browse")).toBe(methods.indexOf("update.runs.list") + 1);
+    expect(methods.indexOf("plugins.catalog.browse")).toBe(methods.indexOf("claws.monitors") + 1);
     expect(methods.indexOf("plugins.catalog.categories")).toBe(
       methods.indexOf("plugins.catalog.browse") + 1,
     );
