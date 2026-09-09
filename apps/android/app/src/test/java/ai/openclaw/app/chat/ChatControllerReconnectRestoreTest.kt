@@ -4,6 +4,7 @@ import ai.openclaw.app.gateway.GatewayRequestNotEnqueued
 import ai.openclaw.app.gateway.GatewayRequestOutcomeUnknown
 import ai.openclaw.app.gateway.GatewayRequestRejected
 import ai.openclaw.app.gateway.GatewaySession
+import ai.openclaw.app.gateway.syntheticGatewayRequestLease
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -1478,7 +1479,7 @@ class ChatControllerReconnectRestoreTest {
           cacheScope = { gatewayScope },
           captureRequestLease = { capturedScope ->
             val connection = physicalConnection
-            GatewaySession.RequestLease(
+            syntheticGatewayRequestLease(
               endpointStableId = requireNotNull(capturedScope).gatewayId,
               isCurrentImpl = { physicalConnection == connection },
             ) { method, params, _, withEnqueue ->

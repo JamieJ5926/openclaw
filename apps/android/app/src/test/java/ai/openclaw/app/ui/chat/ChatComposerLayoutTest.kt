@@ -20,6 +20,7 @@ import ai.openclaw.app.closeNodeRuntimeTestFixture
 import ai.openclaw.app.gateway.GatewayRegistryEntry
 import ai.openclaw.app.gateway.GatewayRegistryEntryKind
 import ai.openclaw.app.gateway.GatewaySession
+import ai.openclaw.app.gateway.syntheticGatewayRequestLease
 import ai.openclaw.app.i18n.NativeStringResources
 import ai.openclaw.app.i18n.nativeString
 import ai.openclaw.app.ui.FoldAwareContent
@@ -1771,7 +1772,7 @@ class ChatComposerLayoutTest {
     }
     val leased: (ChatCacheScope?) -> GatewaySession.RequestLease? = { gatewayScope ->
       capture(gatewayScope)?.let { lease ->
-        GatewaySession.RequestLease(
+        syntheticGatewayRequestLease(
           lease.endpointStableId,
           isCurrentImpl = lease::isCurrent,
           commitIfCurrentImpl = lease::commitIfCurrent,
@@ -2897,7 +2898,7 @@ class ChatComposerLayoutTest {
     val original = field.get(controller) as (ChatCacheScope?) -> GatewaySession.RequestLease?
     val capture: (ChatCacheScope?) -> GatewaySession.RequestLease? = { scope ->
       original(scope)?.let { lease ->
-        GatewaySession.RequestLease(
+        syntheticGatewayRequestLease(
           endpointStableId = lease.endpointStableId,
           isCurrentImpl = lease::isCurrent,
           commitIfCurrentImpl = lease::commitIfCurrent,
@@ -3540,7 +3541,7 @@ class ChatComposerLayoutTest {
     val originalRequest = requestField.get(controller) as (ChatCacheScope?) -> GatewaySession.RequestLease?
     val request: (ChatCacheScope?) -> GatewaySession.RequestLease? = { scope ->
       originalRequest(scope)?.let { lease ->
-        GatewaySession.RequestLease(
+        syntheticGatewayRequestLease(
           endpointStableId = lease.endpointStableId,
           isCurrentImpl = lease::isCurrent,
           commitIfCurrentImpl = lease::commitIfCurrent,
@@ -4146,7 +4147,7 @@ class ChatComposerLayoutTest {
     val captureLease = leaseField.get(controller) as (ChatCacheScope?) -> GatewaySession.RequestLease?
     val progressLease: (ChatCacheScope?) -> GatewaySession.RequestLease? = { gatewayScope ->
       captureLease(gatewayScope)?.let { lease ->
-        GatewaySession.RequestLease(
+        syntheticGatewayRequestLease(
           endpointStableId = lease.endpointStableId,
           isCurrentImpl = lease::isCurrent,
           commitIfCurrentImpl = lease::commitIfCurrent,
@@ -4399,7 +4400,7 @@ class ChatComposerLayoutTest {
     }
     val captureLease: (ChatCacheScope?) -> GatewaySession.RequestLease? = { scope ->
       originalLease(scope)?.let { lease ->
-        GatewaySession.RequestLease(
+        syntheticGatewayRequestLease(
           endpointStableId = lease.endpointStableId,
           isCurrentImpl = lease::isCurrent,
           commitIfCurrentImpl = lease::commitIfCurrent,
