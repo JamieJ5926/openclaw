@@ -438,13 +438,11 @@ describeControlUiE2e("Control UI Plugins mocked Gateway E2E", () => {
       expect(
         await page.getByText("Connect OpenClaw to Matrix rooms and direct messages.").count(),
       ).toBe(1);
-      const detailTabs = page.getByRole("tablist", { name: "Plugin details" });
-      expect(await detailTabs.getByRole("tab", { name: "README" }).count()).toBe(1);
-      expect(await detailTabs.getByRole("tab", { name: "Skills" }).count()).toBe(1);
-      expect(await detailTabs.getByRole("tab", { name: "Configuration" }).count()).toBe(1);
-      expect(await detailTabs.getByRole("tab", { name: "Compatibility" }).count()).toBe(1);
-      expect(await detailTabs.getByRole("tab", { name: "Versions" }).count()).toBe(1);
-      expect(await detailTabs.getByRole("tab", { name: "Advanced" }).count()).toBe(1);
+      const detailTabs = page.locator('wa-tab-group[aria-label="Plugin details"]');
+      await detailTabs.waitFor();
+      expect(
+        (await detailTabs.locator("wa-tab").allTextContents()).map((text) => text.trim()),
+      ).toEqual(["README", "Skills", "Configuration", "Compatibility", "Versions", "Advanced"]);
       expect(await page.getByText("52.2k", { exact: true }).count()).toBe(1);
       expect(await page.getByText("Capabilities match the stated purpose.").count()).toBe(1);
       expect(

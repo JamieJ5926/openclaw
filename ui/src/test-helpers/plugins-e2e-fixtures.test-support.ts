@@ -13,7 +13,7 @@ function inventory(plugins: PluginCatalogItem[]): PluginListResult {
   return { plugins, diagnostics: [], mutationAllowed: true };
 }
 
-export const workboardDisabled = {
+const workboardDisabled = {
   id: "workboard",
   name: "Workboard",
   packageName: "@openclaw/workboard",
@@ -30,13 +30,13 @@ export const workboardDisabled = {
   removable: false,
 } satisfies PluginCatalogItem;
 
-export const workboardEnabled = {
+const workboardEnabled = {
   ...workboardDisabled,
   enabled: true,
   state: "enabled",
 } satisfies PluginCatalogItem;
 
-export const lobsterPlugin = {
+const lobsterPlugin = {
   id: "lobster",
   name: "Lobster",
   description: "Run typed workflows with resumable approvals.",
@@ -50,7 +50,7 @@ export const lobsterPlugin = {
   install: { source: "clawhub", packageName: "@openclaw/lobster" },
 } satisfies PluginCatalogItem;
 
-export const remoteIconPlugin = {
+const remoteIconPlugin = {
   id: "remote-icon",
   name: "FireCrawl",
   description: "Web extraction and crawling.",
@@ -65,7 +65,7 @@ export const remoteIconPlugin = {
   install: { source: "clawhub", packageName: "@openclaw/firecrawl" },
 } satisfies PluginCatalogItem;
 
-export const calendarPlugin = {
+const calendarPlugin = {
   id: "calendar-plus",
   name: "Calendar Plus",
   packageName: "calendar-plus",
@@ -80,7 +80,7 @@ export const calendarPlugin = {
   removable: true,
 } satisfies PluginCatalogItem;
 
-export const telegramPlugin = {
+const telegramPlugin = {
   id: "telegram",
   name: "Telegram",
   packageName: "@openclaw/telegram",
