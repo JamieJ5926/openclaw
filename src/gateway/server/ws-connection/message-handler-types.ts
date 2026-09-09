@@ -1,5 +1,4 @@
 import type { IncomingMessage } from "node:http";
-import type { WebSocket } from "ws";
 import type {
   ConnectParams,
   RequestFrame,
@@ -19,6 +18,10 @@ import type { PluginNodeCapabilitySurface } from "../../plugin-node-capability.j
 import type { GatewayRole } from "../../role-policy.js";
 import type { GatewayConnectionWork } from "../../server-connection-work.js";
 import type { GatewayRequestContext, GatewayRequestHandlers } from "../../server-methods/types.js";
+import type {
+  GatewayConnectionTransport,
+  PrepareGatewayAuthenticatedReceive,
+} from "../connection-transport.js";
 import type { GatewayWsBrowserOrigin, GatewayWsClient, WsHandshakePhase } from "../ws-types.js";
 import type { ControlUiPairingKind } from "./connect-policy.js";
 import type { resolvePairingLocality } from "./handshake-auth-helpers.js";
@@ -34,7 +37,8 @@ export type WsOriginCheckMetrics = {
 type WsSendResult = { kind: "sent" | "unavailable" } | { kind: "serialization"; error: unknown };
 
 export type GatewayWsMessageHandlerParams = {
-  socket: WebSocket;
+  socket: GatewayConnectionTransport;
+  prepareAuthenticatedReceive: PrepareGatewayAuthenticatedReceive;
   connectionWork: GatewayConnectionWork;
   upgradeReq: IncomingMessage;
   ingressAttribution: GatewayAttributedIngress;
