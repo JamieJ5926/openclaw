@@ -93,9 +93,13 @@ env:
   OCM_VERSION: v0.2.33
   OCM_LINUX_X64_SHA256: 06b0e46791e750eb044e4a898b6643ad5e7b20224fe0c64f160e35a42f08d00a
   KOVA_REPOSITORY: openclaw/Kova
-  KOVA_CANONICAL_CONFIG_REF: 065d2ffd535f12fd0f3a15c412a08a456f580260
-  KOVA_LEGACY_LIST_CONFIG_REF: 065d2ffd535f12fd0f3a15c412a08a456f580260
-  KOVA_TRUSTED_LIVE_REF: 065d2ffd535f12fd0f3a15c412a08a456f580260
+  KOVA_CANONICAL_CONFIG_REF: cf6e26f0ca1241c9e7a626e96e66f392ff58012d
+  KOVA_LEGACY_LIST_CONFIG_REF: cf6e26f0ca1241c9e7a626e96e66f392ff58012d
+  KOVA_TRUSTED_LIVE_REF: cf6e26f0ca1241c9e7a626e96e66f392ff58012d
+  # Reviewed cross-user evaluator for secretless external runs.
+  KOVA_ISOLATED_REF: da14529c14f0e485fead894c322ae593964e56cf
+  PERFORMANCE_OCM_COMMIT: 46496ba70f20cabf5a0b96fb88bc26e77567126f
+  PERFORMANCE_OCM_RUST_TOOLCHAIN: 1.95.0
   OPENCLAW_CANONICAL_CONFIG_SINCE: edecdbd05efc98c4f580309ac89e8459462f00c9
   CRABBOX_COMMIT: 8ba71f913bbe57285ae29af45ef0d8ec6712477d
   CRABBOX_VERSION: 0.46.0+8ba71f913bbe
@@ -131,6 +135,7 @@ jobs:
           KOVA_REF_INPUT: ${{ inputs.kova_ref }}
           KOVA_CONFIG_CONTRACT_INPUT: ${{ inputs.kova_config_contract }}
           WORKFLOW_SHA: ${{ github.workflow_sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         shell: bash
         run: |
           set -euo pipefail
@@ -275,8 +280,10 @@ jobs:
           NODE
             )"
             if [[ "$(jq -r '.calibrated' <<<"$metadata")" == true ]]; then
-              # Kova #116 carries the historical status CLI calibration for this release only.
-              kova_ref="70ea2c5a3bdd206937b4a0bd7460a19a69d8c52a"
+              # Kova #116 carries the historical 250% status CLI calibration for this release only;
+              # Kova #118 keeps process-census time out of CPU scan uncertainty;
+              # Kova #119 discovers a starting gateway before its zero baseline is lost.
+              kova_ref="cf6e26f0ca1241c9e7a626e96e66f392ff58012d"
             fi
             detected_contract="$(jq -r '.contract' <<<"$metadata")"
             default_kova_ref=""
@@ -296,6 +303,12 @@ jobs:
             esac
             kova_ref="${kova_ref:-$default_kova_ref}"
             kova_config_contract="${kova_config_contract:-$detected_contract}"
+          fi
+          if [[ -z "${KOVA_REF_INPUT:-}" &&
+            ( "$GITHUB_REF" != "refs/heads/${DEFAULT_BRANCH}" || "$resolved_sha" != "$WORKFLOW_SHA" ) ]]; then
+            [[ "$KOVA_ISOLATED_REF" =~ ^[0-9a-f]{40}$ ]] ||
+              { echo "::error::The reviewed cross-user Kova dependency is not pinned."; exit 1; }
+            kova_ref="$KOVA_ISOLATED_REF"
           fi
           encoded_kova_ref="$(jq -rn --arg value "$kova_ref" '$value | @uri')"
           kova_sha="$(gh api "repos/${KOVA_REPOSITORY}/commits/${encoded_kova_ref}" --jq .sha)"
@@ -1260,6 +1273,31 @@ jobs:
           [[ "$(git -C "$src" rev-parse HEAD)" == "$CRABBOX_COMMIT" ]]
           echo "CRABBOX_SOURCE=$src" >> "$GITHUB_ENV"
 
+      - name: Build reviewed OCM for the isolated SUT
+        if: steps.lane.outputs.run == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(uname -s):$(uname -m)" == Linux:x86_64 ]]
+          [[ "$PERFORMANCE_OCM_COMMIT" =~ ^[0-9a-f]{40}$ &&
+            "$KOVA_ISOLATED_REF" =~ ^[0-9a-f]{40}$ &&
+            "$PERFORMANCE_OCM_RUST_TOOLCHAIN" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+            { echo "::error::Reviewed OCM/Kova commits and a lock-compatible Rust toolchain are required."; exit 1; }
+          source="$PWD/.artifacts/performance-ocm-source"
+          [[ ! -e "$source" && ! -L "$source" ]]
+          git init -b main "$source"
+          git -C "$source" remote add origin https://github.com/openclaw/ocm.git
+          git -C "$source" fetch --depth=1 origin "$PERFORMANCE_OCM_COMMIT"
+          git -C "$source" checkout --detach FETCH_HEAD
+          [[ "$(git -C "$source" rev-parse HEAD)" == "$PERFORMANCE_OCM_COMMIT" ]]
+          rustup toolchain install "$PERFORMANCE_OCM_RUST_TOOLCHAIN" --profile minimal
+          cargo "+$PERFORMANCE_OCM_RUST_TOOLCHAIN" build --locked --release --manifest-path "$source/Cargo.toml"
+          payload="$PWD/.github/crabbox/performance-control"
+          mkdir -p "$payload"
+          install -m 0755 "$source/target/release/ocm" "$payload/ocm"
+          "$payload/ocm" env artifact export --help >/dev/null
+          (cd "$payload" && sha256sum ocm > ocm.sha256)
+
       - name: Bundle trusted performance helpers
         if: steps.lane.outputs.run == 'true'
         shell: bash
@@ -1418,7 +1456,7 @@ jobs:
           args=("${common_args[@]}" --script scripts/openclaw-performance-crabbox.sh)
           set +e
           require_instrumented=false
-          if [[ "$KOVA_SHA" == "$KOVA_CANONICAL_CONFIG_REF" || "$KOVA_SHA" == "$KOVA_LEGACY_LIST_CONFIG_REF" ]]; then
+          if [[ "$KOVA_SHA" == "$KOVA_ISOLATED_REF" ]]; then
             require_instrumented=true
           fi
           "$crabbox" "${args[@]}" -- remote \
@@ -1426,7 +1464,7 @@ jobs:
             "$PROFILE" "$repeat" "$KOVA_CONFIG_CONTRACT" "${{ matrix.include_filters }}" \
             "${{ matrix.expected_release_entries }}" "${{ inputs.fail_on_regression || 'false' }}" \
             "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$CRABBOX_VERSION" \
-            "$PERFORMANCE_MODEL_ID" "$require_instrumented" \
+            "$PERFORMANCE_MODEL_ID" "$require_instrumented" "$KOVA_ISOLATED_REF" \
             2>&1 | tee "$timing_log"
           status=${PIPESTATUS[0]}
           command_status="$status"

@@ -2,11 +2,11 @@
 set -euo pipefail
 
 readonly SUT_USER="openclaw-sut"
+readonly RUNNER_USER="openclaw-bench"
 readonly NODE_VERSION="24.19.0"
 readonly NODE_SHA256="14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647"
 readonly PNPM_VERSION="11.15.1"
-readonly OCM_VERSION="v0.2.32"
-readonly OCM_SHA256="5b20c21b2825f69b89eb37baa657f0f0062124517e6e6828e9857c7e9bbd3070"
+readonly OCM_BINARY="/opt/openclaw-performance/ocm"
 readonly CRABBOX_COMMIT="8ba71f913bbe57285ae29af45ef0d8ec6712477d"
 readonly MAX_ARTIFACT_FILES=256
 readonly MAX_ARTIFACT_BYTES=250000000
@@ -61,12 +61,12 @@ file_sha256() {
 as_sut() {
   local uid
   uid="$(id -u "$SUT_USER")"
-  runuser -u "$SUT_USER" -- env -i \
+  runuser -u "$SUT_USER" -- /usr/bin/env -C "/home/${SUT_USER}" -i \
     HOME="/home/${SUT_USER}" \
     XDG_CACHE_HOME="/home/${SUT_USER}/.cache" \
     XDG_RUNTIME_DIR="/run/user/${uid}" \
     DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" \
-    PATH="/opt/node-v${NODE_VERSION}/bin:/opt/ocm-${OCM_VERSION}:/usr/local/bin:/usr/bin:/bin:/home/${SUT_USER}/.local/bin" \
+    PATH="/home/${SUT_USER}/.local/node_modules/.bin:/opt/node-v${NODE_VERSION}/bin:/opt/openclaw-performance:/usr/bin:/bin" \
     GIT_CONFIG_GLOBAL=/dev/null \
     GIT_CONFIG_SYSTEM=/dev/null \
     GIT_TERMINAL_PROMPT=0 \
@@ -76,16 +76,50 @@ as_sut() {
     "$@"
 }
 
+as_runner() {
+  runuser -u "$RUNNER_USER" -- /usr/bin/env -C "/home/${RUNNER_USER}" -i \
+    HOME="/home/${RUNNER_USER}" \
+    XDG_CACHE_HOME="/home/${RUNNER_USER}/.cache" \
+    PATH="/opt/node-v${NODE_VERSION}/bin:/usr/bin:/bin" \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_TERMINAL_PROMPT=0 CI=1 \
+    "$@"
+}
+
+candidate_environment() {
+  printf '%s\n' \
+    "HOME=/home/${SUT_USER}" \
+    "XDG_CACHE_HOME=/home/${SUT_USER}/.cache" \
+    "XDG_RUNTIME_DIR=/run/user/$(id -u "$SUT_USER")" \
+    "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u "$SUT_USER")/bus" \
+    "PATH=/home/${SUT_USER}/.local/node_modules/.bin:/opt/node-v${NODE_VERSION}/bin:/opt/openclaw-performance:/usr/bin:/bin" \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_TERMINAL_PROMPT=0 \
+    CI=1 OPENCLAW_SKIP_CHANNELS=1 OPENCLAW_SKIP_CRON=1
+}
+
+as_candidate() {
+  local entry env_args=()
+  while IFS= read -r entry; do env_args+=("$entry"); done < <(candidate_environment)
+  /usr/bin/sudo -n -u "$SUT_USER" -- /usr/bin/env -C "/home/${SUT_USER}" -i "${env_args[@]}" "$@"
+}
+
+candidate_transport() {
+  candidate_environment | jq -Rn --arg binary "$1" --arg user "$SUT_USER" '
+    [inputs | capture("^(?<key>[^=]+)=(?<value>.*)$")] | from_entries |
+    {prefix:["/usr/bin/sudo","-n","-u",$user,"--"],binary:$binary,env:.,cwd:.HOME}'
+}
+
 clone_exact() {
-  local repository="$1" sha="$2" destination="$3"
-  install -d -m 0755 -o "$SUT_USER" -g "$SUT_USER" "$destination"
-  as_sut git -C "$destination" init -b main
-  as_sut git -C "$destination" remote add origin "https://github.com/${repository}.git"
-  as_sut git -C "$destination" fetch --filter=blob:none --depth=1 origin "$sha"
-  as_sut git -C "$destination" checkout --detach FETCH_HEAD
-  [[ "$(as_sut git -C "$destination" rev-parse HEAD)" == "$sha" ]] ||
+  local repository="$1" sha="$2" destination="$3" owner="$4"
+  local executor=as_sut
+  [[ "$owner" != "$RUNNER_USER" ]] || executor=as_runner
+  install -d -m 0700 -o "$owner" -g "$owner" "$destination"
+  "$executor" /usr/bin/git -C "$destination" init -b main
+  "$executor" /usr/bin/git -C "$destination" remote add origin "https://github.com/${repository}.git"
+  "$executor" /usr/bin/git -C "$destination" fetch --filter=blob:none --depth=1 origin "$sha"
+  "$executor" /usr/bin/git -C "$destination" checkout --detach FETCH_HEAD
+  [[ "$("$executor" /usr/bin/git -C "$destination" rev-parse HEAD)" == "$sha" ]] ||
     die "${repository} checkout drifted"
-  [[ "$(as_sut git -C "$destination" remote get-url origin)" == "https://github.com/${repository}.git" ]] ||
+  [[ "$("$executor" /usr/bin/git -C "$destination" remote get-url origin)" == "https://github.com/${repository}.git" ]] ||
     die "${repository} origin changed"
 }
 
@@ -104,41 +138,24 @@ install_toolchain() {
   tar -xJf "$node_archive" -C "$node_root" --strip-components=1
   [[ "$("$node_root/bin/node" --version)" == "v${NODE_VERSION}" ]] || die "Node version mismatch"
 
-  local ocm_root="/opt/ocm-${OCM_VERSION}" ocm_archive="/tmp/ocm.tar.gz"
-  curl -fsSL --proto '=https' --tlsv1.2 --max-time 180 \
-    "https://github.com/shakkernerd/ocm/releases/download/${OCM_VERSION}/ocm-x86_64-unknown-linux-gnu.tar.gz" \
-    -o "$ocm_archive"
-  echo "${OCM_SHA256}  ${ocm_archive}" | sha256sum -c -
-  rm -rf "$ocm_root"
-  mkdir -p "$ocm_root"
-  tar -xzf "$ocm_archive" -C "$ocm_root"
-  chmod 0755 "$ocm_root/ocm"
+  local payload="$PWD/.github/crabbox/performance-control"
+  [[ -f "$payload/ocm" && ! -L "$payload/ocm" ]] || die "trusted OCM build is missing"
+  (cd "$payload" && sha256sum -c ocm.sha256)
+  install -D -o root -g root -m 0755 "$payload/ocm" "$OCM_BINARY"
+  "$OCM_BINARY" env artifact export --help >/dev/null ||
+    die "OCM build does not support bounded artifact export"
 }
 
-prepare_sut() {
-  ! id "$SUT_USER" >/dev/null 2>&1 || die "dedicated lease already has ${SUT_USER}"
-  useradd --create-home --shell /bin/bash --user-group "$SUT_USER"
-  local uid
-  uid="$(id -u "$SUT_USER")"
-
-  install -d -m 0700 -o "$SUT_USER" -g "$SUT_USER" "/home/${SUT_USER}/.cache"
-  [[ -z "$(find "/home/${SUT_USER}/.cache" -mindepth 1 -print -quit)" ]] ||
-    die "SUT cache is not empty"
-  for credential_path in .aws .config/gh .gitconfig .npmrc; do
-    [[ ! -e "/home/${SUT_USER}/${credential_path}" ]] ||
-      die "SUT home unexpectedly contains ${credential_path}"
-  done
-  if as_sut sudo -n true >/dev/null 2>&1; then
-    die "SUT unexpectedly has sudo"
-  fi
-
+prepare_metadata_denial() {
+  local user="$1" executor="$2" uid
+  uid="$(id -u "$user")"
   local firewall destination curl_bin curl_version family url http_code probe_status
   for firewall in iptables ip6tables; do
     command -v "$firewall" >/dev/null || die "metadata protection requires ${firewall}"
   done
   curl_bin="$(command -v curl)" || die "metadata protection requires curl"
   [[ "$curl_bin" == /* && -x "$curl_bin" ]] || die "metadata curl is not an executable path"
-  curl_version="$(as_sut "$curl_bin" -q --version)" || die "metadata curl is unavailable to SUT"
+  curl_version="$("$executor" "$curl_bin" -q --version)" || die "metadata curl is unavailable to $user"
   grep -Eq '^Protocols:.*[[:space:]]http([[:space:]]|$)' <<< "$curl_version" &&
     grep -Eq '^Features:.*[[:space:]]IPv6([[:space:]]|$)' <<< "$curl_version" ||
     die "metadata curl requires HTTP and IPv6 support"
@@ -158,15 +175,34 @@ prepare_sut() {
     # Preserve trailing bytes: only an exact curl 000 with connection failure is evidence.
     http_code="$(
       status=0
-      as_sut "$curl_bin" -q "-${family}" --noproxy '*' --silent \
+      "$executor" "$curl_bin" -q "-${family}" --noproxy '*' --silent \
         --connect-timeout 1 --max-time 2 --output /dev/null --write-out '%{http_code}' \
         "$url" 2>/dev/null || status=$?
       printf '.'
       exit "$status"
     )" || probe_status=$?
     [[ "$probe_status" == 7 && "$http_code" == "000." ]] ||
-      die "SUT IPv${family} metadata denial was not verified"
+      die "$user IPv${family} metadata denial was not verified"
   done
+}
+
+prepare_sut() {
+  ! id "$SUT_USER" >/dev/null 2>&1 || die "dedicated lease already has ${SUT_USER}"
+  useradd --create-home --shell /bin/bash --user-group "$SUT_USER"
+  local uid
+  uid="$(id -u "$SUT_USER")"
+
+  install -d -m 0700 -o "$SUT_USER" -g "$SUT_USER" "/home/${SUT_USER}/.cache"
+  [[ -z "$(find "/home/${SUT_USER}/.cache" -mindepth 1 -print -quit)" ]] ||
+    die "SUT cache is not empty"
+  for credential_path in .aws .config/gh .gitconfig .npmrc; do
+    [[ ! -e "/home/${SUT_USER}/${credential_path}" ]] ||
+      die "SUT home unexpectedly contains ${credential_path}"
+  done
+  if as_sut sudo -n true >/dev/null 2>&1; then
+    die "SUT unexpectedly has sudo"
+  fi
+  prepare_metadata_denial "$SUT_USER" as_sut
 
   local dirty_env
   dirty_env="$(as_sut env | grep -E '^(ACTIONS_|AWS_|CRABBOX_|GITHUB_|RUNNER_)' || true)"
@@ -177,32 +213,58 @@ prepare_sut() {
   [[ -S "/run/user/${uid}/systemd/private" ]] || die "SUT systemd user session is unavailable"
 }
 
+prepare_runner() {
+  ! id "$RUNNER_USER" >/dev/null 2>&1 || die "dedicated lease already has ${RUNNER_USER}"
+  useradd --create-home --shell /bin/bash --user-group "$RUNNER_USER"
+  chmod 0700 "/home/${RUNNER_USER}" "/home/${SUT_USER}"
+  install -d -m 0700 -o "$RUNNER_USER" -g "$RUNNER_USER" \
+    "/home/${RUNNER_USER}/.cache" "/home/${RUNNER_USER}/results"
+  prepare_metadata_denial "$RUNNER_USER" as_runner
+  # The trusted runner can become only B. Neither benchmark identity can become root.
+  printf 'Defaults:%s !use_pty\n%s ALL=(%s) NOPASSWD: /usr/bin/env\n' \
+    "$RUNNER_USER" "$RUNNER_USER" "$SUT_USER" > /etc/sudoers.d/openclaw-performance
+  chmod 0440 /etc/sudoers.d/openclaw-performance
+  visudo -cf /etc/sudoers.d/openclaw-performance
+  if as_runner sudo -n -u root /usr/bin/env -i /usr/bin/true >/dev/null 2>&1; then
+    die "runner unexpectedly has root authority"
+  fi
+  [[ "$(as_runner "$0" __candidate-id)" == "$(id -u "$SUT_USER")" ]] ||
+    die "runner cannot select the SUT identity"
+  for path in /home "/home/${RUNNER_USER}" "/home/${RUNNER_USER}/results" \
+    /opt "/opt/node-v${NODE_VERSION}" /usr/local/libexec; do
+    if as_sut test -w "$path"; then die "SUT can replace runner ancestor $path"; fi
+  done
+}
+
+prepare_candidate() {
+  cd "$1/openclaw"
+  npm --prefix "$HOME/.local" install --no-audit --no-fund "pnpm@${PNPM_VERSION}"
+  export PATH="$HOME/.local/node_modules/.bin:$PATH"
+  pnpm install --frozen-lockfile
+}
+
 run_sut() {
   local lane="$1" root="$2" profile="$3" repeat="$4" contract="$5"
   local include_filters="$6" expected_entries="$7" fail_on_regression="$8"
-  local helpers="$9" model="${10}" require_instrumented="${11}"
-  local openclaw="$root/openclaw" kova="$root/kova"
-  local report_dir="$openclaw/.artifacts/kova/reports/$lane"
-  local bundle_dir="$openclaw/.artifacts/kova/bundles/$lane"
-  local summary_dir="$openclaw/.artifacts/kova/summaries"
-  cd "$openclaw"
+  local helpers="$9" model="${10}" require_instrumented="${11}" results="${12}"
+  local kova="${13}" admitted="${14}"
+  local openclaw="$root/openclaw"
+  local report_dir="$results/.artifacts/kova/reports/$lane"
+  local bundle_dir="$results/.artifacts/kova/bundles/$lane"
+  local summary_dir="$results/.artifacts/kova/summaries"
 
   if [[ "$lane" == "cleanup-probe" ]]; then
     return 42
   fi
 
-  npm --prefix "$HOME/.local" install --no-audit --no-fund "pnpm@${PNPM_VERSION}"
-  export PATH="$HOME/.local/node_modules/.bin:$PATH"
-  pnpm install --frozen-lockfile
-
   if [[ "$lane" == "source" ]]; then
+    cd "$openclaw"
     local source_dir="$openclaw/.artifacts/openclaw-performance/source/mock-provider"
     mkdir -p "$source_dir/mock-hello"
     if ! node -e "const fs=require('node:fs'); const scripts=require('./package.json').scripts||{}; const extensionProbe=['scripts/profile-extension-memory.mts','scripts/profile-extension-memory.mjs'].some((entry)=>fs.existsSync(entry)); process.exit(scripts['test:gateway:cpu-scenarios'] && scripts['test:extensions:memory'] && scripts.openclaw && fs.existsSync('openclaw.mjs') && extensionProbe ? 0 : 1)"; then
-      printf '# OpenClaw Source Performance\n\nSource probes skipped: required probe entry points are unavailable in this tested ref.\n' > "$source_dir/index.md"
+      printf 'Source probes skipped: required probe entry points are unavailable in this tested ref.\n'
       return
     fi
-    build_source_performance
     local supported_startup_cases startup_case
     local startup_case_args=()
     supported_startup_cases="$(
@@ -226,36 +288,68 @@ run_sut() {
       pnpm openclaw qa suite --provider-mode mock-openai --model "mock-openai/$model" \
         --concurrency 1 --output-dir "$run_dir" --scenario channel-chat-baseline
     done
-    source_cli_probes "$openclaw" "$source_dir" "$repeat" "$helpers"
     if node -e "const fs=require('node:fs'); const scripts=require('./package.json').scripts||{}; process.exit(scripts['test:sqlite:perf:smoke'] && fs.existsSync('scripts/bench-sqlite-state.ts') ? 0 : 1)"; then
       pnpm test:sqlite:perf:smoke
       cp .artifacts/sqlite-perf/smoke.json "$source_dir/sqlite-perf-smoke.json"
     else
       echo "SQLite state smoke probe is unavailable in this tested ref; continuing with the remaining source probes."
     fi
-    node "$helpers/openclaw-performance-source-summary.mjs" \
-      --source-dir "$source_dir" --output "$source_dir/index.md"
     return
   fi
 
+  cd "$results"
   npm --prefix "$kova" ci --ignore-scripts --no-audit --no-fund
-  mkdir -p "$HOME/.local/bin" "$report_dir" "$bundle_dir" "$summary_dir"
-  cat > "$HOME/.local/bin/kova" <<EOF
-#!/usr/bin/env bash
-export KOVA_HOME="/home/${SUT_USER}/.kova"
-exec node "$kova/bin/kova.mjs" "\$@"
-EOF
-  chmod 0755 "$HOME/.local/bin/kova"
+  export KOVA_HOME="$HOME/.kova"
+  kova() { node "$kova/bin/kova.mjs" "$@"; }
+  if [[ "$admitted" == true ]]; then
+    export KOVA_OCM_TRANSPORT_JSON
+    KOVA_OCM_TRANSPORT_JSON="$(candidate_transport "$OCM_BINARY")"
+  fi
+  mkdir -p "$report_dir" "$bundle_dir" "$summary_dir"
 
-  build_source_performance
   local timeout_ms=300000
   [[ "$profile" == release ]] && timeout_ms=900000
-  local plan_json="$openclaw/.artifacts/kova/plans/$lane.json"
+  local plan_json="$results/.artifacts/kova/plans/$lane.json"
   mkdir -p "$(dirname "$plan_json")"
   kova matrix plan \
     --profile "$profile" --target "local-build:$openclaw" --include "$include_filters" \
     --parallel 1 --repeat "$repeat" --json > "$plan_json"
-  node --input-type=module - "$plan_json" "$profile" "$include_filters" "$expected_entries" <<'NODE'
+  [[ "$admitted" != true ]] || validate_plan "$plan_json" "$profile" "$include_filters" "$expected_entries"
+  local args=(
+    matrix run --profile "$profile" --target "local-build:$openclaw" --include "$include_filters"
+    --parallel 1 --repeat "$repeat" --auth mock --timeout-ms "$timeout_ms"
+    --report-dir "$report_dir" --execute --json
+  )
+  [[ "$lane" != "mock-deep-profile" ]] || args+=(--deep-profile)
+  [[ "$fail_on_regression" != true || "$admitted" != true ]] || args+=(--gate)
+  local status=0 bundle_status=0
+  KOVA_OPENCLAW_CONFIG_CONTRACT="$contract" KOVA_SCENARIO_TIMEOUT_MS="$timeout_ms" \
+    kova "${args[@]}" > "$report_dir/$lane.log" 2>&1 || status=$?
+  local report
+  if [[ "$admitted" == true ]]; then
+    report="$(node "$helpers/lib/kova-report-selector.mjs" --report-dir "$report_dir")"
+  else
+    # Custom Kova and its selection are diagnostics, never the trusted evaluator.
+    local candidate reports=()
+    for candidate in "$report_dir"/*.json; do
+      [[ "$candidate" == *.summary.json ]] || reports+=("$candidate")
+    done
+    ((${#reports[@]} == 1)) || die "custom Kova must emit one diagnostic report"
+    report="${reports[0]}"
+  fi
+  kova report bundle "$report" \
+    --output-dir "$bundle_dir" --json > "$bundle_dir/bundle.json" || bundle_status=$?
+  ((bundle_status == 0)) || return "$bundle_status"
+  if [[ "$admitted" == true ]]; then
+    # Only A can attest a completed matrix phase after setup and bundling succeeded.
+    printf '%s\n' "$status" > "$results/.artifacts/kova/$lane-matrix-exit"
+    return 0
+  fi
+  return "$status"
+}
+
+validate_plan() {
+  node --input-type=module - "$@" <<'NODE'
 import fs from "node:fs";
 const [file, profile, include, expected] = process.argv.slice(2);
 const plan = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -279,20 +373,17 @@ if (profile === "release") {
   }
 }
 NODE
-  local args=(
-    matrix run --profile "$profile" --target "local-build:$openclaw" --include "$include_filters"
-    --parallel 1 --repeat "$repeat" --auth mock --timeout-ms "$timeout_ms"
-    --report-dir "$report_dir" --execute --json
-  )
-  [[ "$lane" != "mock-deep-profile" ]] || args+=(--deep-profile)
-  [[ "$fail_on_regression" != true ]] || args+=(--gate)
-  set +e
-  KOVA_OPENCLAW_CONFIG_CONTRACT="$contract" KOVA_SCENARIO_TIMEOUT_MS="$timeout_ms" \
-    kova "${args[@]}" \
-      2>&1 | tee "$report_dir/$lane.log"
-  local status=${PIPESTATUS[0]}
-  set -e
+}
 
+validate_kova() {
+  local lane="$1" root="$2" profile="$3" repeat="$4" include_filters="$5" expected_entries="$6"
+  local fail_on_regression="$7" helpers="$8" model="$9" require_instrumented="${10}"
+  local results="${11}" status="${12}" admitted="${13}"
+  local report_dir="$results/.artifacts/kova/reports/$lane"
+  local bundle_dir="$results/.artifacts/kova/bundles/$lane"
+  local summary_dir="$results/.artifacts/kova/summaries"
+  local plan_json="$results/.artifacts/kova/plans/$lane.json" openclaw="$root/openclaw"
+  validate_plan "$plan_json" "$profile" "$include_filters" "$expected_entries"
   local report
   report="$(node "$helpers/lib/kova-report-selector.mjs" --report-dir "$report_dir")"
   local evidence_status=0 bundle_status=0 summary_status=0 effective_status="$status"
@@ -300,14 +391,13 @@ NODE
     --plan "$plan_json" --report "$report" --profile "$profile" \
     --target "local-build:$openclaw" --repeat "$repeat" --include "$include_filters" \
     --auth mock --model "$model" || evidence_status=$?
-  if [[ "$evidence_status" == 0 && "$fail_on_regression" == true && "$status" != 0 ]]; then
+  if [[ "$admitted" == true && "$evidence_status" == 0 && "$fail_on_regression" == true && "$status" != 0 ]]; then
     local gate_args=("$report")
     [[ "$require_instrumented" != true ]] || gate_args+=(--require-instrumented-performance-contract)
     if node "$helpers/lib/kova-report-gate.mjs" "${gate_args[@]}"; then
       effective_status=0
     fi
   fi
-  kova report bundle "$report" --output-dir "$bundle_dir" --json > "$bundle_dir/bundle.json" || bundle_status=$?
   node "$helpers/kova-ci-summary.mjs" --report "$report" \
     --output "$summary_dir/$lane.md" --lane "$lane" || summary_status=$?
   node --input-type=module - "$report" "$status" "$evidence_status" "$bundle_status" "$summary_status" <<'NODE'
@@ -332,6 +422,9 @@ NODE
     die "Kova evidence, bundle, or summary validation failed"
   [[ -s "$bundle_dir/bundle.json" && -s "$summary_dir/$lane.md" ]] ||
     die "Kova bundle or summary evidence is missing"
+  if [[ "$admitted" != true ]]; then
+    [[ "$fail_on_regression" != true ]] || die "custom Kova cannot authorize a performance gate"
+  fi
   [[ "$fail_on_regression" != true ]] || return "$effective_status"
 }
 
@@ -348,16 +441,23 @@ build_source_performance() {
 }
 
 source_cli_probes() (
-  local openclaw="$1" source_dir="$2" repeat="$3" helpers="$4"
+  local openclaw="$1" source_dir="$2" repeat="$3" helpers="$4" supported="$5"
+  [[ "$supported" == true || "$supported" == false ]] || die "invalid CLI capability"
+  mkdir -p "$source_dir"
+  printf '{"supported":%s,"entry":"openclaw.mjs"}\n' "$supported" > "$source_dir/cli-capability.json"
+  if [[ "$supported" == false ]]; then
+    printf '# OpenClaw Source Performance\n\nTrusted CLI measurement unsupported: the pinned target has no openclaw.mjs entry.\n' > "$source_dir/index.md"
+    return
+  fi
   local gateway_home gateway_readiness_home gateway_port gateway_token gateway_pid=""
-  gateway_home="$(mktemp -d)"
-  gateway_readiness_home="$(mktemp -d)"
+  gateway_home="$(as_candidate mktemp -d)"
+  gateway_readiness_home="$(as_candidate mktemp -d)"
   cleanup_gateway() {
-    if [[ -n "$gateway_pid" ]] && kill -0 "$gateway_pid" 2>/dev/null; then
+    if [[ -n "${gateway_pid:-}" ]] && kill -0 "$gateway_pid" 2>/dev/null; then
       kill "$gateway_pid" 2>/dev/null || true
       wait "$gateway_pid" 2>/dev/null || true
     fi
-    rm -rf "$gateway_home" "$gateway_readiness_home"
+    as_candidate rm -rf -- "${gateway_home:-}" "${gateway_readiness_home:-}"
   }
   trap cleanup_gateway EXIT
   gateway_port="$(node -e "const net=require('node:net'); const s=net.createServer(); s.listen(0,'127.0.0.1',()=>{ console.log(s.address().port); s.close(); });")"
@@ -365,12 +465,12 @@ source_cli_probes() (
   local gateway_state="$gateway_home/.openclaw" gateway_config="$gateway_home/.openclaw/openclaw.json"
   local readiness_state="$gateway_readiness_home/.openclaw" readiness_config="$gateway_readiness_home/.openclaw/openclaw.json"
   local gateway_log="$source_dir/cli-gateway.log" readiness_log="$source_dir/cli-gateway-readiness.log"
-  mkdir -p "$gateway_state" "$readiness_state"
+  as_candidate mkdir -p "$gateway_state" "$readiness_state"
   local catalog_refresh_config=""
-  if grep -q 'catalogRefresh:' src/config/zod-schema.core.ts; then
+  if as_candidate grep -q 'catalogRefresh:' "$openclaw/src/config/zod-schema.core.ts"; then
     catalog_refresh_config='"models": { "catalogRefresh": { "enabled": false } },'
   fi
-  cat > "$gateway_config" <<EOF
+  as_candidate tee "$gateway_config" >/dev/null <<EOF
 {
   "agents": { "defaults": { "heartbeat": { "every": "0m" } } },
   "browser": { "enabled": false },
@@ -384,11 +484,11 @@ source_cli_probes() (
   "plugins": { "enabled": true, "entries": { "browser": { "enabled": false } } }
 }
 EOF
-  cp "$gateway_config" "$readiness_config"
-  OPENCLAW_GATEWAY_TOKEN="$gateway_token" OPENCLAW_HOME="$gateway_home" \
+  as_candidate cp "$gateway_config" "$readiness_config"
+  as_candidate env OPENCLAW_GATEWAY_TOKEN="$gateway_token" OPENCLAW_HOME="$gateway_home" \
     OPENCLAW_STATE_DIR="$gateway_state" OPENCLAW_CONFIG_PATH="$gateway_config" \
     OPENCLAW_GATEWAY_PORT="$gateway_port" OPENCLAW_SKIP_CHANNELS=1 OPENCLAW_SKIP_CRON=1 \
-    node dist/entry.js gateway run --bind loopback --port "$gateway_port" --auth token --allow-unconfigured --force \
+    node "$openclaw/dist/entry.js" gateway run --bind loopback --port "$gateway_port" --auth token --allow-unconfigured --force \
     > "$gateway_log" 2>&1 &
   gateway_pid="$!"
   local deadline=$((SECONDS + 120)) remaining probe_timeout
@@ -406,22 +506,53 @@ EOF
   while true; do
     remaining=$((deadline - SECONDS))
     ((remaining > 0)) || die "timed out waiting for gateway WebSocket health"
-    if OPENCLAW_GATEWAY_TOKEN="$gateway_token" OPENCLAW_HOME="$gateway_readiness_home" \
+    if as_candidate env OPENCLAW_GATEWAY_TOKEN="$gateway_token" OPENCLAW_HOME="$gateway_readiness_home" \
       OPENCLAW_STATE_DIR="$readiness_state" OPENCLAW_CONFIG_PATH="$readiness_config" \
-      node dist/entry.js gateway health --port "$gateway_port" --timeout "$((remaining * 1000))" \
+      node "$openclaw/dist/entry.js" gateway health --port "$gateway_port" --timeout "$((remaining * 1000))" \
       --json > "$readiness_log" 2>&1; then
       break
     fi
     kill -0 "$gateway_pid" 2>/dev/null || die "gateway exited before WebSocket health"
     ((SECONDS >= deadline)) || sleep 1
   done
-  OPENCLAW_GATEWAY_TOKEN="$gateway_token" OPENCLAW_HOME="$gateway_home" \
+  OPENCLAW_BENCH_TRANSPORT_JSON="$(candidate_transport "/opt/node-v${NODE_VERSION}/bin/node")" \
+    OPENCLAW_GATEWAY_TOKEN="$gateway_token" OPENCLAW_HOME="$gateway_home" \
     OPENCLAW_STATE_DIR="$gateway_state" OPENCLAW_CONFIG_PATH="$gateway_config" \
     OPENCLAW_GATEWAY_PORT="$gateway_port" \
     node "$helpers/bench-cli-startup.mjs" --entry "$openclaw/openclaw.mjs" \
     --case gatewayHealthJsonWarmState --case gatewayHealthJsonFreshState \
     --case configGetGatewayPort --runs "$repeat" --warmup 1 --output "$source_dir/cli-startup.json"
 )
+
+collect_diagnostics() {
+  local source="$1" destination="$2" subtree="$3"
+  local file relative size total=0 count=0
+  [[ -d "$source/$subtree" && ! -L "$source/$subtree" ]] || die "diagnostic subtree is missing"
+  # B has been stopped. Copy only bounded regular bytes, never a candidate-selected destination.
+  while IFS= read -r -d '' file; do
+    [[ ! -L "$file" && ( -d "$file" || -f "$file" ) ]] || die "diagnostic links or special files are forbidden"
+    [[ "$(as_sut /usr/bin/realpath "$file")" == "$file" ]] || die "diagnostic ancestor is redirected"
+    [[ -f "$file" ]] || continue
+    relative="${file#"$source/"}"
+    [[ "$relative" =~ ^\.artifacts/[A-Za-z0-9._/-]+$ && "$relative" != *"/../"* ]] ||
+      die "unsafe diagnostic path"
+    case "$relative" in
+      .artifacts/openclaw-performance/source/mock-provider/cli-* | \
+      .artifacts/openclaw-performance/source/mock-provider/index.md)
+        die "candidate diagnostics cannot supply runner measurement files" ;;
+    esac
+    [[ "$(as_sut /usr/bin/stat -c %h "$file")" == 1 ]] || die "diagnostic hardlinks are forbidden"
+    size="$(as_sut /usr/bin/stat -c %s "$file")"
+    ((size <= MAX_ARTIFACT_FILE_BYTES)) || die "diagnostic file exceeds byte limit"
+    count=$((count + 1)) total=$((total + size))
+    ((count <= MAX_ARTIFACT_FILES && total <= MAX_ARTIFACT_BYTES)) || die "diagnostics exceed payload limit"
+    [[ ! -e "$destination/$relative" && ! -L "$destination/$relative" ]] ||
+      die "diagnostics cannot replace runner output"
+    install -D -o "$RUNNER_USER" -g "$RUNNER_USER" -m 0600 "$file" "$destination/$relative"
+  done < <(as_sut /usr/bin/find "$source/$subtree" -print0)
+  # install -D creates root-owned ancestors; hand them only to A, after B is absent.
+  chown -R "$RUNNER_USER:$RUNNER_USER" "$destination/.artifacts"
+}
 
 quiesce_sut() {
   local uid deadline
@@ -478,29 +609,29 @@ write_payload() {
   : > "$manifest"
   local file_count=0 total_bytes=0 path file rel size sha
   for path in "${paths[@]}"; do
-    [[ -e "$root/openclaw/$path" ]] || die "missing artifact path $path"
+    [[ -e "$root/$path" ]] || die "missing artifact path $path"
     while IFS= read -r -d '' file; do
       [[ ! -L "$file" ]] || die "artifact symlinks are forbidden"
-      rel="${file#"$root/openclaw/"}"
+      rel="${file#"$root/"}"
       [[ "$rel" =~ ^\.artifacts/[A-Za-z0-9._/-]+$ && "$rel" != *"/../"* ]] ||
         die "unsafe artifact path"
-      [[ "$(as_sut /usr/bin/realpath "$file")" == "$file" ]] || die "artifact symlink ancestors are forbidden"
-      size="$(as_sut /usr/bin/stat -c %s "$file")"
+      [[ "$(as_runner /usr/bin/realpath "$file")" == "$file" ]] || die "artifact symlink ancestors are forbidden"
+      size="$(as_runner /usr/bin/stat -c %s "$file")"
       ((size > 0 && size <= MAX_ARTIFACT_FILE_BYTES)) || die "artifact size is out of bounds: $rel"
-      sha="$(as_sut /usr/bin/sha256sum "$file" | cut -d' ' -f1)"
+      sha="$(as_runner /usr/bin/sha256sum "$file" | cut -d' ' -f1)"
       jq -cn --arg path "$rel" --argjson size "$size" --arg sha256 "$sha" \
         '{path:$path,size:$size,sha256:$sha256}' >> "$manifest"
       file_count=$((file_count + 1))
       total_bytes=$((total_bytes + size))
       ((file_count <= MAX_ARTIFACT_FILES && total_bytes <= MAX_ARTIFACT_BYTES)) ||
         die "artifact payload is too large"
-    done < <(as_sut /usr/bin/find "$root/openclaw/$path" -type f -print0 | sort -z)
+    done < <(as_runner /usr/bin/find "$root/$path" -type f -print0 | sort -z)
   done
   ((file_count > 0 && file_count <= MAX_ARTIFACT_FILES)) || die "artifact file count is out of bounds"
   ((total_bytes <= MAX_ARTIFACT_BYTES)) || die "artifact payload is too large"
   jq -sr 'sort_by(.path)' "$manifest" > "$output/artifacts.json"
   jq -jr '.[] | .path + "\u0000"' "$output/artifacts.json" |
-    as_sut /usr/bin/tar --dereference -C "$root/openclaw" -czf - --null --verbatim-files-from -T - > "$payload"
+    as_runner /usr/bin/tar --dereference -C "$root" -czf - --null --verbatim-files-from -T - > "$payload"
 
   jq -n \
     --arg lane "$lane" --arg testedRef "$tested_ref" \
@@ -536,12 +667,13 @@ write_payload() {
 }
 
 remote_main() {
-  (($# == 16)) || die "remote mode requires 16 arguments"
+  (($# == 17)) || die "remote mode requires 17 arguments"
   local lane="$1" openclaw_sha="$2" kova_sha="$3" workflow_sha="$4" tested_ref="$5"
   local profile="$6" repeat="$7" contract="$8" include_filters="$9"
   local expected_entries="${10}" fail_on_regression="${11}" run_id="${12}" run_attempt="${13}"
   local crabbox_version="${14}"
   local model="${15}" require_instrumented="${16}"
+  local admitted_kova_sha="${17}"
   case "$lane" in
     source | mock-provider | mock-deep-profile | cleanup-probe) ;;
     *) die "unsupported lane $lane" ;;
@@ -549,6 +681,7 @@ remote_main() {
   require_sha openclaw_sha "$openclaw_sha"
   require_sha kova_sha "$kova_sha"
   require_sha workflow_sha "$workflow_sha"
+  require_sha admitted_kova_sha "$admitted_kova_sha"
   require_scalar tested_ref "$tested_ref"
   require_scalar crabbox_version "$crabbox_version"
   require_scalar model "$model"
@@ -610,29 +743,90 @@ remote_main() {
       "$control_workspace/.github/crabbox/performance-control/helpers/$helper" "$helpers/$helper"
   done
   prepare_sut
-  clone_exact openclaw/openclaw "$openclaw_sha" "$root/openclaw"
-  clone_exact openclaw/Kova "$kova_sha" "$root/kova"
+  prepare_runner
+  clone_exact openclaw/openclaw "$openclaw_sha" "$root/openclaw" "$SUT_USER"
+  local admitted=false kova="$root/kova" executor=as_sut
+  local results="/home/${RUNNER_USER}/results" workload_results="$root/openclaw"
+  if [[ "$kova_sha" == "$admitted_kova_sha" ]]; then
+    admitted=true kova="/home/${RUNNER_USER}/kova" executor=as_runner
+    workload_results="$results"
+  fi
+  clone_exact openclaw/Kova "$kova_sha" "$kova" "$([[ "$admitted" == true ]] && echo "$RUNNER_USER" || echo "$SUT_USER")"
 
+  local source_cli_supported=false source_cli_entry
+  if [[ "$lane" == source ]]; then
+    # Capture immutable entry availability before any candidate lifecycle code runs.
+    source_cli_entry="$(as_sut /usr/bin/git -C "$root/openclaw" ls-tree --name-only "$openclaw_sha" -- openclaw.mjs)"
+    case "$source_cli_entry" in
+      openclaw.mjs) source_cli_supported=true ;;
+      "") ;;
+      *) die "unexpected CLI entry inventory" ;;
+    esac
+  fi
   started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   set +e
-  as_sut "$(realpath "$0")" __sut \
-    "$lane" "$root" "$profile" "$repeat" "$contract" "$include_filters" \
-    "$expected_entries" "$fail_on_regression" "$helpers" "$model" "$require_instrumented"
+  (
+    set -e
+    [[ "$lane" != cleanup-probe ]] || exit 42
+    as_sut "$0" __prepare "$root"
+    if [[ "$lane" == source ]]; then
+      [[ "$source_cli_supported" != true ]] || as_sut "$0" __build "$root/openclaw"
+      source_status=0
+      as_sut "$0" __sut "$lane" "$root" "$profile" "$repeat" "$contract" "$include_filters" \
+        "$expected_entries" false "$helpers" "$model" "$require_instrumented" "$workload_results" "$kova" false || source_status=$?
+      as_runner "$0" __source-cli "$root/openclaw" \
+        "$results/.artifacts/openclaw-performance/source/mock-provider" "$repeat" "$helpers" "$source_cli_supported"
+      exit "$source_status"
+    else
+      as_sut "$0" __build "$root/openclaw"
+      "$executor" "$0" __sut "$lane" "$root" "$profile" "$repeat" "$contract" "$include_filters" \
+        "$expected_entries" "$fail_on_regression" "$helpers" "$model" "$require_instrumented" "$workload_results" "$kova" "$admitted"
+    fi
+  )
   status=$?
   set -e
   finished_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   quiesce_sut
-  [[ "$(as_sut git -C "$root/openclaw" rev-parse HEAD)" == "$openclaw_sha" ]] ||
+  [[ "$(as_sut /usr/bin/git -C "$root/openclaw" rev-parse HEAD)" == "$openclaw_sha" ]] ||
     die "OpenClaw HEAD changed during SUT execution"
-  [[ "$(as_sut git -C "$root/kova" rev-parse HEAD)" == "$kova_sha" ]] ||
+  [[ "$("$executor" /usr/bin/git -C "$kova" rev-parse HEAD)" == "$kova_sha" ]] ||
     die "Kova HEAD changed during SUT execution"
   [[ "$lane" != cleanup-probe ]] || return "$status"
 
+  if [[ "$lane" == source ]]; then
+    collect_diagnostics "$root/openclaw" "$results" ".artifacts/openclaw-performance/source"
+    if [[ "$source_cli_supported" == true ]]; then
+      as_runner node "$helpers/openclaw-performance-source-summary.mjs" \
+        --source-dir "$results/.artifacts/openclaw-performance/source/mock-provider" \
+        --output "$results/.artifacts/openclaw-performance/source/mock-provider/index.md"
+    fi
+  else
+    [[ "$admitted" == true ]] || collect_diagnostics "$root/openclaw" "$results" ".artifacts/kova"
+    local validation_status=0 matrix_status="$status"
+    if [[ "$admitted" == true && "$status" == 0 ]]; then
+      local matrix_receipt="$results/.artifacts/kova/$lane-matrix-exit" matrix_receipt_size
+      matrix_receipt_size="$(as_runner /usr/bin/stat -c %s "$matrix_receipt")"
+      ((matrix_receipt_size >= 2 && matrix_receipt_size <= 4)) || die "invalid matrix phase receipt size"
+      matrix_status="$(as_runner /usr/bin/cat "$matrix_receipt")"
+      [[ "$matrix_status" =~ ^(0|[1-9][0-9]{0,2})$ && "$matrix_status" -le 255 ]] ||
+        die "invalid matrix phase exit"
+    fi
+    as_runner "$0" __validate-kova "$lane" "$root" "$profile" "$repeat" "$include_filters" \
+      "$expected_entries" "$fail_on_regression" "$helpers" "$model" "$require_instrumented" \
+      "$results" "$matrix_status" "$admitted" || validation_status=$?
+    if [[ "$admitted" != true ]]; then
+      as_runner /bin/sh -eu -c '
+        mkdir -p "$(dirname "$1")"
+        printf "\nCustom Kova: candidate-produced diagnostics only; not gate evidence.\n" >> "$1"
+      ' sh "$results/.artifacts/kova/summaries/$lane.md"
+    fi
+    if ((status == 0)); then status="$validation_status"; fi
+  fi
   local export_status
   set +e
   (
     set -e
-    write_payload "$lane" "$root" "$control_workspace" "$tested_ref" "$openclaw_sha" "$kova_sha" \
+    write_payload "$lane" "$results" "$control_workspace" "$tested_ref" "$openclaw_sha" "$kova_sha" \
     "$workflow_sha" "$run_id" "$run_attempt" "$CRABBOX_COMMIT" "$crabbox_version" \
     "$started_at" "$finished_at" "$profile" "$repeat" "$contract" "$include_filters" \
     "$fail_on_regression" "$status"
@@ -714,6 +908,25 @@ case "${1:-}" in
   __sut)
     shift
     run_sut "$@"
+    ;;
+  __prepare)
+    shift
+    prepare_candidate "$@"
+    ;;
+  __build)
+    cd "$2"
+    build_source_performance
+    ;;
+  __source-cli)
+    shift
+    source_cli_probes "$@"
+    ;;
+  __candidate-id)
+    as_candidate id -u
+    ;;
+  __validate-kova)
+    shift
+    validate_kova "$@"
     ;;
   verify)
     shift

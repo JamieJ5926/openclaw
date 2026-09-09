@@ -11,6 +11,118 @@ import { isProcessAlive, waitForDead } from "../helpers/process-wait.js";
 import { createTempDirTracker } from "../helpers/temp-dir.js";
 
 describe("bench-cli-startup", () => {
+  it("routes synthetic samples and their state through the explicit transport without runner environment", () => {
+    const tempDirs = createTempDirTracker();
+    const root = tempDirs.make("openclaw-cli-transport-");
+    try {
+      const prefix = join(root, "transport.mjs");
+      const entry = join(root, "entry.mjs");
+      const calls = join(root, "calls.jsonl");
+      const output = join(root, "report.json");
+      writeFileSync(
+        prefix,
+        `import assert from "node:assert/strict";
+import fs from "node:fs";
+import { spawnSync } from "node:child_process";
+const args = process.argv.slice(2);
+assert.equal(args.shift(), "/usr/bin/env");
+assert.equal(args.shift(), "-C");
+const cwd = args.shift();
+assert.equal(cwd, ${JSON.stringify(root)});
+assert.equal(args.shift(), "-i");
+const env = {};
+while (args[0]?.includes("=") && !args[0].startsWith("/")) {
+  const value = args.shift(), index = value.indexOf("=");
+  env[value.slice(0,index)] = value.slice(index+1);
+}
+fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify({args,env})+"\\n");
+if (args[0] === "/usr/bin/timeout") {
+  assert.deepEqual(args.splice(0,4), ["/usr/bin/timeout","--signal=TERM","--kill-after=1s","5s"]);
+}
+const result = spawnSync(args[0],args.slice(1),{env,cwd,stdio:"inherit"});
+process.exit(result.status ?? 99);
+`,
+      );
+      writeFileSync(
+        entry,
+        `import assert from "node:assert/strict";
+import fs from "node:fs";
+assert.equal(process.env.SUT_FIXTURE,"yes");
+assert.equal(process.env.RUNNER_PRIVATE_CANARY,undefined);
+assert.equal(process.env.OPENCLAW_BENCH_TRANSPORT_JSON,undefined);
+assert.equal(process.cwd(),${JSON.stringify(root)});
+fs.writeFileSync(process.env.OPENCLAW_STATE_DIR+"/witness","sample");
+console.log("fixture version");
+`,
+      );
+      const result = spawnSync(
+        process.execPath,
+        [
+          "--import",
+          "tsx",
+          "scripts/bench-cli-startup.ts",
+          "--entry",
+          entry,
+          "--case",
+          "version",
+          "--runs",
+          "1",
+          "--warmup",
+          "0",
+          "--timeout-ms",
+          "5000",
+          "--json",
+          "--output",
+          output,
+        ],
+        {
+          cwd: resolve(__dirname, "../.."),
+          env: {
+            ...process.env,
+            RUNNER_PRIVATE_CANARY: "must-not-forward",
+            OPENCLAW_BENCH_TRANSPORT_JSON: JSON.stringify({
+              prefix: [process.execPath, prefix],
+              binary: process.execPath,
+              env: { HOME: root, PATH: process.env.PATH, SUT_FIXTURE: "yes" },
+            }),
+          },
+          encoding: "utf8",
+          timeout: 15_000,
+        },
+      );
+      expect(result.status, result.stderr).toBe(0);
+      expect(JSON.parse(readFileSync(output, "utf8")).primary.cases[0].samples).toMatchObject([
+        { exitCode: 0, signal: null },
+      ]);
+      const invocations = readFileSync(calls, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      expect(invocations).toHaveLength(4);
+      expect(invocations.filter((call) => call.args.includes("/usr/bin/timeout"))).toHaveLength(1);
+      expect(invocations.every((call) => call.env.RUNNER_PRIVATE_CANARY === undefined)).toBe(true);
+    } finally {
+      tempDirs.cleanup();
+    }
+  });
+
+  it.each(["{}", '{"prefix":["relative"],"binary":"/node","env":{}}'])(
+    "rejects malformed cross-user transport before candidate execution: %s",
+    (transport) => {
+      const result = spawnSync(
+        process.execPath,
+        ["--import", "tsx", "scripts/bench-cli-startup.ts", "--entry", "/not-executed"],
+        {
+          env: { ...process.env, OPENCLAW_BENCH_TRANSPORT_JSON: transport },
+          encoding: "utf8",
+        },
+      );
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("Invalid benchmark transport");
+      expect(result.stdout).toBe("");
+    },
+  );
+
   it("rejects unknown CLI options before running benchmarks", () => {
     expect(() => testing.validateCliArgs(["--wat"])).toThrow("Unknown argument: --wat");
 

@@ -87,12 +87,14 @@ function kovaMatrixEntries(): Array<Record<string, string>> {
 
 function runCandidateTrustClassification({
   candidateSha,
+  canonicalRef = "0f9e678e239b45db46d2bd930b7983203580df78",
   eventName,
   kovaSha = "0f9e678e239b45db46d2bd930b7983203580df78",
   ref,
   workflowSha,
 }: {
   candidateSha: string;
+  canonicalRef?: string;
   eventName: "schedule" | "workflow_dispatch";
   kovaSha?: string;
   ref: string;
@@ -110,7 +112,7 @@ function runCandidateTrustClassification({
       GITHUB_EVENT_NAME: eventName,
       GITHUB_OUTPUT: output,
       GITHUB_REF: ref,
-      KOVA_CANONICAL_CONFIG_REF: "0f9e678e239b45db46d2bd930b7983203580df78",
+      KOVA_CANONICAL_CONFIG_REF: canonicalRef,
       KOVA_SHA: kovaSha,
       WORKFLOW_SHA: workflowSha,
     },
@@ -127,6 +129,28 @@ function runCandidateTrustClassification({
       : [],
   );
   return { outputs, result };
+}
+
+function runLiveLane(kovaRefTrusted: string, secretEligible: string) {
+  const root = tempDirs.make("openclaw-performance-live-lane-");
+  const output = join(root, "output");
+  const summary = join(root, "summary");
+  const run = (findStep("Decide lane").run ?? "")
+    .replaceAll("${{ github.event_name }}", "workflow_dispatch")
+    .replaceAll("${{ inputs.deep_profile || 'false' }}", "false")
+    .replaceAll("${{ inputs.live_openai_candidate || 'false' }}", "true");
+  const result = spawnSync("bash", ["-c", run], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      GITHUB_OUTPUT: output,
+      GITHUB_STEP_SUMMARY: summary,
+      KOVA_REF_TRUSTED_FOR_LIVE: kovaRefTrusted,
+      LANE_ID: "live-openai-candidate",
+      SECRET_ELIGIBLE: secretEligible,
+    },
+  });
+  return { result, output, summary };
 }
 
 function createGitHubResolutionStub(root: string) {
@@ -155,7 +179,7 @@ esac
 const CANONICAL_SCHEMA = "    mediaModels: z\n";
 const LEGACY_SCHEMA = "    imageGenerationModel: AgentToolModelSchema.optional(),\n";
 const SCHEMA_PATH = "src/config/zod-schema.agent-defaults.ts";
-const CALIBRATED_KOVA_REF = "70ea2c5a3bdd206937b4a0bd7460a19a69d8c52a";
+const CALIBRATED_KOVA_REF = "cf6e26f0ca1241c9e7a626e96e66f392ff58012d";
 
 function contentsMetadata(sourcePath: string, bytes: Buffer) {
   return {
@@ -170,6 +194,7 @@ function contentsMetadata(sourcePath: string, bytes: Buffer) {
 }
 
 type ResolutionOptions = {
+  external?: boolean;
   schema?: string | Buffer;
   packageJson?: string;
   packageMetadata?: unknown;
@@ -181,6 +206,10 @@ type ResolutionOptions = {
     TARGET_SHA?: string;
     TARGET_REF_INPUT?: string;
     KOVA_SHA_OVERRIDE?: string;
+    KOVA_CANONICAL_CONFIG_REF?: string;
+    KOVA_LEGACY_LIST_CONFIG_REF?: string;
+    KOVA_TRUSTED_LIVE_REF?: string;
+    KOVA_ISOLATED_REF?: string;
     API_ERROR?: string;
   };
   status?: number;
@@ -301,18 +330,21 @@ if (process.env.CONTENTS_TIMEOUT === "true") {
       GH_TOKEN: "test",
       GITHUB_OUTPUT: output,
       GITHUB_REF_NAME: "main",
+      GITHUB_REF: "refs/heads/main",
+      DEFAULT_BRANCH: "main",
       GITHUB_REPOSITORY: "openclaw/openclaw",
       KOVA_CANONICAL_CONFIG_REF: canonicalRef,
       KOVA_CONFIG_CONTRACT_INPUT: options.contractOverride ?? "",
       KOVA_LEGACY_LIST_CONFIG_REF: legacyRef,
       KOVA_TRUSTED_LIVE_REF: canonicalRef,
+      KOVA_ISOLATED_REF: "9".repeat(40),
       KOVA_REF_INPUT: options.kovaRef ?? "",
       KOVA_REPOSITORY: "openclaw/Kova",
       OPENCLAW_CANONICAL_CONFIG_SINCE: "d".repeat(40),
       PATH: `${bin}:${process.env.PATH ?? ""}`,
       TARGET_REF_INPUT: "candidate",
       TARGET_SHA: "c".repeat(40),
-      WORKFLOW_SHA: "e".repeat(40),
+      WORKFLOW_SHA: options.external ? "e".repeat(40) : "c".repeat(40),
       GIT_POISON: join(root, "git-called"),
       NODE_OPTIONS: `--require=${JSON.stringify(preload)}`,
       CONTENTS_CALLS: join(root, "contents-calls"),
@@ -488,9 +520,9 @@ describe("OpenClaw performance workflow", () => {
 
   it("pins the Kova evaluator with release validation contracts", () => {
     const workflow = readFileSync(WORKFLOW, "utf8");
-    const canonicalKovaRef = "065d2ffd535f12fd0f3a15c412a08a456f580260";
-    const legacyKovaRef = "065d2ffd535f12fd0f3a15c412a08a456f580260";
-    const trustedLiveKovaRef = "065d2ffd535f12fd0f3a15c412a08a456f580260";
+    const canonicalKovaRef = "cf6e26f0ca1241c9e7a626e96e66f392ff58012d";
+    const legacyKovaRef = "cf6e26f0ca1241c9e7a626e96e66f392ff58012d";
+    const trustedLiveKovaRef = "cf6e26f0ca1241c9e7a626e96e66f392ff58012d";
     const install = findStep("Install OCM and Kova");
     const installRun = install.run ?? "";
     const resolveTarget = findStep("Resolve OpenClaw target ref", "resolve_target");
@@ -581,6 +613,152 @@ describe("OpenClaw performance workflow", () => {
       external_required: "true",
     });
   });
+
+  it.each([
+    { name: "historical candidate", workflowSha: "e".repeat(40), eligible: "false" },
+    { name: "canonical workflow candidate", workflowSha: "c".repeat(40), eligible: "true" },
+  ])(
+    "resolves the shared calibrated pin without granting $name extra trust",
+    async ({ workflowSha, eligible }) => {
+      const pins = expectDefined(readWorkflow().env, "performance workflow pins");
+      const canonicalRef = expectDefined(pins.KOVA_CANONICAL_CONFIG_REF, "canonical Kova pin");
+      const run = await runTargetResolution({
+        packageJson: JSON.stringify({ version: "2026.7.33" }),
+        overrides: {
+          KOVA_CANONICAL_CONFIG_REF: canonicalRef,
+          KOVA_LEGACY_LIST_CONFIG_REF: expectDefined(
+            pins.KOVA_LEGACY_LIST_CONFIG_REF,
+            "legacy Kova pin",
+          ),
+          KOVA_TRUSTED_LIVE_REF: expectDefined(pins.KOVA_TRUSTED_LIVE_REF, "trusted live Kova pin"),
+        },
+      });
+      expect(run.result.status, run.result.stderr).toBe(0);
+      expect(run.outputs.kova_ref).toBe(CALIBRATED_KOVA_REF);
+      expect(run.outputs.kova_config_contract).toBe("canonical");
+      expect(run.outputs.kova_ref_trusted_for_live).toBe("true");
+      expect(run.requestedPaths).toEqual(["package.json", SCHEMA_PATH]);
+      const trust = runCandidateTrustClassification({
+        candidateSha: run.outputs.tested_sha,
+        canonicalRef,
+        eventName: "workflow_dispatch",
+        kovaSha: run.outputs.kova_ref,
+        ref: "refs/heads/main",
+        workflowSha,
+      });
+      expect(trust.result.status, trust.result.stderr).toBe(0);
+      expect(trust.outputs).toEqual({
+        secret_eligible: eligible,
+        cache_write_allowed: eligible,
+        external_required: eligible === "true" ? "false" : "true",
+      });
+      const lane = runLiveLane(
+        run.outputs.kova_ref_trusted_for_live,
+        trust.outputs.secret_eligible,
+      );
+      expect(lane.result.status, lane.result.stderr).toBe(0);
+      expect(readFileSync(lane.output, "utf8")).toBe(`run=${eligible}\n`);
+      if (eligible === "false") {
+        expect(readFileSync(lane.summary, "utf8")).toContain(
+          "candidate is not eligible for live credentials",
+        );
+      }
+    },
+  );
+
+  it.each([
+    {
+      name: "admitted",
+      canonicalRef: CALIBRATED_KOVA_REF,
+      legacyRef: "b".repeat(40),
+      required: "true",
+    },
+    {
+      name: "admitted legacy",
+      canonicalRef: "a".repeat(40),
+      legacyRef: CALIBRATED_KOVA_REF,
+      required: "true",
+    },
+    { name: "custom", canonicalRef: "a".repeat(40), legacyRef: "b".repeat(40), required: "false" },
+  ])(
+    "passes the $name Kova instrumentation requirement to the guest",
+    ({ canonicalRef, legacyRef, required }) => {
+      const body = expectDefined(
+        findStep("Attest and run candidate in disposable Crabbox", "external_performance").run,
+        "external performance execution body",
+      );
+      const start = body.indexOf("require_instrumented=false");
+      const end = body.indexOf("status=${PIPESTATUS[0]}", start);
+      expect(start).toBeGreaterThan(-1);
+      expect(end).toBeGreaterThan(start);
+      const run = body
+        .slice(start, end)
+        .replaceAll("${{ matrix.include_filters }}", "fixture")
+        .replaceAll("${{ matrix.expected_release_entries }}", "1")
+        .replaceAll("${{ inputs.fail_on_regression || 'false' }}", "false");
+      const root = tempDirs.make("openclaw-performance-instrumentation-");
+      const output = join(root, "arguments");
+      const result = spawnSync(
+        "bash",
+        [
+          "-c",
+          `
+set -euo pipefail
+capture() { printf '%s\\0' "$@" > "$ARGUMENTS"; }
+crabbox=capture
+args=(run)
+lane=source repeat=1
+${run}
+`,
+        ],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            ARGUMENTS: output,
+            KOVA_SHA: CALIBRATED_KOVA_REF,
+            KOVA_CANONICAL_CONFIG_REF: canonicalRef,
+            KOVA_LEGACY_LIST_CONFIG_REF: legacyRef,
+            KOVA_ISOLATED_REF: required === "true" ? CALIBRATED_KOVA_REF : "9".repeat(40),
+            OPENCLAW_SHA: "c".repeat(40),
+            WORKFLOW_SHA: "e".repeat(40),
+            TESTED_REF: "fixture",
+            PROFILE: "smoke",
+            KOVA_CONFIG_CONTRACT: "canonical",
+            GITHUB_RUN_ID: "1",
+            GITHUB_RUN_ATTEMPT: "1",
+            CRABBOX_VERSION: "fixture",
+            PERFORMANCE_MODEL_ID: "fixture",
+            timing_log: join(root, "timing"),
+          },
+        },
+      );
+      expect(result.status, result.stderr).toBe(0);
+      expect(readFileSync(output, "utf8").split("\0")).toEqual([
+        "run",
+        "--",
+        "remote",
+        "source",
+        "c".repeat(40),
+        CALIBRATED_KOVA_REF,
+        "e".repeat(40),
+        "fixture",
+        "smoke",
+        "1",
+        "canonical",
+        "fixture",
+        "1",
+        "false",
+        "1",
+        "1",
+        "fixture",
+        "fixture",
+        required,
+        required === "true" ? CALIBRATED_KOVA_REF : "9".repeat(40),
+        "",
+      ]);
+    },
+  );
 
   it.each([
     { name: "ordinary version", version: "2026.8.1" },
@@ -1023,14 +1201,8 @@ describe("OpenClaw performance workflow", () => {
     const bin = createGitHubResolutionStub(root);
     const trustedRef = "1fe2f4081877bb12b7f7ed355349f98b8a0a6882";
     const compatibleUntrustedRef = "0f9e678e239b45db46d2bd930b7983203580df78";
-    const decideLaneRun = (decideLane.run ?? "")
-      .replaceAll("${{ github.event_name }}", "workflow_dispatch")
-      .replaceAll("${{ inputs.deep_profile || 'false' }}", "false")
-      .replaceAll("${{ inputs.live_openai_candidate || 'false' }}", "true");
-
     const runBoundary = (kovaRef: string, name: string) => {
       const resolveOutput = join(root, `${name}-resolve-output`);
-      const laneOutput = join(root, `${name}-lane-output`);
       const resolve = spawnSync("bash", ["-c", resolveTarget.run ?? ""], {
         encoding: "utf8",
         env: {
@@ -1056,18 +1228,8 @@ describe("OpenClaw performance workflow", () => {
           .split("\n")
           .map((line) => line.split("=", 2)),
       );
-      const lane = spawnSync("bash", ["-c", decideLaneRun], {
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          GITHUB_OUTPUT: laneOutput,
-          GITHUB_STEP_SUMMARY: join(root, `${name}-summary`),
-          KOVA_REF_TRUSTED_FOR_LIVE: resolved.kova_ref_trusted_for_live,
-          LANE_ID: "live-openai-candidate",
-          SECRET_ELIGIBLE: "true",
-        },
-      });
-      return { lane, laneOutput, resolved };
+      const lane = runLiveLane(resolved.kova_ref_trusted_for_live, "true");
+      return { lane: lane.result, laneOutput: lane.output, resolved };
     };
 
     expect(decideLane.run).toContain(
@@ -1105,6 +1267,25 @@ describe("OpenClaw performance workflow", () => {
     } finally {
       rmSync(root, { force: true, recursive: true });
     }
+  });
+
+  it.each([
+    { name: "default isolated evaluator", kovaRef: "", expected: "9".repeat(40) },
+    { name: "explicit custom diagnostic", kovaRef: "8".repeat(40), expected: "8".repeat(40) },
+  ])("preserves evaluator selection for $name", async ({ kovaRef, expected }) => {
+    const { result, outputs } = await runTargetResolution({ external: true, kovaRef });
+    expect(result.status, result.stderr).toBe(0);
+    expect(outputs.kova_ref).toBe(expected);
+    expect(outputs.kova_ref_trusted_for_live).toBe("false");
+  });
+
+  it("refuses an external default until an immutable isolated evaluator is pinned", async () => {
+    const { result } = await runTargetResolution({
+      external: true,
+      overrides: { KOVA_ISOLATED_REF: "" },
+    });
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain("reviewed cross-user Kova dependency is not pinned");
   });
 
   it("keeps arbitrary performance candidates secretless and cacheless", () => {

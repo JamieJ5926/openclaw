@@ -23,6 +23,8 @@ sync:
   include:
     - .github/crabbox/openclaw-performance-evidence.schema.json
     - scripts/openclaw-performance-crabbox.sh
+    - .github/crabbox/performance-control/ocm
+    - .github/crabbox/performance-control/ocm.sha256
     - .github/crabbox/performance-control/helpers/bench-cli-startup.mjs
     - .github/crabbox/performance-control/helpers/kova-ci-summary.mjs
     - .github/crabbox/performance-control/helpers/lib/kova-report-gate.mjs
