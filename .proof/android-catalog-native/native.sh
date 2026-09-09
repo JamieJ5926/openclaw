@@ -45,6 +45,7 @@ until test "$(timeout 5 adb -s emulator-5554 shell getprop sys.boot_completed 2>
   sleep 1
 done
 adb -s emulator-5554 reverse tcp:18789 tcp:18789
+"$NODE_EXECUTABLE" "$INPUT/capture-preflight.mjs"
 "$NODE_EXECUTABLE" "$INPUT/diagnose-native.mjs" before-app
 adb -s emulator-5554 install "$TRIAL/apk/candidate.apk"
 adb -s emulator-5554 shell am start -W -n ai.openclaw.app.debug/ai.openclaw.app.MainActivity
