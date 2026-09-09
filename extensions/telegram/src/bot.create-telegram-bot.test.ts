@@ -4373,6 +4373,9 @@ describe("createTelegramBot", () => {
   }
 
   it("accepts mentionPatterns matches with and without unrelated mentions", async () => {
+    getChatSpy.mockRejectedValueOnce(
+      Object.assign(new Error("Bad Request: chat not found"), { error_code: 400 }),
+    );
     const cases = [
       {
         name: "plain mention pattern text",

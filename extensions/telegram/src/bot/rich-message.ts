@@ -7,7 +7,7 @@ import type {
 } from "grammy/types";
 
 type TelegramRichMessage = { rich_message?: Message.RichMessageMessage["rich_message"] };
-export type TelegramRichMention = Extract<RichText, { type: "mention" | "text_mention" }>;
+type TelegramRichMention = Extract<RichText, { type: "mention" | "text_mention" }>;
 export type TelegramRichMessageAddress = {
   mentions: TelegramRichMention[];
   leadingCommand?: Extract<RichText, { type: "bot_command" }>;

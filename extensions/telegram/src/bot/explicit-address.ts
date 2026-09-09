@@ -52,13 +52,12 @@ export function resolveTelegramNativeMessageAddress(params: {
     return { explicitAddress: undefined, usernames: new Set() };
   }
   // sender_chat uses a bot-shaped sender for channel and anonymous-admin posts.
-  const addressedToOther = Boolean(
+  const addressedToOther =
     (message.reply_to_message?.from?.is_bot &&
       !message.reply_to_message.sender_chat &&
       message.reply_to_message.from.id !== botId) ||
     entities.some((entity) => entity.type === "text_mention" && entity.user.is_bot) ||
-    richAddress.mentions.some((mention) => mention.type === "text_mention" && mention.user.is_bot),
-  );
+    richAddress.mentions.some((mention) => mention.type === "text_mention" && mention.user.is_bot);
   const usernames = new Set([
     ...entities
       .filter((entity) => entity.type === "mention")
