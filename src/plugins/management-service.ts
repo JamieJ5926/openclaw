@@ -432,6 +432,7 @@ export const listManagedPlugins = withManagedPluginCache(
         if (!load) {
           load = fetchClawHubPluginVersionCategories({
             baseUrl,
+            skipAuth: true,
             packages: [...categoryTargets.values()].map((target) => target.request),
           }).then(
             (results) =>

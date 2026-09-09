@@ -101,6 +101,7 @@ export type ClawHubPluginVersionCategories = {
 type ClawHubReadOptions = {
   baseUrl?: string;
   token?: string;
+  skipAuth?: boolean;
   timeoutMs?: number;
   fetchImpl?: ClawHubFetch;
 };
@@ -383,6 +384,7 @@ async function fetchOptionalReadme(
   const { response, url, hasToken } = await requestClawHub({
     baseUrl: params.baseUrl,
     token: params.token,
+    skipAuth: params.skipAuth,
     timeoutMs: params.timeoutMs,
     fetchImpl: params.fetchImpl,
     path: `/api/v1/packages/${encodeURIComponent(params.packageName)}/file`,
@@ -566,6 +568,7 @@ export async function fetchClawHubPluginVersionCategories(
   const value = await fetchClawHubJson<unknown>({
     baseUrl: params.baseUrl,
     token: params.token,
+    skipAuth: params.skipAuth,
     timeoutMs: params.timeoutMs,
     fetchImpl: params.fetchImpl,
     method: "POST",

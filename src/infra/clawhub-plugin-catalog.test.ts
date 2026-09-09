@@ -269,6 +269,8 @@ describe("ClawHub plugin catalog client", () => {
 
     const result = await fetchClawHubPluginVersionCategories({
       baseUrl: "https://example.com",
+      token: "private-token",
+      skipAuth: true,
       packages: [
         { name: "@openclaw/memory", version: "1.2.3" },
         { name: "@openclaw/missing", version: "4.5.6" },
@@ -277,6 +279,7 @@ describe("ClawHub plugin catalog client", () => {
     });
 
     expect(request?.method).toBe("POST");
+    expect(request?.headers.has("authorization")).toBe(false);
     expect(new URL(request?.url ?? "").pathname).toBe("/api/v1/packages/categories:batch");
     await expect(request?.json()).resolves.toEqual({
       packages: [

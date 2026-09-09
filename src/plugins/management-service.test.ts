@@ -374,6 +374,7 @@ describe("plugin management service", () => {
     expect(mocks.pluginVersionCategories).toHaveBeenCalledOnce();
     expect(mocks.pluginVersionCategories).toHaveBeenCalledWith({
       baseUrl: "https://clawhub.ai",
+      skipAuth: true,
       packages: [{ name: "community/memory", version: "4.5.6" }],
     });
     expect(catalog.plugins[0]).toMatchObject({
@@ -426,12 +427,14 @@ describe("plugin management service", () => {
       [
         {
           baseUrl: "https://private.example/clawhub",
+          skipAuth: true,
           packages: [{ name: "community/memory", version: "4.5.6" }],
         },
       ],
       [
         {
           baseUrl: "https://public.example",
+          skipAuth: true,
           packages: [{ name: "community/memory", version: "4.5.6" }],
         },
       ],
