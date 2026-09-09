@@ -1,7 +1,16 @@
 #!/usr/bin/env node
 // Measures CLI startup memory with an isolated home and an in-process bench entry.
 import { spawnSync as defaultSpawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readlinkSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -88,6 +97,45 @@ function parseArgs(argv) {
     throw new Error(`Unknown option: ${arg}`);
   }
   return options;
+}
+function resolveReportPath(filePath, unresolvedLinks = new Set()) {
+  try {
+    return realpathSync.native(filePath);
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      throw error;
+    }
+    const parentPath = path.dirname(filePath);
+    if (lstatSync(filePath, { throwIfNoEntry: false })?.isSymbolicLink()) {
+      // A dangling leaf still redirects writes. Preserve its raw target so
+      // symlink/.. segments follow filesystem order, not lexical normalization.
+      const physicalParent = realpathSync.native(parentPath);
+      const linkPath = path.join(physicalParent, path.basename(filePath));
+      if (unresolvedLinks.has(linkPath)) {
+        throw error;
+      }
+      unresolvedLinks.add(linkPath);
+      const target = readlinkSync(linkPath);
+      return resolveReportPath(
+        path.isAbsolute(target) ? target : `${physicalParent}${path.sep}${target}`,
+        unresolvedLinks,
+      );
+    }
+    return path.join(resolveReportPath(parentPath, unresolvedLinks), path.basename(filePath));
+  }
+}
+function assertDistinctReportPaths({ jsonPath, summaryPath }) {
+  const jsonStat = statSync(jsonPath, { bigint: true, throwIfNoEntry: false });
+  const summaryStat = statSync(summaryPath, { bigint: true, throwIfNoEntry: false });
+  if (
+    (jsonStat &&
+      summaryStat &&
+      jsonStat.dev === summaryStat.dev &&
+      jsonStat.ino === summaryStat.ino) ||
+    resolveReportPath(jsonPath) === resolveReportPath(summaryPath)
+  ) {
+    throw new Error("--json and --summary must refer to different files");
+  }
 }
 function resolveDefaultLimitsMb(platform = process.platform) {
   return {
@@ -367,6 +415,7 @@ function runStartupMemoryCheck(argv = process.argv.slice(2), params = {}) {
     return { skipped: true, results: [] };
   }
   const options = parseArgs(argv);
+  assertDistinctReportPaths(options);
   tmpHome = mkdtempSync(path.join(os.tmpdir(), "openclaw-startup-memory-"));
   benchEntryPath = path.join(tmpHome, "bench-entry.mjs");
   // Run the real launcher in-process so peak RSS is self-reported at exit
