@@ -12,7 +12,6 @@ import {
   isDefinitiveRunLifecycle,
   type AgentRunTerminalOutcome,
 } from "../agents/agent-run-terminal-outcome.js";
-import { listAgentEntries } from "../agents/agent-scope-config.js";
 import {
   resolveAgentDir,
   resolveAgentWorkspaceDir,
@@ -20,15 +19,16 @@ import {
   resolveSessionAgentId,
 } from "../agents/agent-scope.js";
 import { ensureContextWindowCacheLoaded } from "../agents/context.js";
-import { DEFAULT_PROVIDER } from "../agents/defaults.js";
 import { resolveActiveEmbeddedRunSessionId } from "../agents/embedded-agent-runner/active-run-projections.js";
 import { queueEmbeddedAgentMessageWithOutcomeAsync } from "../agents/embedded-agent-runner/runs.js";
 import { QuestionAnswerUnconfirmedError } from "../agents/harness/gateway-question-dispatch.js";
+import { resolveThinkingDefault } from "../agents/model-selection.js";
+import { resolvePublishedModelCatalogOwner } from "../agents/prepared-model-catalog-owner.js";
 import {
-  buildAllowedModelSet,
-  buildConfiguredModelCatalog,
-  resolveThinkingDefault,
-} from "../agents/model-selection.js";
+  readPreparedModelCatalog,
+  withPreparedModelCatalogOwner,
+} from "../agents/prepared-model-catalog.js";
+import { getPreparedModelRuntimeAuthMaterializations } from "../agents/prepared-model-runtime-auth.js";
 import { loadAgentRuntimePluginRegistryHandle } from "../agents/runtime-plugins.js";
 import { readToolValidationErrorSummary } from "../agents/tool-error-summary.js";
 import { resolveTextCommand } from "../auto-reply/commands-registry.js";
@@ -45,13 +45,17 @@ import { getRuntimeConfig, registerConfigWriteListener } from "../config/config.
 import type { SessionEntry } from "../config/sessions.js";
 import { applySessionPatchProjection } from "../config/sessions/session-accessor.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import {
+  mergeAssistantText,
+  resolveAssistantTextInput,
+  type AssistantTextSnapshot,
+} from "../gateway/agent-event-assistant-text.js";
 import { isChatStopCommandText } from "../gateway/chat-abort.js";
 import { resolveEffectiveChatHistoryMaxChars } from "../gateway/chat-display-projection.js";
 import {
+  capLiveAssistantText,
   normalizeLiveAssistantBufferedText,
   projectLiveAssistantBufferedText,
-  resolveAssistantLiveChatInput,
-  resolveMergedAssistantText,
   shouldSuppressAssistantEventForLiveChat,
 } from "../gateway/live-chat-projector.js";
 import { getMaxChatHistoryMessagesBytes } from "../gateway/server-constants.js";
@@ -63,10 +67,11 @@ import {
   CHAT_HISTORY_MAX_SINGLE_MESSAGE_BYTES,
   replaceOversizedChatHistoryMessages,
 } from "../gateway/server-methods/chat.js";
-import { loadGatewayModelCatalog } from "../gateway/server-model-catalog.js";
+import { buildModelsListResult } from "../gateway/server-methods/models-list-result.js";
 import { createGatewaySession } from "../gateway/session-create-service.js";
 import { performGatewaySessionReset } from "../gateway/session-reset-service.js";
 import { capArrayByJsonBytes } from "../gateway/session-transcript-readers.js";
+import { projectSessionPatchResult } from "../gateway/session-utils-model.js";
 import {
   buildGatewaySessionInfo,
   getSessionDefaults,
@@ -89,8 +94,6 @@ import {
   setEmbeddedPluginApprovalBroker,
 } from "../infra/embedded-plugin-approval-broker.js";
 import { logInfo, logWarn } from "../logger.js";
-import type { PluginRegistry } from "../plugins/registry-types.js";
-import { withPluginRuntimeRegistryScope } from "../plugins/runtime/gateway-request-scope.js";
 import { agentSessionKeysMatchByRequestKey, normalizeAgentId } from "../routing/session-key.js";
 import { defaultRuntime } from "../runtime.js";
 import { INTERNAL_MESSAGE_CHANNEL } from "../utils/message-channel.js";
@@ -127,6 +130,7 @@ type LocalRunState = {
   agentId: string;
   controller: AbortController;
   buffer: string;
+  assistantScope?: AssistantTextSnapshot["scope"];
   managedMediaUrls: Set<string>;
   lastBroadcastText?: string;
   isBtw: boolean;
@@ -177,54 +181,20 @@ const embeddedSessionStartupMigrationLog = {
   warn: (message: string) => logWarn(message, silentRuntime),
 };
 
-function hasProviderWildcardModelAllowlist(cfg: OpenClawConfig) {
-  const modelMaps = [
-    cfg.agents?.defaults?.models,
-    ...listAgentEntries(cfg).map((agent) => agent.models),
-  ];
-  return modelMaps.some((models) =>
-    Object.keys(models ?? {}).some((key) => key.trim().endsWith("/*")),
-  );
-}
-
-function resolveConfiguredReplaceModeCatalog(cfg: OpenClawConfig) {
-  if (cfg.models?.mode !== "replace") {
-    return undefined;
-  }
-  if (hasProviderWildcardModelAllowlist(cfg)) {
-    return undefined;
-  }
-  return buildConfiguredModelCatalog({ cfg });
-}
-
-function shouldLoadFullGatewayCatalogForReplaceMode(cfg: OpenClawConfig) {
-  return cfg.models?.mode === "replace" && hasProviderWildcardModelAllowlist(cfg);
-}
-
 function ensureEmbeddedHistoryRuntimePluginsLoaded(params: {
   cfg: OpenClawConfig;
   sessionAgentId: string;
-}): { status: "warmed"; registry?: PluginRegistry } | { status: "failed"; error: string } {
+}): { status: "warmed" } | { status: "failed"; error: string } {
   try {
     const workspaceDir = resolveAgentWorkspaceDir(params.cfg, params.sessionAgentId);
-    const registry = loadAgentRuntimePluginRegistryHandle({
+    loadAgentRuntimePluginRegistryHandle({
       config: params.cfg,
       workspaceDir,
     });
-    return { status: "warmed", ...(registry ? { registry } : {}) };
+    return { status: "warmed" };
   } catch (err) {
     return { status: "failed", error: formatTuiErrorMessage(err) };
   }
-}
-
-async function loadEmbeddedTuiModelCatalog(cfg: OpenClawConfig) {
-  const configuredCatalog = resolveConfiguredReplaceModeCatalog(cfg);
-  if (configuredCatalog !== undefined) {
-    return configuredCatalog;
-  }
-  return await loadGatewayModelCatalog(
-    shouldLoadFullGatewayCatalogForReplaceMode(cfg) ? { readOnly: false } : undefined,
-  );
 }
 
 function resolveBtwQuestion(message: string): string | undefined {
@@ -359,11 +329,6 @@ async function waitForQueuedLocalRun(previousRun: QueuedSessionRun, runId: strin
 }
 
 export class EmbeddedTuiBackend implements TuiBackend {
-  private runtimePluginRegistry?: PluginRegistry;
-
-  private withRuntimePluginRegistry<T>(run: () => T): T {
-    return withPluginRuntimeRegistryScope(this.runtimePluginRegistry, run);
-  }
   readonly connection = { url: "local embedded" };
 
   onEvent?: (evt: TuiEvent) => void;
@@ -632,6 +597,7 @@ export class EmbeddedTuiBackend implements TuiBackend {
 
   async loadHistory(opts: { sessionKey: string; agentId?: string; limit?: number }) {
     await this.ready;
+    await this.preparedModelRuntime.waitUntilReady();
     const loadOptions = opts.agentId ? { agentId: opts.agentId } : undefined;
     const {
       cfg,
@@ -649,8 +615,6 @@ export class EmbeddedTuiBackend implements TuiBackend {
       cfg,
       sessionAgentId,
     });
-    this.runtimePluginRegistry =
-      runtimePluginsPrewarm.status === "warmed" ? runtimePluginsPrewarm.registry : undefined;
     const resolvedSessionModel = resolveSessionModelRef(cfg, entry, sessionAgentId);
     const max = Math.min(
       CHAT_HISTORY_MAX_ENTRIES,
@@ -700,7 +664,11 @@ export class EmbeddedTuiBackend implements TuiBackend {
 
     let thinkingLevel = entry?.thinkingLevel;
     if (!thinkingLevel) {
-      const catalog = await this.withRuntimePluginRegistry(() => loadEmbeddedTuiModelCatalog(cfg));
+      const catalog = await readPreparedModelCatalog({
+        config: cfg,
+        agentId: sessionAgentId,
+        readOnly: true,
+      });
       thinkingLevel = resolveThinkingDefault({
         cfg,
         provider: resolvedSessionModel.provider,
@@ -730,10 +698,7 @@ export class EmbeddedTuiBackend implements TuiBackend {
       thinkingLevel,
       fastMode: entry?.fastMode,
       verboseLevel: sessionInfo.verboseLevel,
-      runtimePluginsPrewarm:
-        runtimePluginsPrewarm.status === "warmed"
-          ? { status: "warmed" as const }
-          : runtimePluginsPrewarm,
+      runtimePluginsPrewarm,
       ...(inFlightRun ? { inFlightRun } : {}),
     };
   }
@@ -762,6 +727,7 @@ export class EmbeddedTuiBackend implements TuiBackend {
     opts: Parameters<TuiBackend["patchSession"]>[0],
   ): Promise<SessionsPatchResult> {
     await this.ready;
+    await this.preparedModelRuntime.waitUntilReady();
     const cfg = getRuntimeConfig();
     const target = resolveGatewaySessionStoreTargetWithStore({
       cfg,
@@ -790,24 +756,21 @@ export class EmbeddedTuiBackend implements TuiBackend {
           agentId: target.agentId,
           patch: opts,
           loadGatewayModelCatalog: () =>
-            this.withRuntimePluginRegistry(() => loadEmbeddedTuiModelCatalog(cfg)),
+            readPreparedModelCatalog({ config: cfg, agentId: target.agentId, readOnly: true }),
         }),
     });
     if (!applied.ok) {
       throw new Error(applied.error.message);
     }
 
-    const resolved = resolveSessionModelRef(cfg, applied.entry, target.agentId);
-    return {
-      ok: true as const,
-      path: target.storePath,
-      key: target.canonicalKey ?? opts.key,
-      entry: { ...applied.entry },
-      resolved: {
-        modelProvider: resolved.provider,
-        model: resolved.model,
-      },
-    };
+    const projected = projectSessionPatchResult({
+      canonicalKey: target.canonicalKey ?? opts.key,
+      cfg,
+      entry: applied.entry,
+      storePath: target.storePath,
+      targetAgentId: target.agentId,
+    });
+    return { ...projected, entry: { ...projected.entry } };
   }
 
   async resetSession(key: string, reason?: "new" | "reset", opts?: { agentId?: string }) {
@@ -834,6 +797,7 @@ export class EmbeddedTuiBackend implements TuiBackend {
 
   async createSession(opts: TuiSessionCreateOptions) {
     await this.ready;
+    await this.preparedModelRuntime.waitUntilReady();
     const cfg = getRuntimeConfig();
     const result = await createGatewaySession({
       cfg,
@@ -844,7 +808,15 @@ export class EmbeddedTuiBackend implements TuiBackend {
       emitCommandHooks: Boolean(opts.parentSessionKey),
       commandSource: "tui:embedded",
       loadGatewayModelCatalog: () =>
-        this.withRuntimePluginRegistry(() => loadEmbeddedTuiModelCatalog(cfg)),
+        readPreparedModelCatalog({
+          config: cfg,
+          agentId: resolveSessionAgentId({
+            sessionKey: opts.key,
+            config: cfg,
+            agentId: opts.agentId,
+          }),
+          readOnly: true,
+        }),
     });
     if (!result.ok) {
       throw new Error(result.error.message);
@@ -927,21 +899,27 @@ export class EmbeddedTuiBackend implements TuiBackend {
   }
 
   async listModels(opts?: { agentId?: string }): Promise<TuiModelChoice[]> {
+    await this.ready;
+    await this.preparedModelRuntime.waitUntilReady();
     const cfg = getRuntimeConfig();
-    const catalog = await this.withRuntimePluginRegistry(() => loadEmbeddedTuiModelCatalog(cfg));
-    const { allowedCatalog } = buildAllowedModelSet({
-      cfg,
-      catalog,
-      defaultProvider: DEFAULT_PROVIDER,
-      agentId: opts?.agentId,
-    });
-    return allowedCatalog.map((entry) => ({
-      id: entry.id,
-      name: entry.name ?? entry.id,
-      provider: entry.provider,
-      contextWindow: entry.contextWindow,
-      reasoning: entry.reasoning,
-    }));
+    const agentId = opts?.agentId ?? resolveDefaultAgentId(cfg);
+    return await withPreparedModelCatalogOwner(
+      { config: cfg, agentId, readOnly: true },
+      async (snapshot) =>
+        (
+          await buildModelsListResult({
+            source: {
+              kind: "published",
+              owner: {
+                ...resolvePublishedModelCatalogOwner(snapshot),
+                authMaterializations: getPreparedModelRuntimeAuthMaterializations(snapshot),
+              },
+            },
+            agentId,
+            params: { includeDetails: true },
+          })
+        ).models,
+    );
   }
 
   async runGoalCommand(opts: Parameters<NonNullable<TuiBackend["runGoalCommand"]>>[0]) {
@@ -1325,7 +1303,7 @@ export class EmbeddedTuiBackend implements TuiBackend {
     }
 
     const assistantLiveChatInput =
-      evt.stream === "assistant" ? resolveAssistantLiveChatInput(evt.data) : undefined;
+      evt.stream === "assistant" ? resolveAssistantTextInput(evt.data) : undefined;
     if (
       assistantLiveChatInput &&
       !run.isBtw &&
@@ -1334,11 +1312,13 @@ export class EmbeddedTuiBackend implements TuiBackend {
       for (const url of assistantLiveChatInput.managedMediaUrls ?? []) {
         run.managedMediaUrls.add(url);
       }
-      run.buffer = resolveMergedAssistantText({
-        previousText: run.buffer,
-        nextText: assistantLiveChatInput.text,
-        nextDelta: assistantLiveChatInput.delta,
-      });
+      const snapshot = mergeAssistantText(
+        { text: run.buffer, scope: run.assistantScope },
+        assistantLiveChatInput,
+        "live",
+      );
+      run.assistantScope = snapshot.scope;
+      run.buffer = capLiveAssistantText(snapshot);
       this.emitChatDelta(evt.runId, run);
       return;
     }
@@ -1361,6 +1341,7 @@ export class EmbeddedTuiBackend implements TuiBackend {
     run.finishing = false;
     if (phase === "error") {
       run.buffer = "";
+      delete run.assistantScope;
     }
     if (this.projectTerminalOutcome(evt.runId, run, evt.data)) {
       return;

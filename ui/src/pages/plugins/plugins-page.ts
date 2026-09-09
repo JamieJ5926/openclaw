@@ -567,6 +567,7 @@ class PluginsPage extends OpenClawLightDomElement {
         onSelect: (tab) => this.selectHubTab(tab),
       })}
       ${renderSettingsWorkspace(html`
+        <openclaw-plugin-manager></openclaw-plugin-manager>
         ${
           discovery
             ? html`<wa-tab-panel

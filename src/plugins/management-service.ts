@@ -6,7 +6,7 @@ import type {
   PluginsInspectResult,
 } from "../../packages/gateway-protocol/src/schema/plugins.js";
 import { resolveConfigWidePluginMetadataSnapshot } from "../config/io.plugin-metadata.js";
-import { resolveIsNixMode } from "../config/paths.js";
+import { resolveIsConfigReadOnly } from "../config/paths.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { resolvePendingPluginCapabilityReview } from "./capability-consent.js";
 import {
@@ -32,7 +32,6 @@ import { createInstalledPluginOwnershipResolver } from "./installed-plugin-packa
 import {
   type ManagedPluginCatalogEntry,
   type ManagedPluginCatalog,
-  type OfficialCatalogResult,
   getManagedPluginCache,
   withManagedPluginCache,
   prepareCatalogEntry,
@@ -56,6 +55,7 @@ import {
   resolveOfficialExternalPluginId,
   resolveOfficialExternalPluginLabel,
 } from "./official-external-plugin-catalog.js";
+import type { OfficialCatalogResult } from "./official-external-plugin-catalog.types.js";
 import { tracksPluginDependencyStatus } from "./official-external-plugin-repair-hints.js";
 import { createPluginCache, getProcessPluginCache, withPluginCache } from "./plugin-cache.js";
 import {
@@ -448,7 +448,7 @@ export const listManagedPlugins = withManagedPluginCache(
     return {
       plugins: plugins.toSorted(compareCatalogEntries),
       diagnostics,
-      mutationAllowed: !resolveIsNixMode(env),
+      mutationAllowed: !resolveIsConfigReadOnly(env),
     };
   },
 );

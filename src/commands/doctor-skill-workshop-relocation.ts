@@ -157,7 +157,6 @@ function retargetWorkshopProposal(
       skillFile: target.skillFile,
       source: "openclaw-workshop",
     },
-    updatedAt: new Date().toISOString(),
   };
 }
 
@@ -228,18 +227,12 @@ export async function readLegacyWorkshopSourceStat(workspaceDir: string, source:
   return sourceStat;
 }
 
-export async function planWorkshopRelocation(
+export function classifyWorkshopRelocation(
   records: LegacyWorkshopProposal[],
   config: OpenClawConfig,
   env: NodeJS.ProcessEnv,
   deferredSources: ReadonlySet<string> = new Set(),
-): Promise<{
-  moves: WorkshopMove[];
-  updates: WorkshopProposalUpdate[];
-  externalProposalCount: number;
-  externalProposalCountsByAgent: Record<string, number>;
-  warnings: string[];
-}> {
+) {
   const candidates = records.flatMap<WorkshopRelocationPlan>((entry) => {
     if (entry.record.status !== "pending" && entry.record.status !== "applied") {
       return [];
@@ -275,6 +268,21 @@ export async function planWorkshopRelocation(
   const external = candidates.filter(
     ({ record }) => record.status === "pending" || record.kind === "create",
   );
+  return { candidates, external };
+}
+
+export async function planWorkshopRelocation(
+  records: LegacyWorkshopProposal[],
+  config: OpenClawConfig,
+  env: NodeJS.ProcessEnv,
+  deferredSources: ReadonlySet<string> = new Set(),
+) {
+  const { candidates, external } = classifyWorkshopRelocation(
+    records,
+    config,
+    env,
+    deferredSources,
+  );
   const warnings: string[] = [];
   const deferredWorkspaces = new Set<string>();
   for (const workspaceDir of new Set(external.map((plan) => plan.workspaceDir))) {
@@ -282,7 +290,11 @@ export async function planWorkshopRelocation(
       continue;
     }
     try {
-      assertWorkspaceStateMigrationReady({ workspaceDirs: [workspaceDir], env });
+      assertWorkspaceStateMigrationReady({
+        workspaceDirs: [workspaceDir],
+        env,
+        operation: "doctor",
+      });
     } catch (error) {
       // Doctor owns legacy-file import. Leave every proposal for this workspace
       // unchanged until that import and its source cleanup have both finished.
@@ -503,12 +515,6 @@ export async function planWorkshopRelocation(
       (move) => !conflictsBySource.has(move.source) && !deferredMoveSources.has(move.source),
     ),
     updates,
-    externalProposalCount: external.length,
-    externalProposalCountsByAgent: external.reduce<Record<string, number>>((counts, plan) => {
-      const ownerAgentId = plan.ownerAgentId ?? plan.unconfiguredOwnerAgentId ?? "unknown";
-      counts[ownerAgentId] = (counts[ownerAgentId] ?? 0) + 1;
-      return counts;
-    }, {}),
     warnings,
   };
 }
