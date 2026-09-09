@@ -247,7 +247,7 @@ describeControlUiE2e("Control UI chat message actions", () => {
       expect(await gateway.getRequests("chat.send")).toHaveLength(0);
 
       await page.getByRole("button", { name: "Open parent session", exact: true }).click();
-      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
+      const composer = page.locator(".agent-chat__composer-combobox textarea");
       await composer.waitFor({ state: "visible" });
       if (viewport.name === "mobile") {
         await bubble.tap();

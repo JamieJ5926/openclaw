@@ -87,6 +87,7 @@ import {
 } from "./stale-chunk-reload.ts";
 import {
   READY_STARTUP_PRESENTATION,
+  STARTUP_REGION_READY_EVENT,
   type StartupPresentation,
   type StartupPresentationController,
 } from "./startup-presentation.ts";
@@ -330,6 +331,7 @@ class OpenClawShell
   constructor() {
     super();
     this.addEventListener(CHAT_ROUTE_READY_EVENT, () => this.requestUpdate());
+    this.addEventListener(STARTUP_REGION_READY_EVENT, () => this.requestUpdate());
     this.addEventListener(CHAT_TRANSCRIPT_LOADING_CHANGED_EVENT, () => this.requestUpdate());
     this.addEventListener(CHAT_PANE_LIFECYCLE_CHANGED_EVENT, () => this.requestUpdate());
     this.addEventListener(PLUGIN_SURFACE_PRESENTATION_CHANGED_EVENT, () => this.requestUpdate());

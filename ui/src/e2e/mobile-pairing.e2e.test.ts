@@ -75,7 +75,7 @@ suite.define(() => {
         .locator(".chat-group.assistant .chat-text")
         .getByText(baselineText, { exact: true });
       await baseline.waitFor();
-      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
+      const composer = page.locator(".agent-chat__composer-combobox textarea");
       await composer.fill("/pa");
       await gateway.waitForRequest("commands.list");
       const pairOption = page.getByRole("option").filter({ hasText: "/pair" });

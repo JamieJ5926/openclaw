@@ -634,7 +634,7 @@ suite.define(() => {
 
     await page.goto(`${suite.server.baseUrl}chat`);
     await page.getByText("Ready for the running tool wave proof.").waitFor();
-    await page.locator("openclaw-chat-pane .agent-chat__input textarea").fill("run a long command");
+    await page.locator(".agent-chat__input textarea").fill("run a long command");
     await page.getByRole("button", { name: "Send message" }).click();
     const send = await gateway.waitForRequest("chat.send");
     const runId = (send.params as { idempotencyKey?: string }).idempotencyKey as string;
@@ -809,9 +809,7 @@ suite.define(() => {
       });
 
       await page.goto(`${suite.server.baseUrl}chat`);
-      await page
-        .locator("openclaw-chat-pane .agent-chat__input textarea")
-        .fill("run the reviewed command");
+      await page.locator(".agent-chat__input textarea").fill("run the reviewed command");
       await page.getByRole("button", { name: "Send message" }).click();
       const send = await gateway.waitForRequest("chat.send");
       const runId = (send.params as { idempotencyKey?: string }).idempotencyKey as string;

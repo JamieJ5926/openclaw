@@ -259,9 +259,7 @@ suite.define(() => {
       await checkDelivery.waitFor({ state: "visible" });
       await expectPastedPngImage(retainedTurn.locator("img.chat-message-image"));
       await expect
-        .poll(() =>
-          page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea").isDisabled(),
-        )
+        .poll(() => page.locator(".agent-chat__composer-combobox textarea").isDisabled())
         .toBe(true);
 
       const historyCount = (await gateway.getRequests("chat.history")).length;

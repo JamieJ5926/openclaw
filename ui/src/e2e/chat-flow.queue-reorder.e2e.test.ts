@@ -20,7 +20,7 @@ suite.define(() => {
 
     try {
       await page.goto(`${suite.server.baseUrl}chat`);
-      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
+      const composer = page.locator(".agent-chat__composer-combobox textarea");
       await composer.waitFor({ state: "visible", timeout: 15_000 });
 
       // Offline is the honest way to hold a queue still: nothing drains while
@@ -77,7 +77,7 @@ suite.define(() => {
 
     try {
       await page.goto(`${suite.server.baseUrl}chat`);
-      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
+      const composer = page.locator(".agent-chat__composer-combobox textarea");
       await composer.waitFor({ state: "visible", timeout: 15_000 });
 
       await gateway.setOnline(false);

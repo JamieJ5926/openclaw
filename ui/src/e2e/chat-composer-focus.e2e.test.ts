@@ -215,7 +215,7 @@ suite.define(() => {
       await page.goto(`${suite.server.baseUrl}chat`);
       await gateway.waitForRequest("chat.startup");
 
-      const composer = page.locator("openclaw-chat-pane .agent-chat__input");
+      const composer = page.locator(".agent-chat__input");
       const textarea = composer.locator("textarea");
       await composer.waitFor({ state: "visible" });
 

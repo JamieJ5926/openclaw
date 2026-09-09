@@ -295,49 +295,6 @@ describe("optional custom element requests", () => {
     expect(element.loadModule).toHaveBeenCalledTimes(2);
   });
 
-  it("preserves a reportable preload failure behind the current request without retrying after dismissal", async () => {
-    const { requests, requestUpdate } = createRequestHarness();
-    const pendingLoad = createDeferred();
-    const currentTag = uniqueTag();
-    const current = {
-      tagName: currentTag,
-      label: "current panel",
-      loadModule: vi.fn(async () => {
-        await pendingLoad.promise;
-        customElements.define(currentTag, class extends HTMLElement {});
-      }),
-    };
-    const error = new Error("native controls unavailable");
-    const preloaded = {
-      tagName: uniqueTag(),
-      label: "native controls",
-      loadModule: vi.fn(async () => {
-        throw error;
-      }),
-    };
-
-    requests.request(current);
-    requests.preload(preloaded, { reportError: true });
-    await waitForFast(() => expect(requests.isPreloading(preloaded)).toBe(false));
-    expect(preloaded.loadModule).toHaveBeenCalledOnce();
-    expect(requests.visibleState).toMatchObject({ element: current, status: "loading" });
-
-    pendingLoad.resolve();
-    await waitForFast(() =>
-      expect(requests.visibleState).toMatchObject({
-        element: preloaded,
-        error,
-        stale: false,
-        status: "error",
-      }),
-    );
-    requestUpdate.mockImplementationOnce(() => requests.preload(preloaded, { reportError: true }));
-    requests.close();
-    await waitForFast(() => expect(requests.isPreloading(preloaded)).toBe(false));
-    expect(requests.visibleState).toBeUndefined();
-    expect(preloaded.loadModule).toHaveBeenCalledOnce();
-  });
-
   it("reports a preload failure when an active surface opts into recovery", async () => {
     const error = new Error("chunk unavailable");
     const { requests, requestUpdate } = createRequestHarness();
@@ -349,7 +306,21 @@ describe("optional custom element requests", () => {
       }),
     };
 
+    const pending = createDeferred();
+    const tagName = uniqueTag();
+    const current = {
+      tagName,
+      label: "current panel",
+      loadModule: async () => {
+        await pending.promise;
+        customElements.define(tagName, class extends HTMLElement {});
+      },
+    };
+    requests.request(current);
     requests.preload(element, { reportError: true });
+    await waitForFast(() => expect(requests.isPreloading(element)).toBe(false));
+    expect(requests.visibleState?.element).toBe(current);
+    pending.resolve();
 
     await waitForFast(() =>
       expect(requests.visibleState).toMatchObject({
@@ -359,7 +330,6 @@ describe("optional custom element requests", () => {
         status: "error",
       }),
     );
-    await waitForFast(() => expect(requests.isPreloading(element)).toBe(false));
     requestUpdate.mockImplementationOnce(() => requests.preload(element, { reportError: true }));
     requests.close();
     await waitForFast(() => expect(requests.isPreloading(element)).toBe(false));

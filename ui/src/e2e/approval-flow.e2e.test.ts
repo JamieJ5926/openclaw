@@ -215,9 +215,7 @@ suite.define(() => {
     await currentPage.goto(`${suite.server?.baseUrl ?? ""}chat`);
     await gateway.waitForRequest("sessions.list");
 
-    const composer = currentPage.locator(
-      "openclaw-chat-pane .agent-chat__composer-combobox textarea",
-    );
+    const composer = currentPage.locator(".agent-chat__composer-combobox textarea");
     await composer.fill("run a command that needs approval");
     await currentPage.getByRole("button", { name: "Send message" }).click();
     const firstSend = requireRecord((await gateway.waitForRequest("chat.send")).params);

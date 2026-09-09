@@ -369,7 +369,7 @@ suite.define(() => {
 
   it("restores the composer and its draft from an authoritative answer without a resolution event", async () => {
     const { gateway, page } = await openQuestionPage();
-    const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
+    const composer = page.locator(".agent-chat__composer-combobox textarea");
     await composer.fill("Keep this release note draft");
     const request = questionRecord("question-deploy-target", [
       {
@@ -684,7 +684,7 @@ suite.define(() => {
     expect(resolveRequest.params).toEqual({ id: request.id, cancel: true });
     await expect.poll(() => panel.count()).toBe(0);
     await expectQuestionAttention(page, false);
-    await page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea").waitFor();
+    await page.locator(".agent-chat__composer-combobox textarea").waitFor();
     await expect
       .poll(() => page.locator(".chat-question-summary").filter({ hasText: "Skipped" }).count())
       .toBe(1);
@@ -805,7 +805,7 @@ suite.define(() => {
 
     await expect.poll(() => panel.count()).toBe(0);
     await expectQuestionAttention(page, false);
-    await page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea").waitFor();
+    await page.locator(".agent-chat__composer-combobox textarea").waitFor();
     expect(await gateway.getRequests("question.get")).toHaveLength(2);
   });
 

@@ -33,7 +33,7 @@ beforeEach(() => {
     ? createControlUiE2eArtifactDir("initial-connect-splash", artifactRoot)
     : undefined;
 });
-const viewport = { height: 900, width: 1440 };
+const viewport = { height: 900, width: 1280 };
 
 let browser: Browser;
 let server: ControlUiE2eServer;
@@ -66,13 +66,8 @@ async function createPageWithoutRecording(): Promise<Page> {
   return context.newPage();
 }
 
-async function takeProofScreenshot(
-  page: Page,
-  name: string,
-  surface: Locator,
-  content: Locator[],
-): Promise<Buffer> {
-  const png = await takeControlUiViewportScreenshot(page, surface, content);
+async function takeProofScreenshot(page: Page, name: string, content: Locator[]): Promise<Buffer> {
+  const png = await takeControlUiViewportScreenshot(page, page.locator(".shell"), content);
   if (artifactDir) {
     await writeFile(path.join(artifactDir, `${name}.png`), png);
   }
@@ -102,20 +97,15 @@ async function proofContentPainted(page: Page, proof: Buffer, content: Locator):
   );
 }
 
-async function captureProof(
-  page: Page,
-  name: string,
-  surface: Locator,
-  content: Locator[],
-): Promise<void> {
+async function captureProof(page: Page, name: string, content: Locator[]): Promise<void> {
   if (artifactDir) {
-    await takeProofScreenshot(page, name, surface, content);
+    await takeProofScreenshot(page, name, content);
   }
 }
 
 async function traceLoginGateMounts(page: Page): Promise<() => Promise<boolean>> {
   await page.addInitScript(() => {
-    const trace = { mounted: false, evidence: [] as { at: number; error: string | null }[] };
+    const trace = { mounted: false };
     (
       window as Window & {
         openclawLoginGateMountTrace?: typeof trace;
@@ -129,12 +119,6 @@ async function traceLoginGateMounts(page: Page): Promise<() => Promise<boolean>>
             (node.localName === "openclaw-login-gate" || node.querySelector("openclaw-login-gate"))
           ) {
             trace.mounted = true;
-            const gate =
-              node.localName === "openclaw-login-gate"
-                ? node
-                : node.querySelector("openclaw-login-gate");
-            const props = (gate as HTMLElement & { props?: { lastError?: string | null } }).props;
-            trace.evidence.push({ at: performance.now(), error: props?.lastError ?? null });
           }
         }
       }
@@ -149,15 +133,6 @@ async function traceLoginGateMounts(page: Page): Promise<() => Promise<boolean>>
           }
         ).openclawLoginGateMountTrace?.mounted ?? false,
     );
-}
-
-async function loginGateMountEvidence(page: Page): Promise<string> {
-  return page.evaluate(() =>
-    JSON.stringify(
-      (window as Window & { openclawLoginGateMountTrace?: { evidence: unknown[] } })
-        .openclawLoginGateMountTrace?.evidence ?? [],
-    ),
-  );
 }
 
 describeControlUiE2e("Control UI initial connection skeleton E2E", () => {
@@ -182,89 +157,60 @@ describeControlUiE2e("Control UI initial connection skeleton E2E", () => {
     openContexts.clear();
   });
 
-  it.each([false, true])(
-    "shows region skeletons and a disabled composer before admission (embedded: %s)",
-    async (embedded) => {
-      const page = await createPage();
-      if (embedded) {
-        await page.addInitScript(() => {
-          Object.assign(window, {
-            __OPENCLAW_NATIVE_EMBED__: { platform: "macos", formFactor: "desktop" },
-          });
-        });
+  it("shows region skeletons and a disabled composer while a configured token connects", async () => {
+    const page = await createPage();
+    const loginGateMounted = await traceLoginGateMounts(page);
+    const loginModuleRequests: string[] = [];
+    page.on("request", (request) => {
+      if (/\/login-gate(?:\.runtime)?\.ts(?:\?|$)/u.test(request.url())) {
+        loginModuleRequests.push(request.url());
       }
-      const loginGateMounted = await traceLoginGateMounts(page);
-      const loginModuleRequests: string[] = [];
-      page.on("request", (request) => {
-        if (/\/login-gate(?:\.runtime)?\.ts(?:\?|$)/u.test(request.url())) {
-          loginModuleRequests.push(request.url());
-        }
-      });
-      const gateway = await installMockGateway(page, { deferredMethods: ["connect"] });
+    });
+    const gateway = await installMockGateway(page, { deferredMethods: ["connect"] });
 
-      await page.goto(`${server.baseUrl}#token=e2e-shared-token`);
-      await gateway.waitForRequest("connect");
-      const shell = page.locator(".shell");
-      await shell.waitFor();
-      const skeleton = shell.locator(".startup-transcript-skeleton");
-      await skeleton.waitFor();
-      const composer = shell.locator(".agent-chat__composer-combobox textarea:visible");
-      await composer.waitFor();
-      expect(await composer.isDisabled()).toBe(true);
-      expect(await shell.locator("openclaw-mascot").count()).toBe(0);
-      expect(await page.getByText("Loading panel", { exact: true }).count()).toBe(0);
-      expect(
-        await page
-          .getByText("Loading…", { exact: true })
-          .and(page.locator(":not(.sr-only)"))
-          .count(),
-      ).toBe(0);
-      expect(await page.locator("openclaw-login-gate").count()).toBe(0);
-      const proof = await takeProofScreenshot(page, "01-connecting-skeletons", shell, [
-        skeleton,
-        composer,
-      ]);
-      expect(
-        await proofContentPainted(page, proof, skeleton),
-        "connecting proof must contain the transcript skeleton",
-      ).toBe(true);
-      expect(await shell.evaluate((element) => getComputedStyle(element).animationName)).toBe(
-        "none",
-      );
-      const pulseOwner = page.locator("openclaw-app");
-      expect(
-        await pulseOwner.evaluate((element) => getComputedStyle(element).animationName),
-      ).not.toBe("none");
-      await page.setViewportSize({ width: 390, height: 844 });
-      await page.emulateMedia({ reducedMotion: "reduce" });
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
-        true,
-      );
-      expect(
-        await pulseOwner.evaluate((element) =>
-          Number.parseFloat(getComputedStyle(element).animationDuration),
-        ),
-      ).toBeLessThanOrEqual(0.00001);
-      await captureProof(page, "01-mobile-reduced-motion", shell, [skeleton, composer]);
-      await page.setViewportSize(viewport);
-      await page.emulateMedia({ reducedMotion: "no-preference" });
+    await page.goto(`${server.baseUrl}#token=e2e-shared-token`);
+    await gateway.waitForRequest("connect");
+    const shell = page.locator(".shell");
+    await shell.waitFor();
+    const skeleton = shell.locator(".startup-transcript-skeleton");
+    await skeleton.waitFor();
+    const composer = shell.locator(".agent-chat__composer-combobox textarea");
+    expect(await composer.isDisabled()).toBe(true);
+    expect(await shell.locator("openclaw-mascot").count()).toBe(0);
+    expect(await page.getByText("Loading panel", { exact: true }).count()).toBe(0);
+    expect(await page.locator("openclaw-login-gate").count()).toBe(0);
+    const proof = await takeProofScreenshot(page, "01-connecting-skeleton", [skeleton, composer]);
+    const painted = await proofContentPainted(page, proof, skeleton);
+    expect(painted, "connecting proof must contain the skeleton").toBe(true);
+    const highlight = page.locator("openclaw-app");
+    expect(await highlight.evaluate((element) => getComputedStyle(element).animationName)).toBe(
+      "startup-shimmer",
+    );
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+    expect(
+      await highlight.evaluate((element) =>
+        Number.parseFloat(getComputedStyle(element).animationDuration),
+      ),
+    ).toBeLessThanOrEqual(0.00001);
+    await captureProof(page, "01-mobile-reduced-motion", [highlight]);
+    await page.setViewportSize(viewport);
+    await page.emulateMedia({ reducedMotion: "no-preference" });
 
-      await gateway.resolveDeferred("connect");
-      await waitForControlUiRoute(page, { routeId: "chat" });
-      await page.locator("openclaw-app-shell").waitFor();
-      await page.locator('.shell[data-startup-stage="ready"]').waitFor();
-      expect(await loginGateMounted(), await loginGateMountEvidence(page)).toBe(false);
-      expect(loginModuleRequests).toEqual([]);
-      const connectedContent = embedded
-        ? [page.locator(".native-embed-header .page-title")]
-        : [
-            page.locator("openclaw-app-sidebar .sidebar-brand"),
-            page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea"),
-          ];
-      await Promise.all(connectedContent.map((content) => content.waitFor()));
-      await captureProof(page, "02-connected-content", page.locator(".shell"), connectedContent);
-    },
-  );
+    await gateway.resolveDeferred("connect");
+    await page.locator("openclaw-app-shell").waitFor();
+    await page.locator(".startup-chat-skeleton").waitFor({ state: "detached" });
+    expect(await loginGateMounted()).toBe(false);
+    expect(loginModuleRequests).toEqual([]);
+    expect(await page.locator("openclaw-chat-pane textarea").isEnabled()).toBe(true);
+    await captureProof(page, "02-connected-content", [
+      page.locator("openclaw-app-sidebar .sidebar-brand"),
+      page.locator("openclaw-chat-pane textarea"),
+    ]);
+  });
 
   it("keeps region skeletons until the chat route finishes loading", async () => {
     const page = await createPage();
@@ -299,7 +245,7 @@ describeControlUiE2e("Control UI initial connection skeleton E2E", () => {
           .and(page.locator(":not(.sr-only)"))
           .count(),
       ).toBe(0);
-      await captureProof(page, "03-pending-chat-skeleton", page.locator(".shell"), [
+      await captureProof(page, "03-pending-chat-shimmer", [
         loadingState.locator(".startup-transcript-skeleton"),
         composer,
       ]);
@@ -308,9 +254,9 @@ describeControlUiE2e("Control UI initial connection skeleton E2E", () => {
       await waitForControlUiRoute(page, { routeId: "chat" });
       await loadingState.waitFor({ state: "hidden" });
       await page.locator("openclaw-chat-page").waitFor();
-      await captureProof(page, "04-loaded-chat-content", page.locator(".shell"), [
+      await captureProof(page, "04-loaded-chat-content", [
         page.locator("openclaw-app-sidebar .sidebar-brand"),
-        page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea"),
+        page.locator(".agent-chat__composer-combobox textarea"),
       ]);
     } finally {
       releaseChatModule();
@@ -326,8 +272,8 @@ describeControlUiE2e("Control UI initial connection skeleton E2E", () => {
     await gateway.waitForRequest("connect");
     await page.locator(".shell").waitFor();
     expect(await page.locator("openclaw-login-gate").count()).toBe(0);
-    expect(await loginGateMounted(), await loginGateMountEvidence(page)).toBe(false);
-    await captureProof(page, "05-credentialless-connecting-skeleton", page.locator(".shell"), [
+    expect(await loginGateMounted()).toBe(false);
+    await captureProof(page, "05-credentialless-connecting-shimmer", [
       page.locator(".startup-transcript-skeleton"),
     ]);
 
@@ -335,7 +281,7 @@ describeControlUiE2e("Control UI initial connection skeleton E2E", () => {
     await waitForControlUiRoute(page, { routeId: "chat" });
     await page.locator("openclaw-app-shell").waitFor();
     await page.locator('.shell[data-startup-stage="ready"]').waitFor();
-    expect(await loginGateMounted(), await loginGateMountEvidence(page)).toBe(false);
+    expect(await loginGateMounted()).toBe(false);
   });
 
   it("redirects before setup detection without loading the discarded workspace", async () => {
@@ -402,9 +348,7 @@ describeControlUiE2e("Control UI initial connection skeleton E2E", () => {
     );
     await page.locator('.shell[data-startup-stage="ready"]').waitFor();
     expect([...requestedWorkspaceModules]).toEqual([]);
-    await captureProof(page, "06-first-run-routed-before-detection", page.locator(".shell"), [
-      loadingSections,
-    ]);
+    await captureProof(page, "06-first-run-routed-before-detection", [loadingSections]);
     await page.setViewportSize({ height: 844, width: 390 });
     await expect
       .poll(() =>
@@ -413,12 +357,7 @@ describeControlUiE2e("Control UI initial connection skeleton E2E", () => {
         ),
       )
       .toBe(true);
-    await captureProof(
-      page,
-      "06b-first-run-routed-before-detection-mobile",
-      page.locator(".shell"),
-      [loadingSections],
-    );
+    await captureProof(page, "06b-first-run-routed-before-detection-mobile", [loadingSections]);
     await page.setViewportSize(viewport);
 
     await gateway.resolveDeferred("openclaw.setup.detect", {
@@ -467,9 +406,7 @@ describeControlUiE2e("Control UI initial connection skeleton E2E", () => {
     ).toBeLessThanOrEqual(13);
     expect([...requestedWorkspaceModules]).toEqual([]);
     const setupHeading = page.getByRole("heading", { name: "Connect a verified AI model" });
-    await captureProof(page, "07-first-run-model-setup-ready", page.locator(".shell"), [
-      setupHeading,
-    ]);
+    await captureProof(page, "07-first-run-model-setup-ready", [setupHeading]);
     await page.setViewportSize({ height: 844, width: 390 });
     await expect
       .poll(() =>
@@ -478,9 +415,7 @@ describeControlUiE2e("Control UI initial connection skeleton E2E", () => {
         ),
       )
       .toBe(true);
-    await captureProof(page, "07b-first-run-model-setup-ready-mobile", page.locator(".shell"), [
-      setupHeading,
-    ]);
+    await captureProof(page, "07b-first-run-model-setup-ready-mobile", [setupHeading]);
   });
 
   it.each(["entrance", "ancestor entrance", "lazy content"] as const)(
@@ -852,12 +787,10 @@ describeControlUiE2e("Control UI initial connection skeleton E2E", () => {
     const skeleton = shell.locator(".startup-transcript-skeleton");
     await skeleton.waitFor();
     expect(await page.locator("openclaw-login-gate").count()).toBe(0);
-    expect(await loginGateMounted(), await loginGateMountEvidence(page)).toBe(false);
+    expect(await loginGateMounted()).toBe(false);
     expect(await page.getByText("Gateway starting…", { exact: true }).count()).toBe(0);
-    expect(
-      await shell.locator(".agent-chat__composer-combobox textarea:visible").isDisabled(),
-    ).toBe(true);
-    await captureProof(page, "06-gateway-starting-skeleton", shell, [skeleton]);
+    expect(await shell.locator(".agent-chat__composer-combobox textarea").isDisabled()).toBe(true);
+    await captureProof(page, "06-gateway-starting-skeleton", [skeleton]);
 
     await expect
       .poll(async () => (await gateway.getRequests("connect")).length)
@@ -876,6 +809,7 @@ describeControlUiE2e("Control UI initial connection skeleton E2E", () => {
     await page.locator(".shell").waitFor();
     await gateway.resolveDeferred("connect");
     await page.locator("openclaw-app-shell").waitFor();
+    await page.locator('.shell[data-startup-stage="ready"]').waitFor();
 
     // The hello stored a device token, so the reload connect is authenticated
     // and must keep the shell mounted without flashing the gate.

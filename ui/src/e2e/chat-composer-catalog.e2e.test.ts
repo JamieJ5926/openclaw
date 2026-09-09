@@ -114,7 +114,7 @@ suite.define(() => {
 
         await page.goto(controlUiSessionUrl(suite.server.baseUrl, session.key));
         await gateway.waitForRequest("chat.startup");
-        const composer = page.locator("openclaw-chat-pane .agent-chat__input");
+        const composer = page.locator(".agent-chat__input");
         const trigger = composer.locator('[data-chat-model-select="true"]');
 
         await expect.poll(() => trigger.textContent()).toContain("Qwen 3.5 9B");
@@ -274,7 +274,7 @@ suite.define(() => {
       await gateway.waitForRequest("chat.metadata");
       await gateway.waitForRequest("models.list");
 
-      const composer = page.locator("openclaw-chat-pane .agent-chat__input");
+      const composer = page.locator(".agent-chat__input");
       const providers = composer.locator(
         "[data-chat-model-provider] .chat-controls__provider-label",
       );
@@ -349,7 +349,7 @@ suite.define(() => {
       await page.goto(`${suite.server.baseUrl}chat`);
       await gateway.waitForRequest("models.list");
 
-      const composer = page.locator("openclaw-chat-pane .agent-chat__input");
+      const composer = page.locator(".agent-chat__input");
       const picker = composer.locator("details.chat-controls__model-picker");
       const options = picker.locator(
         "button[data-chat-model-option]:not([data-chat-model-target])",
@@ -587,7 +587,7 @@ suite.define(() => {
       await gateway.waitForRequest("chat.startup");
       await gateway.waitForRequest("models.list");
 
-      const composer = page.locator("openclaw-chat-pane .agent-chat__input");
+      const composer = page.locator(".agent-chat__input");
       await composer.locator('[data-chat-model-select="true"]').click();
       await expect.poll(async () => (await gateway.getRequests("models.list")).length).toBe(2);
       await expect
@@ -641,7 +641,7 @@ suite.define(() => {
       await page.goto(`${suite.server.baseUrl}chat`);
       await gateway.waitForRequest("chat.startup");
 
-      const composer = page.locator("openclaw-chat-pane .agent-chat__input");
+      const composer = page.locator(".agent-chat__input");
       const pickerTrigger = composer.locator('[data-chat-model-select="true"]');
       await pickerTrigger.click();
       await gateway.waitForRequest("models.list");
@@ -700,7 +700,7 @@ suite.define(() => {
         sessionKey: "agent:main:main",
       });
       await page.goto(controlUiSessionUrl(suite.server.baseUrl, "agent:main:main"));
-      const composer = page.locator("openclaw-chat-pane .agent-chat__input");
+      const composer = page.locator(".agent-chat__input");
       await expect
         .poll(() => composer.locator('[data-chat-model-option="example/existing"]').count())
         .toBe(1);
@@ -735,9 +735,7 @@ suite.define(() => {
         await page.goto(`${suite.server.baseUrl}chat`);
         await gateway.waitForRequest("chat.startup");
 
-        const textarea = page.locator(
-          "openclaw-chat-pane .agent-chat__composer-combobox > textarea",
-        );
+        const textarea = page.locator(".agent-chat__composer-combobox > textarea:visible");
         await textarea.fill("   ");
         await textarea.blur();
 
@@ -751,7 +749,7 @@ suite.define(() => {
           ? createControlUiE2eArtifactDir("chat-composer-catalog", artifactRoot)
           : undefined;
         if (artifactDir) {
-          await page.locator("openclaw-chat-pane .agent-chat__composer-shell").screenshot({
+          await page.locator(".agent-chat__composer-shell:visible").screenshot({
             animations: "disabled",
             path: `${artifactDir}/placeholder-${label}.png`,
           });

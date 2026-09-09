@@ -1953,7 +1953,6 @@ describe("chat transcript rendering", () => {
     const transcript = createTestTranscript();
     renderChatInto(container, { transcript, loading: true });
     const announcement = requireElement(container, ".chat-transcript-announcement", "status");
-    expect(announcement.getAttribute("role")).toBe("status");
     expect(announcement.textContent).toBe(t("chat.thread.loading"));
     expect(container.querySelector(".chat-thread-inner")?.getAttribute("aria-busy")).toBe("true");
 

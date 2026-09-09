@@ -248,9 +248,7 @@ export async function expectPendingSessionPlacementStartupBeforeRuntime(
     0,
   );
   await expect
-    .poll(() =>
-      page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea").isDisabled(),
-    )
+    .poll(() => page.locator(".agent-chat__composer-combobox textarea").isDisabled())
     .toBe(true);
   expect(await gateway.getRequests("sessions.dispatch")).toHaveLength(0);
   expect(await gateway.getRequests("sessions.send")).toHaveLength(0);

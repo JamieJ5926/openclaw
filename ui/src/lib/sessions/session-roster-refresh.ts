@@ -27,6 +27,8 @@ import {
   retainSessionPaginationWindow,
   sessionListQueryAgentId,
   type QueuedSessionRefresh,
+  type ManagedSessionList,
+  type ManagedSessionListRefresh,
 } from "./session-list-query.ts";
 import {
   buildSessionListParams,
@@ -62,28 +64,9 @@ type SessionRosterRefreshHost = {
   ) => void;
 };
 
-type ManagedSessionListRefresh = {
-  append: boolean;
-  offset?: number;
-  invalidated?: true;
-};
-
 export type SessionRefreshOutcome =
   | { status: "refreshed" | "stale" }
   | { status: "failed"; error: string };
-
-type ManagedSessionList = {
-  key: string;
-  query: ReturnType<typeof normalizeManagedSessionListQuery>;
-  scope: SessionListScope;
-  retainedLimit: number;
-  connectionEpoch: number | null;
-  snapshot: SessionListSnapshot;
-  listeners: Set<(snapshot: SessionListSnapshot) => void>;
-  coordinator: ReturnType<typeof createSessionEventRefreshCoordinator>;
-  pending: Promise<void> | null;
-  queued: ManagedSessionListRefresh | null;
-};
 
 function isForegroundReplacement(options: SessionRefreshOptions): boolean {
   return options.append !== true && options.backgroundHydrate !== true;
@@ -108,6 +91,7 @@ export function createSessionRosterRefresh(host: SessionRosterRefreshHost) {
   let eventRefreshQueued = false;
   let lastListOptions: SessionListOptions = {};
   let primaryList: { scope: SessionListScope } = { scope: {} };
+  let settledList: { connection: SessionConnectionScope; query: SessionListOptions } | undefined;
   let listOptionsSource: "none" | "seeded" | "foreground" = "none";
   const observesPageLifecycle =
     typeof document !== "undefined" && typeof globalThis.addEventListener === "function";
@@ -380,6 +364,7 @@ export function createSessionRosterRefresh(host: SessionRosterRefreshHost) {
       }
       primaryList.scope = append ? lastListOptions : durableListOptions;
       nextResult = host.decorate(nextResult, primaryList);
+      settledList = { connection: scope, query: primaryList.scope };
       host.onCanonicalList(nextResult, issuedRevision, requestOptions.agentId, result);
       const state = host.readState();
       const error = host.observerError();
@@ -402,6 +387,9 @@ export function createSessionRosterRefresh(host: SessionRosterRefreshHost) {
       const message = formatUiError(error);
       const ownsError = isErrorCurrent?.() !== false;
       if (isCurrent()) {
+        if (ownsError) {
+          settledList = { connection: scope, query: durableListOptions };
+        }
         const state = host.readState();
         host.publish(
           {
@@ -582,6 +570,12 @@ export function createSessionRosterRefresh(host: SessionRosterRefreshHost) {
       gatewayAvailable = available;
     },
     primaryList: () => primaryList,
+    hasSettledList: () =>
+      Boolean(
+        settledList &&
+        host.connection.isCurrent(settledList.connection) &&
+        isSameSessionListQuery(settledList.query, lastListOptions, false),
+      ),
     get requestRevision() {
       return requestRevision;
     },

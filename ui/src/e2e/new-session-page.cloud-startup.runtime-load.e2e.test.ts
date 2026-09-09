@@ -95,7 +95,7 @@ suite.define(() => {
       try {
         await page.goto(controlUiSessionUrl(suite.server.baseUrl, sessionKey));
         const pane = page.locator(".chat-pane-cache__pane--active");
-        const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
+        const composer = page.locator(".agent-chat__composer-combobox textarea");
         await expect.poll(() => composer.isDisabled()).toBe(false);
         const owner = await page.evaluate(() => {
           const app = document.querySelector("openclaw-app") as HTMLElement & {

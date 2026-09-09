@@ -477,9 +477,7 @@ suite.define(() => {
       await gateway.waitForRequest("sessions.describe", { match: { key: sessionKey } });
       await expect.poll(() => page.url()).toContain(controlUiSessionPath(sessionKey));
       await expect
-        .poll(() =>
-          page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea").isDisabled(),
-        )
+        .poll(() => page.locator(".agent-chat__composer-combobox textarea").isDisabled())
         .toBe(true);
       const publishPlacement = async (
         state: "requested" | "provisioning" | "syncing" | "starting",

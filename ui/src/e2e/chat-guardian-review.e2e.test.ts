@@ -41,9 +41,7 @@ suite.define(() => {
         });
         await page.goto(`${suite.server.baseUrl}chat`);
         await page.getByText("Ready for a Guardian-reviewed action.").waitFor();
-        await page
-          .locator("openclaw-chat-pane .agent-chat__composer-combobox textarea")
-          .fill("Review this action.");
+        await page.locator(".agent-chat__composer-combobox textarea").fill("Review this action.");
         await page.getByRole("button", { name: "Send message" }).click();
         const request = await gateway.waitForRequest("chat.send");
         const runId = requireString(requireRecord(request.params).idempotencyKey, "chat run id");
@@ -52,7 +50,7 @@ suite.define(() => {
           await writeFile(
             path.join(proofDir, "01-before-review.png"),
             await takeControlUiViewportScreenshot(page, page.locator(".shell"), [
-              page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea"),
+              page.locator(".agent-chat__composer-combobox textarea"),
             ]),
           );
         }
@@ -102,7 +100,7 @@ suite.define(() => {
           await writeFile(
             path.join(proofDir, "03-review-approved.png"),
             await takeControlUiViewportScreenshot(page, page.locator(".shell"), [
-              page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea"),
+              page.locator(".agent-chat__composer-combobox textarea"),
             ]),
           );
         }

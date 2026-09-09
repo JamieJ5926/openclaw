@@ -84,7 +84,7 @@ suite.define(() => {
         controlUiSessionUrl(`${suite.server.baseUrl}operator/`, `agent:${agentId}:main`),
       );
       await waitForControlUiRoute(page, { routeId: "chat" });
-      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox > textarea");
+      const composer = page.locator(".agent-chat__composer-combobox > textarea:visible");
       const draft = "Keep this unsent conversation draft";
       await composer.fill(draft);
       const originalUrl = page.url();

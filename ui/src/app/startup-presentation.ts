@@ -1,5 +1,7 @@
 import { createContext } from "@lit/context";
 
+export const STARTUP_REGION_READY_EVENT = "openclaw-startup-region-ready";
+
 export type StartupPresentation = {
   stage: "pending" | "chrome" | "ready";
   placeholderVisible: boolean;
@@ -38,11 +40,6 @@ export class StartupPresentationController {
       placeholderVisible: false,
       initialAssistantName,
     });
-    this.showAfterDelay();
-  }
-
-  private showAfterDelay() {
-    clearTimeout(this.timer);
     this.timer = setTimeout(() => {
       this.timer = undefined;
       this.shownAt = performance.now();

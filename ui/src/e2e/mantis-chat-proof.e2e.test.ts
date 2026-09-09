@@ -97,7 +97,7 @@ describeMantisWebUiChat("Mantis Control UI web chat proof", () => {
     try {
       await page.goto(`${server.baseUrl}chat`);
       await page.getByText("Mantis web UI proof is ready.").waitFor({ timeout: 10_000 });
-      await page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea").fill(prompt);
+      await page.locator(".agent-chat__composer-combobox textarea").fill(prompt);
       // The working timer starts at the send click; pause first so the elapsed
       // reading is exactly the fastForward below, not inflated by real time.
       await pauseVirtualClock(page);

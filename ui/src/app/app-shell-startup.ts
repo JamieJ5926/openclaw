@@ -1,6 +1,8 @@
 import { pathForRoute } from "../app-route-paths.ts";
 import type { RouteId } from "../app-routes.ts";
+import type { AppSidebarSessionNavigationElement } from "../components/app-sidebar-session-navigation.ts";
 import type { OpenClawAssistantPanel } from "../components/assistant-panel.ts";
+import type { StartupChatPane as StartupPlaceholder } from "../components/startup-chat-skeleton.ts";
 import type { ChatPaneElement } from "../pages/chat/route-draft-focus-handoff.ts";
 import { hasPresentedReplacement } from "../plugins/control-ui-view-presentation.ts";
 import type { ShellRouteState } from "./app-host-route-state.ts";
@@ -35,11 +37,27 @@ export class ShellStartupOwner {
     const host = this.host;
     const startup = host.startupPresentation;
     const context = host.context;
-    if (!startup || !context) {
+    if (!startup || !context || (startup.snapshot.stage === "ready" && !startup.retainSkeletons)) {
       return;
     }
+    const panes = [...host.querySelectorAll<StartupChatPane>("openclaw-chat-pane")].filter(
+      (candidate) => candidate.presented && candidate.visuallyPresented,
+    );
+    for (const placeholder of host.querySelectorAll<StartupPlaceholder>(
+      "openclaw-startup-chat-pane",
+    )) {
+      const pane = panes.find(
+        (candidate) =>
+          candidate.paneId === placeholder.paneId && candidate.closest("openclaw-chat-page"),
+      );
+      if (pane?.querySelector(".agent-chat__composer-combobox textarea")) {
+        // Retire duplicate controls without importing the live draft's height
+        // into the original skeleton footprint, which stays fixed until exit.
+        placeholder.retireComposer();
+      }
+    }
     if (startup.snapshot.stage === "ready") {
-      if (startup.retainSkeletons && !this.releasingSkeletons) {
+      if (!this.releasingSkeletons) {
         this.releasingSkeletons = true;
         // Retain the original geometry through the actual exit, then retire its
         // controls and rows. Empty animations also cover fast/reduced-motion exits.
@@ -106,20 +124,21 @@ export class ShellStartupOwner {
         }
       });
     }
-    const panes = [...host.querySelectorAll<StartupChatPane>("openclaw-chat-pane")].filter(
-      (candidate) => candidate.presented && candidate.visuallyPresented,
-    );
     const chromeReady = Boolean(
       !host.assistantRestorationPending &&
       !host.querySelector<OpenClawAssistantPanel>("openclaw-assistant-panel")
         ?.homePresentationPending &&
       panes.length > 0 &&
-      panes.every((pane) => pane.composerReady) &&
-      panes.every((pane) => pane.querySelector(pane.compact ? ".chat" : ".chat-pane__header")) &&
+      panes.every(
+        (pane) =>
+          pane.composerReady && pane.querySelector(pane.compact ? ".chat" : ".chat-pane__header"),
+      ) &&
       (!host.workspaceChromeVisible || host.navigationSidebar.querySelector(".sidebar-brand")) &&
       this.startupIdentityReady &&
       (context.agents.state.agentsList || context.agents.state.agentsError) &&
-      (context.sessions.state.result || context.sessions.state.error),
+      (!host.workspaceChromeVisible ||
+        host.querySelector<AppSidebarSessionNavigationElement>("openclaw-app-sidebar:defined")
+          ?.sessionData.initialListReady),
     );
     startup.update(
       chromeReady,

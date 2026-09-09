@@ -55,9 +55,7 @@ suite.define(() => {
           });
           await page.goto(`${suite.server.baseUrl}chat`);
           await gateway.waitForRequest("chat.startup");
-          const textarea = page.locator(
-            "openclaw-chat-pane .agent-chat__composer-combobox textarea",
-          );
+          const textarea = page.locator(".agent-chat__composer-combobox textarea");
           await expect.poll(() => textarea.isDisabled()).toBe(blocked);
           const statusBand = page.locator(".agent-chat__composer-status-band");
           if (message) {
@@ -137,9 +135,7 @@ suite.define(() => {
       });
       await expect.poll(() => page.locator(".chat-error").textContent()).toContain(message);
       await expect.poll(() => page.locator(".agent-chat__composer-status-band").count()).toBe(0);
-      await expect
-        .poll(() => page.locator("openclaw-chat-pane .agent-chat__input textarea").isDisabled())
-        .toBe(true);
+      await expect.poll(() => page.locator(".agent-chat__input textarea").isDisabled()).toBe(true);
     });
   });
 
@@ -155,7 +151,7 @@ suite.define(() => {
       await page.goto(`${suite.server.baseUrl}chat`);
       await gateway.waitForRequest("chat.startup");
 
-      const composer = page.locator("openclaw-chat-pane .agent-chat__input");
+      const composer = page.locator(".agent-chat__input");
       const model = composer.locator('[data-chat-model-select="true"]');
       const voice = page.getByRole("button", { name: "Start voice input" });
       await gateway.waitForRequest("models.list");
@@ -215,7 +211,7 @@ suite.define(() => {
       await page.goto(`${suite.server.baseUrl}chat`);
       await gateway.waitForRequest("chat.startup");
 
-      const composer = page.locator("openclaw-chat-pane .agent-chat__input");
+      const composer = page.locator(".agent-chat__input");
       await composer.waitFor({ state: "visible" });
       await composer.locator(".agent-chat__file-input").setInputFiles({
         name: "mobile-composer-proof.txt",
@@ -381,7 +377,7 @@ suite.define(() => {
       await page.goto(`${suite.server.baseUrl}chat`);
       await gateway.waitForRequest("chat.startup");
 
-      const composer = page.locator("openclaw-chat-pane .agent-chat__input");
+      const composer = page.locator(".agent-chat__input");
       const composerShell = page.locator("openclaw-chat-pane .agent-chat__composer-shell");
       const chatContent = page.locator("main.content--chat");
       const chatMain = page.locator(".chat-workbench__main");

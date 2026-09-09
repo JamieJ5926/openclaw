@@ -76,18 +76,14 @@ suite.define(() => {
       await page.goto(`${suite.server.baseUrl}chat`);
 
       const activePrompt = "keep this run active";
-      await page
-        .locator("openclaw-chat-pane .agent-chat__composer-combobox textarea")
-        .fill(activePrompt);
+      await page.locator(".agent-chat__composer-combobox textarea").fill(activePrompt);
       await page.getByRole("button", { name: "Send message" }).click();
 
       await gateway.waitForRequest("chat.send");
       await page.getByRole("button", { name: "Stop generating" }).waitFor({ timeout: 10_000 });
 
       const queuedPrompt = "queue this on the server";
-      await page
-        .locator("openclaw-chat-pane .agent-chat__composer-combobox textarea")
-        .fill(queuedPrompt);
+      await page.locator(".agent-chat__composer-combobox textarea").fill(queuedPrompt);
       await page.getByRole("button", { name: "Queue message" }).click();
 
       const sends = await waitForRequests(gateway, "chat.send", 2);
@@ -140,7 +136,7 @@ suite.define(() => {
       expect(await shortcut.inputValue()).toBe("enter");
       await page.goto(`${suite.server.baseUrl}chat`);
 
-      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
+      const composer = page.locator(".agent-chat__composer-combobox textarea");
       await page.locator(".chat-tool-msg-summary", { hasText: "Exec" }).waitFor();
       await page.getByRole("button", { name: "Stop generating" }).waitFor();
       let agentSequence = 0;
@@ -634,7 +630,7 @@ suite.define(() => {
       await page.locator("[data-settings-send-shortcut]").selectOption("modifier-enter");
       await page.goto(`${suite.server.baseUrl}chat`);
 
-      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
+      const composer = page.locator(".agent-chat__composer-combobox textarea");
       await composer.fill("keep the modifier shortcut run active");
       await page.getByRole("button", { name: "Send message" }).click();
       await gateway.waitForRequest("chat.send");
@@ -663,7 +659,7 @@ suite.define(() => {
       await page.locator("[data-settings-send-shortcut]").selectOption("enter");
       await page.goto(`${suite.server.baseUrl}chat`);
 
-      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
+      const composer = page.locator(".agent-chat__composer-combobox textarea");
       await composer.fill("keep the disconnect run active");
       await page.getByRole("button", { name: "Send message" }).click();
       const initial = requireRecord((await gateway.waitForRequest("chat.send")).params);
@@ -721,7 +717,7 @@ suite.define(() => {
       await page.locator("[data-settings-follow-up-mode]").selectOption("queue");
       await page.goto(`${suite.server.baseUrl}chat`);
 
-      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
+      const composer = page.locator(".agent-chat__composer-combobox textarea");
       const initialText = "keep this run active until session state settles it";
       await composer.fill(initialText);
       await page.getByRole("button", { name: "Send message" }).click();
@@ -828,17 +824,13 @@ suite.define(() => {
     try {
       await page.goto(`${suite.server.baseUrl}chat`);
 
-      await page
-        .locator("openclaw-chat-pane .agent-chat__composer-combobox textarea")
-        .fill("keep this run active");
+      await page.locator(".agent-chat__composer-combobox textarea").fill("keep this run active");
       await page.getByRole("button", { name: "Send message" }).click();
       await gateway.waitForRequest("chat.send");
       await page.getByRole("button", { name: "Stop generating" }).waitFor({ timeout: 10_000 });
 
       const followUp = "interrupt for this session override";
-      await page
-        .locator("openclaw-chat-pane .agent-chat__composer-combobox textarea")
-        .fill(followUp);
+      await page.locator(".agent-chat__composer-combobox textarea").fill(followUp);
       await page.getByRole("button", { name: "Send message" }).click();
 
       const sends = await waitForRequests(gateway, "chat.send", 2);
@@ -860,7 +852,7 @@ suite.define(() => {
     try {
       await page.goto(`${suite.server.baseUrl}chat`);
       await page
-        .locator("openclaw-chat-pane .agent-chat__composer-combobox textarea")
+        .locator(".agent-chat__composer-combobox textarea")
         .fill("/redirect start over cleanly");
       await page.getByRole("button", { name: "Send message" }).click();
 
@@ -889,17 +881,13 @@ suite.define(() => {
       await page.goto(`${suite.server.baseUrl}chat?session=main`);
       await expect.poll(() => new URL(page.url()).pathname).toMatch(/\/chat\/main$/);
 
-      await page
-        .locator("openclaw-chat-pane .agent-chat__composer-combobox textarea")
-        .fill("keep this run active");
+      await page.locator(".agent-chat__composer-combobox textarea").fill("keep this run active");
       await page.getByRole("button", { name: "Send message" }).click();
       await gateway.waitForRequest("chat.send");
       await page.getByRole("button", { name: "Stop generating" }).waitFor({ timeout: 10_000 });
 
       const queuedPrompt = "steer this after restoring the queue";
-      await page
-        .locator("openclaw-chat-pane .agent-chat__composer-combobox textarea")
-        .fill(queuedPrompt);
+      await page.locator(".agent-chat__composer-combobox textarea").fill(queuedPrompt);
       await page.getByRole("button", { name: "Queue message" }).click();
       await page.locator(".chat-queue").getByText(queuedPrompt).waitFor({ timeout: 10_000 });
 

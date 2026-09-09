@@ -44,51 +44,9 @@ export function renderChatTranscriptSkeleton() {
   </div>`;
 }
 
-function renderPane(
-  direct: boolean,
-  assistantName: string,
-  layout: SidebarLayout,
-  width: number,
-  chatMessageMaxWidth: string | undefined,
-) {
-  const header = html`<div class="chat-pane__header" aria-hidden="true" inert>
-    <div class="chat-pane__crumbs">
-      <span class="chat-pane__workspace-chip">
-        <span class="workspace-icon skeleton"></span>
-        <span class="skeleton">${"\u00a0"}</span>
-      </span>
-      <span class="chat-pane__crumb-sep">/</span>
-      <span class="chat-pane__session-title">
-        <span class="chat-pane__session-title-text skeleton">${assistantName}</span>
-      </span>
-    </div>
-  </div>`;
-  const primary = html`<div class="chat-pane-primary-column">
-    <div
-      class="chat"
-      style=${styleMap(
-        chatMessageMaxWidth
-          ? {
-              "--chat-thread-max-width": chatMessageMaxWidth,
-              "--chat-message-max-width": "100%",
-            }
-          : {},
-      )}
-    >
-      <div class="chat-main__conversation">
-        <div class="chat-thread ${direct ? "chat-thread--direct" : ""}">
-          <div class="chat-thread-inner">${renderChatTranscriptSkeleton()}</div>
-        </div>
-        ${renderPendingChatComposer(t("chat.composer.placeholder", { name: assistantName }))}
-      </div>
-    </div>
-  </div>`;
-  const narrow = isSidebarRegionCollapsed(layout, width);
-  const runtime = renderPendingSidebarRegion(layout, narrow);
-  return renderSidebarRegionFrame({ layout, collapsed: narrow, header, primary, runtime });
-}
-
-class StartupChatPane extends OpenClawLightDomElement {
+export class StartupChatPane extends OpenClawLightDomElement {
+  paneId = "";
+  private composerHeight?: number;
   @property() sessionKey = "";
   @property() assistantName = "";
   @property() chatMessageMaxWidth?: string;
@@ -104,17 +62,56 @@ class StartupChatPane extends OpenClawLightDomElement {
     this.resizeObserver.disconnect();
     super.disconnectedCallback();
   }
+  retireComposer() {
+    if (this.composerHeight === undefined) {
+      this.composerHeight = this.querySelector(
+        ".agent-chat__composer-shell",
+      )?.getBoundingClientRect().height;
+      this.requestUpdate();
+    }
+  }
   override render() {
     const width = this.getBoundingClientRect().width;
     // Alias hydration must not change the already-painted placeholder's avatar column.
     const kind = (this.initialSessionKind ??= classifySessionKind(this.sessionKey));
-    return renderPane(
-      kind === "direct" || kind === "cron" || kind === "spawn-child",
-      this.assistantName,
-      fitSidebarLayout(this.sidebarLayout, width) ?? this.sidebarLayout,
-      width,
-      this.chatMessageMaxWidth,
-    );
+    const direct = kind === "direct" || kind === "cron" || kind === "spawn-child";
+    const layout = fitSidebarLayout(this.sidebarLayout, width) ?? this.sidebarLayout;
+    const { assistantName, chatMessageMaxWidth } = this;
+    const header = html`<div class="chat-pane__header" aria-hidden="true" inert>
+      <div class="chat-pane__crumbs">
+        <span class="chat-pane__workspace-chip">
+          <span class="workspace-icon skeleton"></span>
+          <span class="skeleton">${"\u00a0"}</span>
+        </span>
+        <span class="chat-pane__crumb-sep">/</span>
+        <span class="chat-pane__session-title">
+          <span class="chat-pane__session-title-text skeleton">${assistantName}</span>
+        </span>
+      </div>
+    </div>`;
+    const primary = html`<div class="chat-pane-primary-column">
+      <div
+        class="chat"
+        style=${styleMap(
+          chatMessageMaxWidth
+            ? {
+                "--chat-thread-max-width": chatMessageMaxWidth,
+                "--chat-message-max-width": "100%",
+              }
+            : {},
+        )}
+      >
+        <div class="chat-main__conversation">
+          <div class="chat-thread ${direct ? "chat-thread--direct" : ""}">
+            <div class="chat-thread-inner">${renderChatTranscriptSkeleton()}</div>
+          </div>
+          ${renderPendingChatComposer(t("chat.composer.placeholder", { name: assistantName }), this.composerHeight)}
+        </div>
+      </div>
+    </div>`;
+    const narrow = isSidebarRegionCollapsed(layout, width);
+    const runtime = renderPendingSidebarRegion(layout, narrow);
+    return renderSidebarRegionFrame({ layout, collapsed: narrow, header, primary, runtime });
   }
 }
 if (!customElements.get("openclaw-startup-chat-pane")) {
@@ -127,9 +124,9 @@ export function renderStartupChatSkeleton(
   settings: Pick<UiSettings, "chatSplitLayout" | "sidebarSessionLayouts" | "chatMessageMaxWidth">,
 ) {
   const layout = settings.chatSplitLayout ?? {
-    columns: [{ id: "startup", panes: [{ id: "startup", sessionKey }], paneWeights: [1] }],
+    columns: [{ panes: [{ id: "p1", sessionKey }], paneWeights: [1] }],
     columnWeights: [1],
-    activePaneId: "startup",
+    activePaneId: "p1",
   };
   const narrow = matchMedia("(max-width: 1099px)").matches;
   return html`<div class="startup-chat-skeleton">
@@ -147,6 +144,7 @@ export function renderStartupChatSkeleton(
                     style="flex:${column.paneWeights[paneIndex]} 1 0"
                   >
                     <openclaw-startup-chat-pane
+                      .paneId=${pane.id}
                       .sessionKey=${key}
                       .assistantName=${assistantName}
                       .chatMessageMaxWidth=${settings.chatMessageMaxWidth}

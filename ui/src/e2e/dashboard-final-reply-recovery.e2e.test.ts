@@ -75,7 +75,7 @@ suite.define(() => {
       const partialFinalText = "Drafting the durable dashboard reply.";
       const stalePartialFinalText = "Drafting more of the durable dashboard reply.";
       const finalText = "The durable dashboard reply is visible after Done.";
-      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
+      const composer = page.locator(".agent-chat__composer-combobox textarea");
       await composer.fill(prompt);
       await page.getByRole("button", { name: "Send message" }).click();
       const send = await gateway.waitForRequest("chat.send");

@@ -1,8 +1,10 @@
 import type { GatewaySessionRow, SessionsListResult } from "../../api/types.ts";
+import type { createSessionEventRefreshCoordinator } from "./event-refresh-coordinator.ts";
 import type {
   SessionGateway,
   SessionListOptions,
   SessionListScope,
+  SessionListSnapshot,
   SessionRefreshOptions,
 } from "./session-capability.ts";
 import {
@@ -10,6 +12,25 @@ import {
   DEFAULT_SESSION_LIST_QUERY,
   normalizeManagedSessionListQuery,
 } from "./session-requests.ts";
+
+export type ManagedSessionListRefresh = {
+  append: boolean;
+  offset?: number;
+  invalidated?: true;
+};
+
+export type ManagedSessionList = {
+  key: string;
+  query: ReturnType<typeof normalizeManagedSessionListQuery>;
+  scope: SessionListScope;
+  retainedLimit: number;
+  connectionEpoch: number | null;
+  snapshot: SessionListSnapshot;
+  listeners: Set<(snapshot: SessionListSnapshot) => void>;
+  coordinator: ReturnType<typeof createSessionEventRefreshCoordinator>;
+  pending: Promise<void> | null;
+  queued: ManagedSessionListRefresh | null;
+};
 
 export type PublishedSession = {
   row: GatewaySessionRow;

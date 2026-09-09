@@ -18,7 +18,7 @@ suite.define(() => {
       await installMockGateway(page);
 
       await page.goto(`${suite.server.baseUrl}chat`);
-      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
+      const composer = page.locator(".agent-chat__composer-combobox textarea");
       await composer.waitFor({ state: "visible", timeout: 10_000 });
       await composer.fill("draft survives stray drop");
 

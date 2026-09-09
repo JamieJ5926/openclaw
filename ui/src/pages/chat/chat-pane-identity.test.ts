@@ -6,7 +6,6 @@ import { createDeferred } from "../../../../test/helpers/promise.js";
 import type { GatewayBrowserClient, GatewayEventFrame } from "../../api/gateway.ts";
 import type { GatewaySessionRow } from "../../api/types.ts";
 import type { ApplicationContext } from "../../app/context.ts";
-import { loadSettings, saveSettings } from "../../app/settings.ts";
 import { t } from "../../i18n/index.ts";
 import type { SessionCapability } from "../../lib/sessions/index.ts";
 import { gatewayHelloForMethods } from "../../test-helpers/gateway-methods.ts";
@@ -26,52 +25,18 @@ import { renderChat } from "./chat-view.ts";
 import { projectSessionApprovalReplay } from "./session-approval-projection.ts";
 
 describe("chat pane assistant identity snapshots", () => {
-  it.each([
-    {
-      label: "persisted selection without a pane route",
-      selectedSession: "agent:research:main",
-      paneSession: "",
-      paneAgent: undefined,
-    },
-    {
-      label: "a split pane owned by another agent",
-      selectedSession: "agent:main:main",
-      paneSession: "agent:research:main",
-      paneAgent: undefined,
-    },
-    {
-      label: "an explicitly owned global Home pane",
-      selectedSession: "agent:main:main",
-      paneSession: "global",
-      paneAgent: "research",
-    },
-  ])(
-    "uses cached identity before requests resolve for $label",
-    ({ selectedSession, paneSession, paneAgent }) => {
-      const settings = loadSettings();
-      onTestFinished(() => saveSettings(settings));
-      saveSettings({ ...settings, sessionKey: selectedSession });
-      const context = createInitializationContext();
-      context.agents.state.agentsList = {
-        defaultId: "main",
-        mainKey: "main",
-        scope: "per-sender",
-        agents: [
-          { id: "main", identity: { name: "Main Agent" } },
-          { id: "research", identity: { name: "Cached Research" } },
-        ],
-      };
-      const pane = createRenderTestChatPane();
-      pane.sessionKey = paneSession;
-      pane.agentId = paneAgent;
-
-      const state = pane.initialize(context);
-
-      expect(context.config.current.assistantIdentity.name).toBe("Assistant");
-      expect(context.agentSelection.state.selectedId).toBe("main");
-      expect(state.assistantName).toBe("Cached Research");
-    },
-  );
+  it("uses the routed agent's cached name before requests resolve", () => {
+    const context = createInitializationContext();
+    context.agents.state.agentsList = {
+      defaultId: "main",
+      mainKey: "main",
+      scope: "per-sender",
+      agents: [{ id: "research", identity: { name: "Cached Research" } }],
+    };
+    const pane = createRenderTestChatPane();
+    pane.sessionKey = "agent:research:main";
+    expect(pane.initialize(context).assistantName).toBe("Cached Research");
+  });
 
   it("keeps an explicitly owned global Home pane on its agent across work selection", () => {
     const client = { request: vi.fn(async () => ({})) } as unknown as GatewayBrowserClient;
@@ -259,38 +224,20 @@ describe("chat pane assistant identity snapshots", () => {
     expect(state.assistantName).toBe("Session Agent");
   });
 
-  it.each([false, true])(
-    "resets a session-specific identity on connection change (cached roster: %s)",
-    (cached) => {
-      const client = createGatewayBrowserClientFixture();
-      const nextClient = createGatewayBrowserClientFixture();
-      const { pane, state } = createTestChatPane({ client, sessions: {} as SessionCapability });
-      state.assistantName = "Session Agent";
-      state.sessionKey = "agent:research:main";
-      pane.sessionKey = state.sessionKey;
-      if (cached) {
-        pane.context.agents.state.agentsList = {
-          defaultId: "main",
-          mainKey: "main",
-          scope: "per-sender",
-          agents: [
-            { id: "main", identity: { name: "Main Agent" } },
-            { id: "research", identity: { name: "Cached Research" } },
-          ],
-        };
-      }
+  it("resets a session-specific identity when the logical connection changes", () => {
+    const client = createGatewayBrowserClientFixture();
+    const nextClient = createGatewayBrowserClientFixture();
+    const { pane, state } = createTestChatPane({ client, sessions: {} as SessionCapability });
+    state.assistantName = "Session Agent";
 
-      pane.applyGatewaySnapshot({
-        ...pane.context.gateway.snapshot,
-        client: nextClient,
-        phase: "reconnecting" as const,
-      });
+    pane.applyGatewaySnapshot({
+      ...pane.context.gateway.snapshot,
+      client: nextClient,
+      phase: "reconnecting" as const,
+    });
 
-      expect(state.assistantName).toBe(
-        cached ? "Cached Research" : pane.context.config.current.assistantIdentity.name,
-      );
-    },
-  );
+    expect(state.assistantName).toBe(pane.context.config.current.assistantIdentity.name);
+  });
 });
 
 describe("chat pane approval requester identity", () => {

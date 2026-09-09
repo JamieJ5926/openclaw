@@ -46,7 +46,7 @@ suite.define(() => {
         .toBeLessThanOrEqual(CHAT_TRANSCRIPT_END_THRESHOLD_PX);
       await waitForChatScrollIdle(page);
 
-      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
+      const composer = page.locator(".agent-chat__composer-combobox textarea");
       for (let line = 1; line <= 8; line += 1) {
         await composer.fill(
           Array.from({ length: line }, (_, index) => `Growing composer line ${index + 1}`).join(
@@ -163,7 +163,7 @@ suite.define(() => {
       await gateway.deferNext("chat.send");
 
       const prompt = `pending send should scroll before ack\n${"visible now\n".repeat(6)}`;
-      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
+      const composer = page.locator(".agent-chat__composer-combobox textarea");
       await composer.fill(prompt);
       const draftHeight = await composer.evaluate((element) => element.clientHeight);
       if (artifactDir) {

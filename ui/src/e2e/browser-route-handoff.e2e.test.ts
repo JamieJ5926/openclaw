@@ -153,9 +153,7 @@ suite.define(() => {
             }
           }
 
-          await page
-            .locator("openclaw-chat-pane .agent-chat__input textarea")
-            .fill("Continue reading");
+          await page.locator(".agent-chat__input textarea").fill("Continue reading");
           await page.getByRole("button", { name: "Send message" }).click();
           const send = await gateway.waitForRequest("chat.send");
           const runId = asNullableRecord(send.params)?.idempotencyKey;

@@ -234,7 +234,7 @@ suite.define(() => {
             ? page.getByRole("heading", { name: /^Configured providers\b/ })
             : page.locator(
                 pathname === "chat"
-                  ? "openclaw-chat-pane .agent-chat__composer-combobox textarea"
+                  ? ".agent-chat__composer-combobox textarea"
                   : ".agent-chat__composer-combobox textarea",
               );
           await ready.waitFor();

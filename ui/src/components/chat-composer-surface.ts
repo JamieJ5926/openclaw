@@ -85,7 +85,12 @@ export function renderChatComposerSurface(props: {
   `;
 }
 
-export function renderPendingChatComposer(placeholder: string) {
+export function renderPendingChatComposer(placeholder: string, reservedHeight?: number) {
+  if (reservedHeight !== undefined) {
+    return renderChatComposerSurface({
+      beforeInput: html`<div style="height:${reservedHeight}px"></div>`,
+    });
+  }
   return renderChatComposerSurface({
     input: {
       reserveControls: true,

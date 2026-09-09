@@ -317,7 +317,7 @@ suite.define(() => {
       await page.goto(`${suite.server.baseUrl}chat`);
       await expect.poll(() => page.locator(".chat-text").last().textContent()).toContain("keep");
 
-      const textarea = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
+      const textarea = page.locator(".agent-chat__composer-combobox textarea");
       await expect.poll(() => textarea.isEditable()).toBe(true);
       await page.evaluate(() => document.fonts.ready);
       await textarea.click();
@@ -404,7 +404,7 @@ suite.define(() => {
     });
     await page.goto(`${suite.server.baseUrl}chat`);
 
-    const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
+    const composer = page.locator(".agent-chat__composer-combobox textarea");
     await composer.waitFor({ state: "visible" });
 
     // Open the file first: fetching it needs the gateway, and queuing below
@@ -584,7 +584,7 @@ suite.define(() => {
     const { page } = await openThemedChat("claw", "light");
     await page.setViewportSize({ width: 720, height: 900 });
     await page.goto(`${suite.server.baseUrl}chat`);
-    await page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea").waitFor();
+    await page.locator(".agent-chat__composer-combobox textarea").waitFor();
 
     const readChrome = () =>
       page.evaluate(() => ({
@@ -615,7 +615,7 @@ suite.define(() => {
     await waitForControlUiRoute(page, { pathname: "/settings/appearance", routeId: "appearance" });
     await expectChrome(pageColor);
     await page.goBack();
-    await page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea").waitFor();
+    await page.locator(".agent-chat__composer-combobox textarea").waitFor();
     await expectChrome(chatColor);
     await page.locator(".chat-pane__nav-toggle").first().click();
     await page.locator("openclaw-app-sidebar .sidebar-brand__new-thread").click();
@@ -700,7 +700,7 @@ suite.define(() => {
       await route.continue();
     });
     await page.goto(`${suite.server.baseUrl}chat`);
-    await page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea").waitFor();
+    await page.locator(".agent-chat__composer-combobox textarea").waitFor();
     await page.evaluate(() => {
       const root = document.documentElement;
       new MutationObserver(() => {
@@ -789,7 +789,7 @@ suite.define(() => {
 
     await page.goto(`${suite.server.baseUrl}${basePath.slice(1)}/chat`);
     await page
-      .locator("openclaw-chat-pane .agent-chat__composer-combobox textarea")
+      .locator(".agent-chat__composer-combobox textarea")
       .waitFor({ state: "visible", timeout: 30_000 });
 
     const linkHref = await page.evaluate(

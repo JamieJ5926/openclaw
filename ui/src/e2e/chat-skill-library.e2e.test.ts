@@ -119,7 +119,7 @@ suite.define(() => {
       });
       await page.goto(controlUiSessionUrl(suite.server.baseUrl, sessionKey));
       await gateway.waitForRequest("chat.startup");
-      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
+      const composer = page.locator(".agent-chat__composer-combobox textarea");
       await composer.fill("Use $release");
       const references = page.getByRole("listbox", { name: "Skill references" });
       await references.getByRole("option").filter({ hasText: "Alice" }).waitFor();

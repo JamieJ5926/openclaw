@@ -30,7 +30,7 @@ suite.define(() => {
           methodResponses: { "users.mentionable": { users: people, truncated: false } },
         });
         await page.goto(`${suite.server.baseUrl}chat`, { waitUntil: "domcontentloaded" });
-        const input = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
+        const input = page.locator(".agent-chat__composer-combobox textarea");
         await input.fill("@h");
         const menu = page.getByRole("listbox", { name: "Mention a person" });
         await expect.poll(() => menu.getByRole("option").count()).toBe(2);
@@ -65,9 +65,7 @@ suite.define(() => {
           deferredMethods: ["users.mentionable"],
         });
         await page.goto(`${suite.server.baseUrl}chat`, { waitUntil: "domcontentloaded" });
-        await page
-          .locator("openclaw-chat-pane .agent-chat__composer-combobox textarea")
-          .fill("@ha");
+        await page.locator(".agent-chat__composer-combobox textarea").fill("@ha");
         await gateway.waitForRequest("users.mentionable");
         const menu = page.getByRole("listbox", { name: "Mention a person" });
         expect(await menu.textContent()).toContain("Mention a person");

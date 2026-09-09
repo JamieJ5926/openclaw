@@ -260,7 +260,7 @@ suite.define(() => {
       const regularHeaderPadding = await taskHeader.evaluate(
         (header) => getComputedStyle(header).paddingLeft,
       );
-      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
+      const composer = page.locator(".agent-chat__composer-combobox textarea");
       await composer.fill("Keep this draft while docking beside native controls");
       const originalComposer = await composer.elementHandle();
       await page.evaluate(() => {
@@ -589,7 +589,7 @@ suite.define(() => {
       await page.goto(`${suite.server.baseUrl}chat`);
       await page.getByText("Type whenever you are ready.").click();
 
-      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
+      const composer = page.locator(".agent-chat__composer-combobox textarea");
       await expect
         .poll(() => composer.evaluate((element) => element === document.activeElement))
         .toBe(false);
@@ -660,7 +660,7 @@ suite.define(() => {
     }
   });
 
-  it("keeps chat usable while sessions are still loading", async () => {
+  it("keeps chat usable while a background session hydrate is still loading", async () => {
     const context = await suite.newBrowserContext(createControlUiE2eContextOptions());
     const page = await context.newPage();
     const gateway = await installMockGateway(page, {
@@ -676,10 +676,19 @@ suite.define(() => {
     });
 
     try {
-      await page.goto(`${suite.server.baseUrl}chat`);
+      await page.goto(`${suite.server.baseUrl}new`);
+      await page.locator(".new-session-page__message").waitFor();
+      await page.evaluate((pathname) => {
+        const app = document.querySelector("openclaw-app") as HTMLElement & {
+          runtime: {
+            context: { navigate: (route: string, options: { pathname: string }) => void };
+          };
+        };
+        app.runtime.context.navigate("chat", { pathname });
+      }, new URL("chat", suite.server.baseUrl).pathname);
 
       await page.getByText("History renders before sessions finish.").waitFor({ timeout: 10_000 });
-      const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
+      const composer = page.locator(".agent-chat__composer-combobox textarea");
       await composer.waitFor({ state: "visible", timeout: 10_000 });
 
       // The chat boot hydrates the sidebar session list; that request stays

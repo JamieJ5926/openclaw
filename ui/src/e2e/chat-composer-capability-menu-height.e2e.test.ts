@@ -133,7 +133,7 @@ suite.define(() => {
 
       await page.goto(`${suite.server.baseUrl}chat`);
       await gateway.waitForRequest("chat.startup");
-      const composer = page.locator("openclaw-chat-pane .agent-chat__input");
+      const composer = page.locator(".agent-chat__input");
       await expect.poll(() => composer.isVisible()).toBe(true);
       const dropdown = composer.locator("wa-dropdown.agent-chat__capability-menu");
       const attach = composer.locator("button.agent-chat__input-btn--attach");

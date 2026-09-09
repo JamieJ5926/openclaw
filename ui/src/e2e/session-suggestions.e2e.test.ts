@@ -100,7 +100,7 @@ suite.define(() => {
     });
 
     await page.goto(controlUiSessionUrl(suite.server.baseUrl, sessionKey));
-    const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
+    const composer = page.locator(".agent-chat__composer-combobox textarea");
     const modelTrigger = page.locator(".chat-controls__model-trigger");
     const typingRow = page.locator('[data-virtual-row-key="presence:typing"]');
     const typingIndicator = typingRow.locator(".agent-chat__typing-indicator");
@@ -190,7 +190,7 @@ suite.define(() => {
 
     await page.goto(controlUiSessionUrl(suite.server.baseUrl, sessionKey));
     await gateway.waitForRequest("session.suggestions.list");
-    const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
+    const composer = page.locator(".agent-chat__composer-combobox textarea");
     await expect(composer).toBeEnabled();
     await composer.fill("Keep this /sta");
     await gateway.waitForRequest("commands.list");
@@ -218,9 +218,7 @@ suite.define(() => {
     const typingRow = page.locator('[data-virtual-row-key="presence:typing"]');
     const previewBubble = typingRow.locator(".agent-chat__typing-preview-bubble");
     await gateway.waitForRequest("session.suggestions.list");
-    await expect(
-      page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea"),
-    ).toBeEnabled();
+    await expect(page.locator(".agent-chat__composer-combobox textarea")).toBeEnabled();
 
     const ownerTyping = (preview?: string) =>
       gateway.emitGatewayEvent("session.typing", {
@@ -314,7 +312,7 @@ suite.define(() => {
     ]);
     await page.getByRole("button", { name: "Edit Alice's suggestion" }).click();
     await gateway.waitForRequest("session.suggestions.resolve");
-    const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
+    const composer = page.locator(".agent-chat__composer-combobox textarea");
     await expect(composer).toHaveValue("Please edit this first");
     await composer.fill("A newer owner draft");
     await gateway.resolveDeferred("session.suggestions.resolve", {
@@ -341,9 +339,7 @@ suite.define(() => {
     });
 
     await page.goto(controlUiSessionUrl(suite.server.baseUrl, sessionKey));
-    await expect(
-      page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea"),
-    ).toBeDisabled();
+    await expect(page.locator(".agent-chat__composer-combobox textarea")).toBeDisabled();
     await expect(page.getByRole("button", { name: "Suggest message" })).toHaveCount(0);
     await expect(page.locator(".agent-chat__typing-indicator")).toHaveCount(0);
     expect(await gateway.getRequests("session.suggestions.list")).toEqual([]);
@@ -362,9 +358,7 @@ suite.define(() => {
     });
 
     await page.goto(controlUiSessionUrl(suite.server.baseUrl, sessionKey));
-    await expect(
-      page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea"),
-    ).toBeDisabled();
+    await expect(page.locator(".agent-chat__composer-combobox textarea")).toBeDisabled();
     await expect(page.getByRole("button", { name: "Suggest message" })).toHaveCount(0);
     await context.close();
   });

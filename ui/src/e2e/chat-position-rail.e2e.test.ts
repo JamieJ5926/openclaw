@@ -299,9 +299,7 @@ suite.define(() => {
           await expect.poll(currentMarkerIndex).toBeLessThan(10);
           await expect.poll(currentIsVisible).toBe(true);
 
-          const composer = page.locator(
-            "openclaw-chat-pane .agent-chat__composer-combobox textarea",
-          );
+          const composer = page.locator(".agent-chat__composer-combobox textarea");
           await composer.focus();
           const strokeColors = () =>
             markers.evaluateAll((items) =>

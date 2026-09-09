@@ -23,7 +23,7 @@ suite.define(() => {
         const gateway = await installMockGateway(page);
         await page.goto(`${suite.server.baseUrl}chat`);
 
-        const composer = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
+        const composer = page.locator(".agent-chat__composer-combobox textarea");
         await composer.waitFor({ state: "visible" });
         await composer.evaluate((element, text) => {
           const clipboard = new DataTransfer();

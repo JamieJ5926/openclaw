@@ -179,6 +179,9 @@ suite.define(() => {
           return;
         }
         await sidebar.locator(".nav-item--home").waitFor();
+        expect(
+          await page.locator(".startup-chat-skeleton, .startup-sidebar-skeleton").count(),
+        ).toBe(0);
         await sidebar.getByText("Cached only session", { exact: true }).waitFor();
         await transcript.getByText(transcriptText, { exact: true }).waitFor();
         expect(await gateway.getRequests("sessions.list")).toEqual([]);
@@ -250,6 +253,9 @@ suite.define(() => {
         }
         await gateway.waitForRequest("sessions.list");
         await sidebar.locator(".nav-item--home").waitFor();
+        expect(
+          await page.locator(".startup-chat-skeleton, .startup-sidebar-skeleton").count(),
+        ).toBe(0);
         await sidebar.getByText("Live only session", { exact: true }).waitFor();
         expect(await sidebar.getByText("Cached only session", { exact: true }).count()).toBe(0);
         await transcript
