@@ -1,7 +1,7 @@
 import type { IncomingMessage } from "node:http";
 import type { Result } from "@openclaw/normalization-core/result";
 import type { GatewayAttributedIngress } from "../ingress-attribution.js";
-import type { GatewayRole } from "../role-policy.js";
+import type { GatewayRole } from "../role-policy.types.js";
 
 export type GatewayConnectionFrame = Buffer | ArrayBuffer | Buffer[];
 
