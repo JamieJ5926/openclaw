@@ -298,6 +298,7 @@ export const createTalkClient: GatewayRequestHandler = async ({
                 });
                 forgetLegacyVoiceBinding(
                   ownerConnId!,
+                  agentId,
                   params.sessionKey?.trim() || sessionKey,
                   activeVoiceSessionId!,
                 );
@@ -401,6 +402,7 @@ export const createTalkClient: GatewayRequestHandler = async ({
           if (connId) {
             rememberLegacyVoiceBinding({
               connId,
+              agentId,
               sessionKey: params.sessionKey?.trim() || sessionKey,
               voiceSessionId,
             });

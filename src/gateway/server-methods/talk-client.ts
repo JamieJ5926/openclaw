@@ -108,7 +108,7 @@ export const talkClientHandlers: GatewayRequestHandlers = {
       voiceSessionId =
         explicitVoiceSessionId ??
         relaySessionId ??
-        (connId ? readLegacyVoiceBinding(connId, params.sessionKey) : undefined) ??
+        (connId ? readLegacyVoiceBinding(connId, agentId, params.sessionKey) : undefined) ??
         resolveOpenClientVoiceSessionId({ agentId, sessionKey: params.sessionKey }) ??
         createOrResumeClientVoiceSession({
           agentId,
@@ -118,7 +118,12 @@ export const talkClientHandlers: GatewayRequestHandlers = {
       // Pin the resolved id to this connection so a legacy client's later consults
       // reuse one record instead of forking a new never-closed session each time.
       if (connId && !relaySessionId) {
-        rememberLegacyVoiceBinding({ connId, sessionKey: params.sessionKey, voiceSessionId });
+        rememberLegacyVoiceBinding({
+          connId,
+          agentId,
+          sessionKey: params.sessionKey,
+          voiceSessionId,
+        });
       }
       if (relaySessionId && connId) {
         await ensureClientVoiceAgentSessionEntry({
@@ -265,7 +270,7 @@ export const talkClientHandlers: GatewayRequestHandlers = {
       });
       const connId = normalizeOptionalString(client?.connId);
       if (connId) {
-        forgetLegacyVoiceBinding(connId, params.sessionKey, params.voiceSessionId);
+        forgetLegacyVoiceBinding(connId, agentId, params.sessionKey, params.voiceSessionId);
       }
       respond(true, { ok: true }, undefined);
     } catch (err) {

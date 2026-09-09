@@ -530,7 +530,7 @@ describe("talk.client.transcript", () => {
         );
         await vi.waitFor(() => expect(cancelBrowserSession).toHaveBeenCalledOnce());
         await vi.waitFor(() =>
-          expect(readLegacyVoiceBinding(client.connId, sessionKey)).toBeUndefined(),
+          expect(readLegacyVoiceBinding(client.connId, "main", sessionKey)).toBeUndefined(),
         );
         const acceptedConsult = voiceMocks.consultRealtimeVoiceAgent.mock.calls[0]?.[0] as {
           abortSignal: AbortSignal;

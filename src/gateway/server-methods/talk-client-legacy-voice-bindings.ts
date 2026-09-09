@@ -7,8 +7,9 @@ const LEGACY_VOICE_BINDING_TTL_MS = 6 * 60 * 60_000;
 
 const legacyVoiceSessionByClient = new Map<string, { voiceSessionId: string; expiresAt: number }>();
 
-function legacyVoiceBindingKey(connId: string, sessionKey: string): string {
-  return `${connId}\0${sessionKey}`;
+function legacyVoiceBindingKey(connId: string, agentId: string, sessionKey: string): string {
+  // Unqualified voice keys can identify different agents on the same connection.
+  return `${connId}\0${agentId}\0${sessionKey}`;
 }
 
 function pruneLegacyVoiceBindings(now: number): void {
@@ -22,30 +23,40 @@ function pruneLegacyVoiceBindings(now: number): void {
 /** Pins a resolved voice session to one connection so later consults reuse it. */
 export function rememberLegacyVoiceBinding(params: {
   connId: string;
+  agentId: string;
   sessionKey: string;
   voiceSessionId: string;
 }): void {
   const now = Date.now();
   pruneLegacyVoiceBindings(now);
-  legacyVoiceSessionByClient.set(legacyVoiceBindingKey(params.connId, params.sessionKey), {
-    voiceSessionId: params.voiceSessionId,
-    expiresAt: now + LEGACY_VOICE_BINDING_TTL_MS,
-  });
+  legacyVoiceSessionByClient.set(
+    legacyVoiceBindingKey(params.connId, params.agentId, params.sessionKey),
+    {
+      voiceSessionId: params.voiceSessionId,
+      expiresAt: now + LEGACY_VOICE_BINDING_TTL_MS,
+    },
+  );
 }
 
 /** Returns the pinned voice session id, dropping it first when the TTL has passed. */
-export function readLegacyVoiceBinding(connId: string, sessionKey: string): string | undefined {
+export function readLegacyVoiceBinding(
+  connId: string,
+  agentId: string,
+  sessionKey: string,
+): string | undefined {
   pruneLegacyVoiceBindings(Date.now());
-  return legacyVoiceSessionByClient.get(legacyVoiceBindingKey(connId, sessionKey))?.voiceSessionId;
+  return legacyVoiceSessionByClient.get(legacyVoiceBindingKey(connId, agentId, sessionKey))
+    ?.voiceSessionId;
 }
 
 /** Releases the binding only when it still points at the closing voice session. */
 export function forgetLegacyVoiceBinding(
   connId: string,
+  agentId: string,
   sessionKey: string,
   voiceSessionId: string | undefined,
 ): void {
-  const key = legacyVoiceBindingKey(connId, sessionKey);
+  const key = legacyVoiceBindingKey(connId, agentId, sessionKey);
   if (legacyVoiceSessionByClient.get(key)?.voiceSessionId === voiceSessionId) {
     legacyVoiceSessionByClient.delete(key);
   }
