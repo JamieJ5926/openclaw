@@ -26,7 +26,6 @@ import {
   pluginSettingsIdFromPath,
   pluginSlugCandidate,
   pluginTabSlugFromPath,
-  pluginsHubTabFromPath,
   routeIdFromPath,
   sessionRouteNamespaceFromPath,
   setPluginTabSlugs,
