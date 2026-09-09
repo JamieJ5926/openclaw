@@ -63,6 +63,7 @@ async function runOwnerCommand(words: string[]): Promise<{ message: string }> {
 export function registerReefControlUiGatewayMethods(api: OpenClawPluginApi): void {
   register(api, "reef.controlUi.status", "operator.read", async (params) => {
     emptyParams.parse(params);
+    // SAFETY: the host runtime returns the active OpenClaw config; Reef reads only its optional channel subtree.
     const config = resolveReefConfig(api.runtime.config.current() as ReefCoreConfig);
     const configured = Boolean(config.handle && config.email && config.guard);
     let active: ReturnType<typeof getActiveReef>;
