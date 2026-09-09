@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { fork, type ChildProcess } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
@@ -111,6 +111,59 @@ def run_git(`,
       .replaceAll("sleep $((attempt * 5))", "sleep 0.05")
       .replaceAll("sleep 5", "sleep 0.05")
   );
+}
+
+export function renderWindowsJobDiagnostics(source: string, ownerPath?: string): string {
+  const embedded = /^(run_owner ')([\s\S]*?)('\n# End generated CI Git owner\.)$/mu;
+  if (embedded.test(source)) {
+    assert(ownerPath, "Missing copied diagnostic owner path");
+    const invocation = '  exec "$python_command" -I -S -c "$1"';
+    assert.equal(source.split(invocation).length, 2, "Missing platform owner invocation");
+    const rendered = source.replace(
+      embedded,
+      (_match, prefix: string, body: string, suffix: string) => {
+        const adjusted = renderWindowsJobDiagnostics(body.replaceAll("'\\''", "'"));
+        return prefix + adjusted.replaceAll("'", "'\\''") + suffix;
+      },
+    );
+    const quotedPath = `'${ownerPath.split(path.sep).join("/").replaceAll("'", "'\\''")}'`;
+    // Keep the large source inside Bash; Windows cannot pass it as Python's -c argument.
+    writeFileSync(ownerPath, "", { flag: "wx", mode: 0o600 });
+    return rendered.replace(
+      invocation,
+      `  printf '%s' "$1" > ${quotedPath}\n  exec "$python_command" -I -S ${quotedPath}`,
+    );
+  }
+  const drain = source.indexOf("def drain(child, job):");
+  assert(drain >= 0, "Missing copied drain function");
+  const start = source.indexOf('    if os.name == "nt":', drain);
+  const end = source.indexOf("    else:\n        # The group remains ours", start);
+  assert(start >= 0 && end > start, "Missing copied Windows drain boundary");
+  const original = source.slice(start, end);
+  assert.equal(original.split("        terminate_job(job, 1)\n").length, 2);
+  assert.equal(original.split("            if accounting.ActiveProcesses == 0:\n").length, 2);
+  const observed = original
+    .slice('    if os.name == "nt":\n'.length)
+    .replace(
+      "        terminate_job(job, 1)\n",
+      '        diagnostic.sample("before-terminate")\n        terminate_job(job, 1)\n        diagnostic.sample("after-terminate")\n',
+    )
+    .replace(
+      "            if accounting.ActiveProcesses == 0:\n",
+      '            if accounting.ActiveProcesses == 0:\n                diagnostic.sample("accounting-zero", accounting.ActiveProcesses)\n',
+    )
+    .replace(/^/gmu, "    ");
+  const diagnostic = readFileSync(
+    new URL("./fixtures/ci-windows-job-diagnostics.py", import.meta.url),
+    "utf8",
+  );
+  return (
+    source.slice(0, start) +
+    '    if os.name == "nt":\n        with FixtureWindowsJobDiagnostics(child.pid, job, deadline) as diagnostic:\n' +
+    observed.trimEnd() +
+    "\n" +
+    source.slice(end)
+  ).replace("def drain(child, job):", `${diagnostic}\n\ndef drain(child, job):`);
 }
 
 export function expectCiCheckoutCleanup(report: Report) {

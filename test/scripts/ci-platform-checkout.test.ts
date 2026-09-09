@@ -22,6 +22,7 @@ import {
   expectCiCheckoutCleanup,
   readCiCheckoutStep,
   renderGitTestClock,
+  renderWindowsJobDiagnostics,
   withCiCheckoutFixture,
 } from "./ci-checkout.test-support.js";
 import { runCiGitStep } from "./ci-git-owner.test-support.js";
@@ -112,7 +113,14 @@ it.concurrent.each([
         // A broken preflight must never let these negative fixture tests run real Git.
         writeFileSync(
           path.join(root, "checkout.sh"),
-          setupFailure ? "printf 'unexpected workflow invocation\\n' >&2\nexit 99\n" : accelerated,
+          setupFailure
+            ? "printf 'unexpected workflow invocation\\n' >&2\nexit 99\n"
+            : process.platform === "win32" && scenario === "timeouts-exhausted"
+              ? renderWindowsJobDiagnostics(
+                  accelerated,
+                  path.join(root, "windows-git-owner-diagnostic.py"),
+                )
+              : accelerated,
         );
         if (process.platform === "win32") {
           return censusPreload(
