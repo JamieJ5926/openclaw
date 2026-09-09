@@ -114,7 +114,9 @@ Use `createPluginRuntimeStore` to store the runtime reference for use outside th
 </Steps>
 
 <Note>
-Prefer `pluginId` for the runtime-store identity. The lower-level `key` form is for uncommon cases where one plugin intentionally needs more than one runtime slot.
+Prefer `pluginId` for the runtime-store identity. Each plugin registry owns its runtime: discovery and setup cannot replace the runtime used by an active channel. Reads follow the current registration, request, or active registry and fail if that registry has no initialized slot.
+
+Without a selected registry, standalone callers retain the most recently registered runtime. The lower-level `key` form remains process-wide; use it only for a deliberately shared slot with its own lifecycle.
 </Note>
 
 ## Other top-level `api` fields
