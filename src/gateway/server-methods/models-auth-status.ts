@@ -600,7 +600,11 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
       let removed: boolean;
       try {
         removed = selection.profileIds
-          ? await removeAuthProfilesAcrossOwnerStores({ cfg, agentDir, profileIds: removedProfiles })
+          ? await removeAuthProfilesAcrossOwnerStores({
+              cfg,
+              agentDir,
+              profileIds: removedProfiles,
+            })
           : await removeProviderAuthProfilesAcrossOwnerStores({
               cfg,
               provider,

@@ -1,5 +1,6 @@
 // Stale-while-revalidate cache for models.authStatus provider usage enrichment.
 import type { AuthProfileStore } from "../../agents/auth-profiles.js";
+import { getRuntimeAuthProfileStoreCredentialsRevision } from "../../agents/auth-profiles/runtime-snapshots.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { loadProviderUsageSummary } from "../../infra/provider-usage.load.js";
 import { PROVIDER_USAGE_TIMEOUT_MS } from "../../infra/provider-usage.shared.js";
@@ -154,17 +155,17 @@ function scheduleProviderUsageRefresh(params: {
   }
   const publishGeneration = cacheGeneration;
   const ownerToken = {};
+  const credentialsRevision = getRuntimeAuthProfileStoreCredentialsRevision();
+  const isCurrent = () =>
+    publishGeneration === cacheGeneration &&
+    usageRefreshByAgentId.get(params.cacheOwnerKey)?.ownerToken === ownerToken &&
+    (!params.authProfile ||
+      credentialsRevision === getRuntimeAuthProfileStoreCredentialsRevision());
   const load = () =>
     loadProviderUsageSummary({
       providers: params.providerIds,
       ...(params.authProfile ? { authProfile: params.authProfile } : {}),
-      ...(params.authProfile
-        ? {
-            isAuthProfileCurrent: () =>
-              publishGeneration === cacheGeneration &&
-              usageRefreshByAgentId.get(params.cacheOwnerKey)?.ownerToken === ownerToken,
-          }
-        : {}),
+      ...(params.authProfile ? { isAuthProfileCurrent: isCurrent } : {}),
       agentDir: params.agentDir,
       workspaceDir: params.workspaceDir,
       authStore: params.authStore,
@@ -176,10 +177,7 @@ function scheduleProviderUsageRefresh(params: {
     load()
       .then((freshUsage) => {
         const usage = retainLastGoodOnTimeout(freshUsage, params.lastGood);
-        if (
-          publishGeneration === cacheGeneration &&
-          usageRefreshByAgentId.get(params.cacheOwnerKey)?.ownerToken === ownerToken
-        ) {
+        if (isCurrent()) {
           usageCacheByAgentId.set(params.cacheOwnerKey, {
             agentDir: params.agentDir,
             configRef: params.configRef,
