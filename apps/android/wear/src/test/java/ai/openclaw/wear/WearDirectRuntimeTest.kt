@@ -647,6 +647,148 @@ class WearDirectRuntimeTest {
   @Test
   fun sendAcknowledgementFencesHistoryAdmittedDuringSend() = verifySendFencesHistory(historyAfterSend = true)
 
+  @Test
+  fun wireAcknowledgementBeforeFinalCannotResurrectCompletedRun() = verifyTerminalAcknowledgement("final", ackFirst = true)
+
+  @Test
+  fun wireAcknowledgementBeforeAbortedCannotResurrectCompletedRun() = verifyTerminalAcknowledgement("aborted", ackFirst = true)
+
+  @Test
+  fun wireAcknowledgementBeforeErrorCannotResurrectCompletedRun() = verifyTerminalAcknowledgement("error", ackFirst = true)
+
+  @Test
+  fun terminalHistoryAlreadyPendingSurvivesDelayedAcknowledgement() = verifyTerminalAcknowledgement("final", ackFirst = false)
+
+  private fun verifyTerminalAcknowledgement(
+    terminal: String,
+    ackFirst: Boolean,
+  ) = conversationTest {
+    val (sendWork, send) = beginSend()
+    val run = checkNotNull(send.params.text("idempotencyKey"))
+    if (ackFirst) send.acknowledge("started")
+    // Same-socket wire order completes the ACK deferred, but its consumer remains paused.
+    gateway.chat(run, "Terminal $terminal", state = terminal)
+    await(runTasks = false) { runtime.state.value.takeIf { it.messages.lastOrNull()?.text == "Terminal $terminal" } }
+    assertTrue(runtime.state.value.sending)
+    val pendingHistory = if (ackFirst) null else next(gateway.histories)
+    if (!ackFirst) send.acknowledge("started")
+    finish(sendWork)
+    assertSettledSend()
+    assertEquals("A delayed ACK must not restore a $terminal run", null, runtime.state.value.runId)
+    assertEquals(null, runtime.state.value.streamText)
+    (pendingHistory ?: next(gateway.histories)).reply(history("Persisted $terminal"))
+    await { runtime.state.value.takeIf { it.messages.singleOrNull()?.text == "Persisted $terminal" } }
+    assertEquals(null, runtime.state.value.runId)
+    assertTrue("The terminal event owns reconciliation; ACK must not add another load", gateway.histories.tryReceive().isFailure)
+  }
+
+  @Test
+  fun chatEventsSupersedeAcknowledgementsWithoutReplacingLiveRunOrText() =
+    conversationTest {
+      for ((status, newerRun) in listOf("started" to false, "in_flight" to true, "ok" to true)) {
+        val (sendWork, send) = beginSend()
+        val run = if (newerRun) "newer-$status" else checkNotNull(send.params.text("idempotencyKey"))
+        send.acknowledge(status)
+        gateway.chat(run, "Live $status")
+        await(runTasks = false) { runtime.state.value.takeIf { it.streamText == "Live $status" } }
+        finish(sendWork)
+        assertSettledSend()
+        assertEquals("Chat events must retain the live run after $status ACK", run, runtime.state.value.runId)
+        assertEquals("Live $status", runtime.state.value.streamText)
+        assertEquals(
+          "Initial history",
+          runtime.state.value.messages
+            .single()
+            .text,
+        )
+        assertTrue("Superseded ACK must not request another history", gateway.histories.tryReceive().isFailure)
+      }
+    }
+
+  @Test
+  fun activeAcknowledgementsIgnoreForeignChatAndUnrelatedHistory() =
+    conversationTest {
+      for ((status, historyApplied) in listOf("started" to false, "in_flight" to true)) {
+        val (sendWork, send) = beginSend()
+        val refreshWork = operation(runtime::refresh)
+        val refresh = next(gateway.histories)
+        if (historyApplied) {
+          refresh.reply(history("Unrelated refreshed history"))
+          finish(refreshWork)
+        }
+        gateway.chat("foreign-run", "Foreign text", sessionKey = "agent:other:main")
+        send.acknowledge(status)
+        finish(sendWork)
+        assertSettledSend()
+        assertEquals(send.params.text("idempotencyKey"), runtime.state.value.runId)
+        assertEquals(null, runtime.state.value.streamText)
+        if (!historyApplied) {
+          refresh.reply(history("Stale refresh", "stale-run", "Stale text"))
+          finish(refreshWork)
+        }
+        assertEquals(send.params.text("idempotencyKey"), runtime.state.value.runId)
+        assertEquals(
+          if (historyApplied) "Unrelated refreshed history" else "Initial history",
+          runtime.state.value.messages
+            .single()
+            .text,
+        )
+        assertTrue(gateway.histories.tryReceive().isFailure)
+      }
+    }
+
+  @Test
+  fun okAcknowledgementReconcilesBothActiveDurableClaimAndTerminalHistory() =
+    conversationTest {
+      for (active in listOf(true, false)) {
+        gateway.chat("previous-run", "Previous text")
+        await { runtime.state.value.takeIf { it.streamText == "Previous text" } }
+        val (sendWork, send) = beginSend()
+        send.acknowledge("ok")
+        val reconciliation = historyWhileSending(sendWork)
+        assertSettledSend()
+        val run = if (active) checkNotNull(send.params.text("idempotencyKey")) else null
+        reconciliation.reply(history("Canonical accepted history", run, "Recovered stream"))
+        finish(sendWork)
+        assertEquals(run, runtime.state.value.runId)
+        assertEquals(if (active) "Recovered stream" else null, runtime.state.value.streamText)
+        assertEquals(
+          "Canonical accepted history",
+          runtime.state.value.messages
+            .single()
+            .text,
+        )
+        assertSettledSend()
+        assertTrue(gateway.histories.tryReceive().isFailure)
+      }
+    }
+
+  @Test
+  fun failedAcknowledgementReconciliationDoesNotMakeAcceptedDeliveryUnknown() =
+    conversationTest {
+      val (sendWork, send) = beginSend()
+      send.acknowledge("ok")
+      val reconciliation = historyWhileSending(sendWork)
+      assertSettledSend()
+      reconciliation.reply(
+        buildJsonObject {
+          put("code", "UNAVAILABLE")
+          put("message", "Fixture history unavailable")
+        },
+        ok = false,
+      )
+      finish(sendWork)
+      assertSettledSend()
+      assertNotNull("History failure must remain visible", runtime.state.value.error)
+      assertFalse(
+        runtime.state.value.error
+          .orEmpty()
+          .contains("unconfirmed"),
+      )
+      runtime.retrySend()
+      assertTrue("An acknowledged attempt cannot be resent", gateway.sends.tryReceive().isFailure)
+    }
+
   private fun verifySendFencesHistory(historyAfterSend: Boolean) =
     conversationTest {
       gateway.answerSend = false
@@ -796,6 +938,24 @@ class WearDirectRuntimeTest {
       }
 
     suspend fun <T : Any> next(channel: Channel<T>): T = await { channel.tryReceive().getOrNull() }
+
+    suspend fun beginSend(): Pair<List<Job>, HeldRequest> {
+      gateway.answerSend = false
+      val work = operation { runtime.send("Current input", runtime.inputOwner()) }
+      next(gateway.sends)
+      return work to next(gateway.sendReplies)
+    }
+
+    suspend fun historyWhileSending(work: List<Job>): HeldRequest {
+      val result = await { gateway.histories.tryReceive().takeIf { it.isSuccess || work.all { job -> job.isCompleted } } }
+      return checkNotNull(result.getOrNull()) { "A non-active ACK must reconcile canonical history before completing" }
+    }
+
+    fun assertSettledSend() {
+      assertEquals(null, runtime.state.value.pendingSend)
+      assertFalse(runtime.state.value.sending)
+      assertFalse(runtime.state.value.sendUnknown)
+    }
 
     suspend fun finish(work: List<Job>) {
       await { work.takeIf { jobs -> jobs.all { it.isCompleted } } }
@@ -1009,10 +1169,11 @@ class WearDirectRuntimeTest {
       run: String,
       text: String,
       state: String = "delta",
+      sessionKey: String = "agent:main:main",
     ) = event(
       "chat",
       buildJsonObject {
-        put("sessionKey", "agent:main:main")
+        put("sessionKey", sessionKey)
         put("runId", run)
         put("state", state)
         put(
@@ -1088,14 +1249,25 @@ class WearDirectRuntimeTest {
   ) {
     val params = frame["params"]!!.jsonObject
 
-    fun reply(payload: JsonObject) {
+    fun acknowledge(status: String) =
+      reply(
+        buildJsonObject {
+          put("runId", checkNotNull(params.text("idempotencyKey")))
+          put("status", status)
+        },
+      )
+
+    fun reply(
+      payload: JsonObject,
+      ok: Boolean = true,
+    ) {
       check(
         socket.send(
           buildJsonObject {
             put("type", "res")
             put("id", frame["id"]!!)
-            put("ok", true)
-            put("payload", payload)
+            put("ok", ok)
+            put(if (ok) "payload" else "error", payload)
           }.toString(),
         ),
       )

@@ -109,6 +109,7 @@ internal class WearDirectRuntime(
   private var feed = WearApprovalFeed()
   private var conversation = 0L
   private var historyRevision = 0L
+  private var chatRevision = 0L
   private val mutableState =
     MutableStateFlow(
       WearDirectState(selected = store.registry.activeEntry(), gateways = store.registry.entries.value),
@@ -588,10 +589,14 @@ internal class WearDirectRuntime(
       .forEach { id -> reconcileApproval(request, id) }
   }
 
-  private suspend fun loadHistory(request: RequestContext) {
+  private suspend fun loadHistory(
+    request: RequestContext,
+    expectedChatRevision: Long? = null,
+  ) {
     // Newer loads, admitted sends, send acknowledgements, and events supersede this snapshot.
     var admitted: Pair<String, Long>? = null
     commit(request) {
+      if (expectedChatRevision != null && chatRevision != expectedChatRevision) return@commit
       val key = mutableState.value.sessionKey ?: return@commit
       historyRevision += 1
       admitted = key to historyRevision
@@ -653,18 +658,18 @@ internal class WearDirectRuntime(
 
   private fun send(attempt: WearDirectSend) {
     val request = capture() ?: return
-    var admitted = false
+    var admitted: Long? = null
     commit(request) {
       val state = mutableState.value
       if (state.pendingSend !== attempt || state.sending) return@commit
       historyRevision += 1
       mutableState.value = state.copy(sending = true, error = null)
-      admitted = true
+      admitted = chatRevision
     }
-    if (!admitted) return
+    val revision = admitted ?: return
     scope.launch {
-      try {
-        val result =
+      val result =
+        try {
           request(
             request,
             "chat.send",
@@ -675,27 +680,43 @@ internal class WearDirectRuntime(
               put("deliver", false)
             },
           )
-        commit(request) {
-          historyRevision += 1
-          mutableState.value =
-            mutableState.value.copy(
-              sending = false,
-              pendingSend = null,
-              sendUnknown = false,
-              runId = result.text("runId"),
-            )
+        } catch (error: Exception) {
+          commit(request) {
+            val unknown = error !is GatewayRequestDefinitiveFailure
+            mutableState.value =
+              mutableState.value.copy(
+                sending = false,
+                sendUnknown = unknown,
+                error = if (unknown) "Delivery is unconfirmed. Refresh history before retrying." else "Message was not accepted. Retry.",
+              )
+          }
+          if (error is CancellationException) throw error
+          return@launch
         }
-      } catch (error: Exception) {
-        commit(request) {
-          val unknown = error !is GatewayRequestDefinitiveFailure
-          mutableState.value =
-            mutableState.value.copy(
-              sending = false,
-              sendUnknown = unknown,
-              error = if (unknown) "Delivery is unconfirmed. Refresh history before retrying." else "Message was not accepted. Retry.",
-            )
+      var reconcile = false
+      commit(request) {
+        // ACK settles delivery; newer chat events retain ownership of run state and history.
+        val unchanged = chatRevision == revision
+        val active = result.text("status") in setOf("started", "in_flight")
+        val adoptRun = unchanged && active
+        reconcile = unchanged && !active
+        if (adoptRun) historyRevision += 1
+        mutableState.value =
+          mutableState.value.copy(
+            sending = false,
+            pendingSend = null,
+            sendUnknown = false,
+            runId = if (adoptRun) result.text("runId") else mutableState.value.runId,
+          )
+      }
+      if (reconcile) {
+        try {
+          loadHistory(request, expectedChatRevision = revision)
+        } catch (error: CancellationException) {
+          throw error
+        } catch (_: Exception) {
+          commit(request) { mutableState.value = mutableState.value.copy(error = "Could not refresh this conversation. Retry.") }
         }
-        if (error is CancellationException) throw error
       }
     }
   }
@@ -820,6 +841,7 @@ internal class WearDirectRuntime(
         parseWearApprovalTransition(obj)?.let(feed::accept)
         publishApprovals()
       } else if (event == "chat" && obj.text("sessionKey") == mutableState.value.sessionKey) {
+        chatRevision += 1
         historyRevision += 1
         val message = directChatMessage(obj["message"])
         val terminal = obj.text("state") in setOf("final", "aborted", "error")
