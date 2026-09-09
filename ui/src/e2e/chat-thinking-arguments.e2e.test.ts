@@ -76,7 +76,7 @@ suite.define(() => {
             highOptions,
             sliders,
             patch,
-            requests: gateway.requests,
+            requests: await gateway.getRequests(),
           }),
         );
         await page.screenshot({ path: path.join(suite.artifactDir, "partial-thinking.png") });
