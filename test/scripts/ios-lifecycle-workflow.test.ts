@@ -13,14 +13,26 @@ const workflow: { jobs: Record<string, { steps: { name?: string; run?: string }[
 const watchStep = workflow.jobs["ios-build"]?.steps.find(
   (step) => step.name === "Run focused Apple Watch operation simulator tests",
 );
+const qualification = parse(readFileSync(".github/workflows/ios-periphery.yml", "utf8"));
+const qualificationSteps: {
+  name: string;
+  run?: string;
+  if?: string;
+  with?: Record<string, unknown>;
+}[] = qualification.jobs.scan.steps;
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 
-function runWatchStep(mode = "ready") {
+function runWatchStep(mode = "ready", qualificationMode = false) {
   const root = tempDirs.make("openclaw-watch-workflow-");
   const bin = path.join(root, "bin");
   const product = path.join(root, "project derived data", "Watch Product.app");
   mkdirSync(bin, { recursive: true });
   mkdirSync(product, { recursive: true });
+  mkdirSync(path.join(root, "scripts"), { recursive: true });
+  writeFileSync(
+    path.join(root, "scripts/ios-watch-operation-tests.sh"),
+    readFileSync("scripts/ios-watch-operation-tests.sh"),
+  );
   const runner = path.join(root, "tools.mjs");
   writeFileSync(
     runner,
@@ -65,10 +77,15 @@ if (tool === "xcrun") {
     writeFileSync(executable, `#!/bin/sh\nexec '${process.execPath}' '${runner}' '${tool}' "$@"\n`);
     chmodSync(executable, 0o755);
   }
-  if (!watchStep?.run) {
+  const step = qualificationMode
+    ? qualificationSteps.find(
+        (entry) => entry.name === "Run focused Apple Watch operation simulator tests",
+      )
+    : watchStep;
+  if (!step?.run) {
     throw new Error("Missing Watch simulator workflow step");
   }
-  const result = spawnSync("bash", ["--noprofile", "--norc", "-c", watchStep.run], {
+  const result = spawnSync("/bin/bash", ["--noprofile", "--norc", "-c", step.run], {
     cwd: root,
     encoding: "utf8",
     env: {
@@ -83,7 +100,7 @@ if (tool === "xcrun") {
     .trim()
     .split("\n")
     .map((line) => JSON.parse(line));
-  return { result, commands, product };
+  return { result, commands, product, root };
 }
 
 describe.skipIf(process.platform === "win32")("Watch simulator workflow", () => {
@@ -151,5 +168,44 @@ describe.skipIf(process.platform === "win32")("Watch simulator workflow", () => 
     expect(result.status).toBe(23);
     expect(commands.some((command) => command.args.includes("install"))).toBe(false);
     expect(commands.some((command) => command.args.includes("test-without-building"))).toBe(false);
+  });
+
+  it("runs the same Watch suites in qualification mode and retains an independent result bundle", () => {
+    const normal = runWatchStep();
+    const focused = runWatchStep("ready", true);
+    expect(focused.result.status, focused.result.stderr).toBe(0);
+    const testSelection = (commands: Command[]) =>
+      commands
+        .find((command) => command.args.includes("test-without-building"))
+        ?.args.filter((arg) => arg.startsWith("-only-testing:"));
+    expect(testSelection(focused.commands)).toEqual(testSelection(normal.commands));
+    expect(
+      focused.commands.find((command) => command.args.includes("test-without-building"))?.args,
+    ).toContain(path.join(focused.root, "watch-qualification/WatchOperationTests.xcresult"));
+  });
+
+  it("keeps qualification opt-in and separates test evidence from Periphery reports", () => {
+    expect(qualification.on.workflow_dispatch.inputs.watch_qualification.default).toBe(false);
+    for (const name of [
+      "Run Periphery",
+      "Build Periphery report",
+      "Upload Periphery report",
+      "Fail on dead code",
+    ]) {
+      expect(qualificationSteps.find((step) => step.name === name)?.if).toContain(
+        "!(github.event_name == 'workflow_dispatch' && inputs.watch_qualification)",
+      );
+    }
+    const artifact = qualificationSteps.find(
+      (step) => step.name === "Upload Watch qualification evidence",
+    );
+    expect(artifact?.if).toContain("always()");
+    expect(artifact?.with?.["if-no-files-found"]).toBe("error");
+    expect(artifact?.with?.path).toBe("${{ runner.temp }}/watch-qualification");
+    const shared = qualificationSteps.find(
+      (step) => step.name === "Run focused shared Watch transport tests",
+    );
+    expect(shared?.run).toContain("GatewayOperatorHTTPSessionTests");
+    expect(shared?.run).toContain("--no-parallel");
   });
 });
