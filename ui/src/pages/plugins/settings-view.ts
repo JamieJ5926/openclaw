@@ -59,6 +59,7 @@ type SharedProps = {
   onConfigPatch: (path: Array<string | number>, value: unknown) => void;
   onConfigRemove: (path: Array<string | number>) => void;
   onConfigReload: () => void;
+  onConfigRetry: () => void;
   onRefresh: () => void;
 };
 
@@ -77,6 +78,7 @@ type DetailProps = SharedProps & {
   inspection: PluginsInspectResult | null;
   inspectionError: string | null;
   configSchema: JsonSchema | null;
+  hostControlsSchema: JsonSchema | null;
   backHref: string;
   backLabel: string;
   onBack: () => void;
@@ -256,7 +258,7 @@ function renderAdvanced(props: InventoryProps): TemplateResult {
   }
   if (!props.advancedSchema || !props.configValue) {
     return props.configError
-      ? renderRetryError(props.configError, props.onConfigReload)
+      ? renderRetryError(props.configError, props.onConfigRetry)
       : props.configSchemaLoading || !props.configValue
         ? renderSettingsLoadingSkeleton({ rows: 4, carapace: true })
         : renderSettingsEmpty(t("pluginsPage.schemaUnavailable"), { carapace: true });
@@ -273,7 +275,7 @@ function renderAdvanced(props: InventoryProps): TemplateResult {
       onPatch: props.onConfigPatch,
       onRemove: props.onConfigRemove,
     })}
-    ${props.configError ? renderRetryError(props.configError, props.onConfigReload) : nothing}
+    ${props.configError ? renderRetryError(props.configError, props.onConfigRetry) : nothing}
   `;
 }
 
@@ -343,7 +345,7 @@ export function renderPluginSettingsInventory(props: InventoryProps): TemplateRe
 function renderConfiguration(props: DetailProps, plugin: PluginCatalogItem): TemplateResult {
   if (!props.configValue || !props.configSchema) {
     if (props.configError) {
-      return renderRetryError(props.configError, props.onConfigReload);
+      return renderRetryError(props.configError, props.onConfigRetry);
     }
     return renderSettingsLoadingSkeleton({ rows: 3, carapace: true });
   }
@@ -360,7 +362,7 @@ function renderConfiguration(props: DetailProps, plugin: PluginCatalogItem): Tem
       onPatch: props.onConfigPatch,
       onRemove: props.onConfigRemove,
     })}
-    ${props.configError ? renderRetryError(props.configError, props.onConfigReload) : nothing}
+    ${props.configError ? renderRetryError(props.configError, props.onConfigRetry) : nothing}
   `;
 }
 
@@ -415,6 +417,22 @@ function renderAccess(props: DetailProps): TemplateResult {
     })}
     <details class="plugins-settings-advanced-access">
       <summary>${t("pluginsPage.advanced")}</summary>
+      ${
+        props.hostControlsSchema && props.configValue
+          ? renderNode({
+              schema: props.hostControlsSchema,
+              value: pluginEntryValue(props.configValue, props.pluginId),
+              path: ["plugins", "entries", props.pluginId],
+              hints: props.configHints,
+              unsupported: new Set(props.configUnsupportedPaths),
+              disabled: !props.canEditConfig || props.configBusy,
+              showLabel: false,
+              onPatch: props.onConfigPatch,
+              onRemove: props.onConfigRemove,
+            })
+          : nothing
+      }
+      ${props.configError ? renderRetryError(props.configError, props.onConfigRetry) : nothing}
       ${renderPluginDeclaredCapabilities(props.inspection.declared)}
       ${renderPluginGrants(props.inspection.grants, props.inspection.plugin.origin)}
     </details>
@@ -532,7 +550,7 @@ export function renderPluginSettingsDetail(props: DetailProps): TemplateResult {
   if (props.error && !props.result) {
     return renderSettingsPage(renderRetryError(props.error, props.onRefresh), { carapace: true });
   }
-  if (props.loading || !props.result) {
+  if (!props.result) {
     return renderSettingsPage(renderSettingsLoadingSkeleton({ rows: 5, carapace: true }), {
       carapace: true,
     });

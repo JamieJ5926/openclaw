@@ -10,6 +10,8 @@ import {
   createPluginsRouteData,
   createPluginsRouteLocation,
   createResult,
+  createRuntimeConfigHarness,
+  deferred,
   mountPage,
   resetPluginsPageTestState,
 } from "./plugins-page.test-support.ts";
@@ -134,5 +136,69 @@ describe("PluginsPage routing", () => {
     expect(context.navigate).toHaveBeenCalledWith(testCase.target, {
       pathname: testCase.pathname,
     });
+  });
+
+  it("retries configuration without discarding the pending draft", async () => {
+    const result = createResult();
+    const { client } = createClient(async (method) =>
+      method === "plugins.inspect" ? createInspectResult() : result,
+    );
+    const harness = createGateway(client);
+    const refresh = vi.fn(async () => undefined);
+    const runtimeConfig = createRuntimeConfigHarness(
+      refresh,
+      {
+        configFormDirty: true,
+        lastError: "Save failed",
+        configForm: { plugins: { entries: { workboard: { config: { token: "pending" } } } } },
+      } as never,
+      () => client,
+    );
+    const context = createContext(harness.gateway, refresh, undefined, runtimeConfig);
+    const routeData = createPluginsRouteData(
+      harness.gateway,
+      result,
+      createPluginsRouteLocation("/settings/plugins/workboard"),
+    );
+    const { page } = await mountPage(context, routeData);
+    await switchToSettingsSurface(page, routeData);
+
+    const retry = page.querySelector<HTMLButtonElement>(".plugins-settings-error button");
+    expect(retry?.textContent?.trim()).toBe("Try again");
+    retry?.click();
+
+    expect(runtimeConfig.runtimeConfig.retry).toHaveBeenCalledOnce();
+    expect(runtimeConfig.runtimeConfig.refreshSchema).toHaveBeenCalledOnce();
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("keeps the installed detail mounted during a background catalog refresh", async () => {
+    const result = createResult();
+    const nextCatalog = deferred<typeof result>();
+    const { client } = createClient(async (method) => {
+      if (method === "plugins.inspect") {
+        return createInspectResult();
+      }
+      if (method === "plugins.list") {
+        return nextCatalog.promise;
+      }
+      return result;
+    });
+    const harness = createGateway(client);
+    const routeData = createPluginsRouteData(
+      harness.gateway,
+      result,
+      createPluginsRouteLocation("/settings/plugins/workboard"),
+    );
+    const { page } = await mountPage(createContext(harness.gateway), routeData);
+    await switchToSettingsSurface(page, routeData);
+    await vi.waitFor(() => expect(page.querySelector("h1")?.textContent).toContain("Workboard"));
+
+    const refresh = page.refreshCatalog();
+    await vi.waitFor(() => expect(page.loading).toBe(true));
+    expect(page.querySelector("h1")?.textContent).toContain("Workboard");
+
+    nextCatalog.resolve(result);
+    await refresh;
   });
 });

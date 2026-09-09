@@ -43,7 +43,11 @@ import type { PluginRowMessage } from "./plugin-row-message.ts";
 import { PluginsConsentController } from "./plugins-consent-controller.ts";
 import { renderPluginsHubHeader } from "./plugins-hub-header.ts";
 import { PLUGINS_HUB_PANEL_ID, type PluginsHubTab } from "./plugins-hub.ts";
-import { pluginAdvancedSchema, pluginConfigSchema } from "./settings-model.ts";
+import {
+  pluginAdvancedSchema,
+  pluginConfigSchema,
+  pluginHostControlsSchema,
+} from "./settings-model.ts";
 import {
   renderPluginSettingsDetail,
   renderPluginSettingsInventory,
@@ -548,6 +552,10 @@ class PluginsPage extends OpenClawLightDomElement {
         this.pluginConfigEditPending = false;
         void this.context.runtimeConfig.refresh({ discardPendingChanges: true });
       },
+      onConfigRetry: () => {
+        void this.context.runtimeConfig.retry();
+        void this.context.runtimeConfig.refreshSchema();
+      },
       onRefresh: () => void this.refreshCatalog(),
     };
     return html`
@@ -620,6 +628,10 @@ class PluginsPage extends OpenClawLightDomElement {
                   inspection: this.detail?.inspection ?? null,
                   inspectionError: this.detail?.error ?? null,
                   configSchema: pluginConfigSchema(configAnalysis.schema, detailPluginId),
+                  hostControlsSchema: pluginHostControlsSchema(
+                    configAnalysis.schema,
+                    detailPluginId,
+                  ),
                   backHref: pathForRoute(settingsParentRoute, this.context.basePath),
                   backLabel:
                     settingsParentRoute === "plugins" ? t("tabs.plugins") : t("nav.settings"),

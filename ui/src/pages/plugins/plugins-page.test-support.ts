@@ -203,6 +203,8 @@ type RuntimeConfigTestHarness = {
     refresh: ApplicationContext["runtimeConfig"]["refresh"];
     ensureLoaded: ReturnType<typeof vi.fn<() => Promise<undefined>>>;
     ensureSchemaLoaded: ReturnType<typeof vi.fn<() => Promise<undefined>>>;
+    refreshSchema: ReturnType<typeof vi.fn<() => Promise<undefined>>>;
+    retry: ReturnType<typeof vi.fn<() => Promise<boolean>>>;
     patch: ReturnType<
       typeof vi.fn<(options: { raw: Record<string, unknown>; note: string }) => Promise<boolean>>
     >;
@@ -227,6 +229,8 @@ export function createRuntimeConfigHarness(
     refresh: refreshConfig,
     ensureLoaded: vi.fn(async () => undefined),
     ensureSchemaLoaded: vi.fn(async () => undefined),
+    refreshSchema: vi.fn(async () => undefined),
+    retry: vi.fn(async () => true),
     patch,
     patchFromSnapshot: vi.fn(async (build) => {
       const config = runtimeConfigState.configSnapshot?.sourceConfig ?? {};

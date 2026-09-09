@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { pluginAdvancedSchema, pluginConfigSchema, pluginEntryValue } from "./settings-model.ts";
+import {
+  pluginAdvancedSchema,
+  pluginConfigSchema,
+  pluginEntryValue,
+  pluginHostControlsSchema,
+} from "./settings-model.ts";
 
 const schema = {
   type: "object",
@@ -17,7 +22,12 @@ const schema = {
           properties: {
             workboard: {
               type: "object",
-              properties: { config: { type: "object", properties: { token: { type: "string" } } } },
+              properties: {
+                config: { type: "object", properties: { token: { type: "string" } } },
+                hooks: { type: "object" },
+                llm: { type: "object" },
+                subagent: { type: "object" },
+              },
             },
           },
           additionalProperties: {
@@ -44,6 +54,14 @@ describe("plugin settings model", () => {
   it("resolves named and wildcard plugin configuration schemas", () => {
     expect(pluginConfigSchema(schema, "workboard")?.properties).toHaveProperty("token");
     expect(pluginConfigSchema(schema, "other")?.type).toBe("object");
+  });
+
+  it("preserves editable host-owned plugin controls outside plugin config", () => {
+    expect(Object.keys(pluginHostControlsSchema(schema, "workboard")?.properties ?? {})).toEqual([
+      "hooks",
+      "llm",
+      "subagent",
+    ]);
   });
 
   it("never reads inherited plugin ids from schema or config", () => {

@@ -23,6 +23,31 @@ export function pluginConfigSchema(
   return schemaProperty(pluginEntrySchema(rootSchema, pluginId), "config");
 }
 
+export function pluginHostControlsSchema(
+  rootSchema: JsonSchema | null,
+  pluginId: string,
+): JsonSchema | null {
+  const entry = pluginEntrySchema(rootSchema, pluginId);
+  if (!entry?.properties) {
+    return null;
+  }
+  const keys = ["hooks", "llm", "subagent"];
+  const properties = Object.fromEntries(
+    keys.flatMap((key) => {
+      const schema = entry.properties?.[key];
+      return schema ? [[key, schema] as const] : [];
+    }),
+  );
+  return Object.keys(properties).length > 0
+    ? {
+        ...entry,
+        properties,
+        required: entry.required?.filter((key) => keys.includes(key)),
+        additionalProperties: false,
+      }
+    : null;
+}
+
 export function pluginAdvancedSchema(rootSchema: JsonSchema | null): JsonSchema | null {
   const plugins = schemaProperty(rootSchema, "plugins");
   if (!plugins?.properties) {
