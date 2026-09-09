@@ -128,28 +128,76 @@ public struct OpenClawRunQuery: EntityStringQuery {
     }
 }
 
+public enum OpenClawNativeSessionOperation: String, AppEnum {
+    case open
+    case compose
+    #if os(iOS)
+    case liveVoice
+    #endif
+
+    public static let typeDisplayRepresentation: TypeDisplayRepresentation = "Session Operation"
+    #if os(iOS)
+    public static let caseDisplayRepresentations: [Self: DisplayRepresentation] = [
+        .open: "Open",
+        .compose: "Compose",
+        .liveVoice: "Live Voice",
+    ]
+    #else
+    public static let caseDisplayRepresentations: [Self: DisplayRepresentation] = [
+        .open: "Open",
+        .compose: "Compose",
+    ]
+    #endif
+}
+
+/// App Intents metadata permits one OpenIntent per entity; session variants
+/// share this declaration while named Shortcuts delegate to its perform method.
 public struct OpenSessionIntent: OpenIntent {
     public static let title: LocalizedStringResource = "Open Session"
     public static let authenticationPolicy: IntentAuthenticationPolicy = .requiresLocalDeviceAuthentication
     @Parameter(title: "Session") public var target: OpenClawSessionEntity
+    @Parameter(title: "Operation", default: .open) public var operation: OpenClawNativeSessionOperation
+    @Parameter(title: "Draft") public var draft: String?
     public static var parameterSummary: some ParameterSummary {
-        Summary("Open \(\.$target)")
+        Summary("\(\.$operation) \(\.$target)") { \.$draft }
     }
 
-    public init() {}
-    public init(target: OpenClawSessionEntity) {
+    public init() {
+        self.operation = .open
+    }
+
+    public init(
+        target: OpenClawSessionEntity,
+        operation: OpenClawNativeSessionOperation = .open,
+        draft: String? = nil)
+    {
         self.target = target
+        self.operation = operation
+        self.draft = draft
     }
 
     @MainActor
     public func perform() async throws -> some IntentResult {
-        try await OpenClawNativeActionServices.open(.session(self.target.session))
+        let request: OpenClawNativeOpenRequest = switch self.operation {
+        case .open: .session(self.target.session)
+        case .compose: .compose(self.target.session, draft: self.draft)
+        #if os(iOS)
+        case .liveVoice: .liveVoice(self.target.session)
+        #endif
+        }
+        try await OpenClawNativeActionServices.open(request)
         return .result()
     }
 }
 
-public struct OpenComposeIntent: OpenIntent {
+public struct OpenComposeIntent: AppIntent {
     public static let title: LocalizedStringResource = "Compose Message"
+    public static let openAppWhenRun = true
+    @available(iOS 26.0, macOS 26.0, *)
+    public static var supportedModes: IntentModes {
+        .foreground(.immediate)
+    }
+
     public static let authenticationPolicy: IntentAuthenticationPolicy = .requiresLocalDeviceAuthentication
     @Parameter(title: "Session") public var target: OpenClawSessionEntity
     @Parameter(title: "Draft") public var draft: String?
@@ -164,8 +212,7 @@ public struct OpenComposeIntent: OpenIntent {
 
     @MainActor
     public func perform() async throws -> some IntentResult {
-        try await OpenClawNativeActionServices.open(.compose(self.target.session, draft: self.draft))
-        return .result()
+        try await OpenSessionIntent(target: self.target, operation: .compose, draft: self.draft).perform()
     }
 }
 
@@ -190,8 +237,14 @@ public struct OpenRunIntent: OpenIntent {
 }
 
 #if os(iOS)
-public struct OpenLiveVoiceIntent: OpenIntent {
+public struct OpenLiveVoiceIntent: AppIntent {
     public static let title: LocalizedStringResource = "Open Session Voice"
+    public static let openAppWhenRun = true
+    @available(iOS 26.0, *)
+    public static var supportedModes: IntentModes {
+        .foreground(.immediate)
+    }
+
     public static let authenticationPolicy: IntentAuthenticationPolicy = .requiresLocalDeviceAuthentication
     @Parameter(title: "Session") public var target: OpenClawSessionEntity
     public static var parameterSummary: some ParameterSummary {
@@ -205,8 +258,7 @@ public struct OpenLiveVoiceIntent: OpenIntent {
 
     @MainActor
     public func perform() async throws -> some IntentResult {
-        try await OpenClawNativeActionServices.open(.liveVoice(self.target.session))
-        return .result()
+        try await OpenSessionIntent(target: self.target, operation: .liveVoice).perform()
     }
 }
 #endif

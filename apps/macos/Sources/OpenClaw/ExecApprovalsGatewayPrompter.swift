@@ -99,8 +99,10 @@ final class ExecApprovalsGatewayPrompter {
             let nowMs = Int(Date().timeIntervalSince1970 * 1000)
             let (remainingMs, overflow) = request.expiresAtMs.subtractingReportingOverflow(nowMs)
             guard !overflow, remainingMs > 0 else { return }
-            let validate: (@MainActor () async -> Bool)? = context.nativeBinding.map { _ in
-                { await self.validateNativeContext(context, delivery: delivery) }
+            let validate: (@MainActor () async -> Bool)? = if context.nativeBinding != nil {
+                { @MainActor in await self.validateNativeContext(context, delivery: delivery) }
+            } else {
+                nil
             }
             guard let decision = await ExecApprovalsPromptPresenter.prompt(
                 request.request,

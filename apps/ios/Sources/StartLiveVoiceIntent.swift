@@ -2,7 +2,7 @@ import AppIntents
 import OpenClawKit
 
 extension OpenClawApp: AppIntentsPackage {
-    static var includedPackages: [any AppIntentsPackage.Type] {
+    nonisolated static var includedPackages: [any AppIntentsPackage.Type] {
         [OpenClawNativeAppIntents.self]
     }
 }
