@@ -60,6 +60,7 @@ describe("renderInstalledPlugins", () => {
       { ...createPlugin({ id: "web", name: "Web" }), categories: ["web", "channels"] },
       { ...createPlugin({ id: "channel", name: "Channel" }), categories: ["channels", "web"] },
       { ...createPlugin({ id: "model", name: "Model" }), categories: ["models"] },
+      { ...createPlugin({ id: "executor", name: "Executor" }), categories: ["agent-runtimes"] },
       { ...createPlugin({ id: "memory", name: "Memory" }), categories: ["memory"] },
       { ...createPlugin({ id: "context", name: "Context" }), categories: ["context"] },
       createPlugin({ id: "uncategorized", name: "Uncategorized" }),
@@ -80,6 +81,7 @@ describe("renderInstalledPlugins", () => {
     expect(groups.map((group) => group.dataset.pluginCategory)).toEqual([
       "channels",
       "models",
+      "agent-runtimes",
       "memory",
       "context",
       "voice",
@@ -92,6 +94,7 @@ describe("renderInstalledPlugins", () => {
     expect(groups.map((group) => group.querySelector("h3")?.textContent?.trim())).toEqual([
       "Channels",
       "Models",
+      "Agent runtimes",
       "Memory",
       "Context",
       "Voice",
@@ -101,7 +104,7 @@ describe("renderInstalledPlugins", () => {
       "Tools",
       "Uncategorized",
     ]);
-    expect(visiblePluginIds(container)).toHaveLength(10);
+    expect(visiblePluginIds(container)).toHaveLength(11);
     expect(
       groups
         .find((group) => group.dataset.pluginCategory === "channels")

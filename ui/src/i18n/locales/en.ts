@@ -3162,6 +3162,7 @@ export const en: TranslationMap & {
     noInstalledMatchTitle: "No installed plugins match",
     categoryChannels: "Channels",
     categoryModels: "Models",
+    categoryAgentRuntimes: "Agent runtimes",
     categoryMemory: "Memory",
     categoryContext: "Context",
     categoryWeb: "Web",

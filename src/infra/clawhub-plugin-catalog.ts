@@ -118,6 +118,7 @@ const PLUGIN_CATEGORY_ICON_KEYS = new Set([
   "activity",
   "book-open",
   "brain",
+  "bot",
   "database",
   "git-branch",
   "globe",

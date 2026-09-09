@@ -23,6 +23,7 @@ type InstalledPluginGroup = {
 const INSTALLED_CATEGORY_LABELS: Readonly<Record<string, string>> = {
   channels: "pluginsPage.categoryChannels",
   models: "pluginsPage.categoryModels",
+  "agent-runtimes": "pluginsPage.categoryAgentRuntimes",
   memory: "pluginsPage.categoryMemory",
   context: "pluginsPage.categoryContext",
   web: "pluginsPage.categoryWeb",

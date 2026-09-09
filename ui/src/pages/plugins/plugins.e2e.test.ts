@@ -660,7 +660,7 @@ describeControlUiE2e("Control UI Plugins mocked Gateway E2E", () => {
         label.trim(),
       );
       expect(categoryLabels.join(" | ")).toBe(
-        "All categories | Channels | Models | Memory | Context | Voice | Web | Media | Security | Integrations | Developer tools | Infrastructure | Documents & files | Inbox & collaboration | Productivity | Scheduling | Finance & payments | Sales & marketing | Data & analytics | Agent orchestration | Research | Other",
+        "All categories | Channels | Models | Agent runtimes | Memory | Context | Voice | Web | Media | Security | Integrations | Developer tools | Infrastructure | Documents & files | Inbox & collaboration | Productivity | Scheduling | Finance & payments | Sales & marketing | Data & analytics | Agent orchestration | Research | Other",
       );
       expect(await categories.getByRole("link").count()).toBe(0);
       expect(
