@@ -71,6 +71,10 @@ openclaw-app:has(.shell:not([data-startup-stage="ready"])) {
   flex: 1;
 }
 
+.startup-sidebar-skeleton .sidebar-recent-session__name {
+  --startup-bar-height: 10px;
+}
+
 .startup-sidebar-skeleton .sidebar-recent-sessions__label-text {
   flex: 1;
   --startup-bar-width: 30%;
