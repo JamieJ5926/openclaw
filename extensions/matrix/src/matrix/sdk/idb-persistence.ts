@@ -310,6 +310,7 @@ export async function restoreIdbFromDisk(snapshotPath?: string): Promise<boolean
 export async function persistIdbToDisk(params?: {
   snapshotPath?: string;
   databasePrefix?: string;
+  strict?: boolean;
 }): Promise<void> {
   const snapshotPath = params?.snapshotPath ?? resolveDefaultIdbSnapshotPath();
   try {
@@ -340,6 +341,9 @@ export async function persistIdbToDisk(params?: {
     );
   } catch (err) {
     LogService.warn("IdbPersistence", "Failed to persist IndexedDB snapshot:", err);
+    if (params?.strict) {
+      throw err;
+    }
   }
 }
 

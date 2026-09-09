@@ -5,6 +5,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { CryptoEvent } from "matrix-js-sdk/lib/crypto-api/CryptoEvent.js";
+import { SyncApi, SyncState } from "matrix-js-sdk/lib/sync.js";
+import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 import { resetPluginStateStoreForTests } from "openclaw/plugin-sdk/plugin-state-test-runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { installMatrixTestRuntime } from "../test-runtime.js";
@@ -178,6 +180,10 @@ class FakeMatrixEvent extends EventEmitter {
     return this.unsigned ?? {};
   }
 
+  getDecryptionPromise(): Promise<void> | null {
+    return null;
+  }
+
   getStateKey(): string | undefined {
     return this.stateKey;
   }
@@ -247,7 +253,23 @@ type MatrixJsClientStub = {
   getCrypto: ReturnType<typeof vi.fn<() => unknown>>;
   decryptEventIfNeeded: ReturnType<typeof vi.fn>;
   relations: ReturnType<typeof vi.fn>;
+  syncApi?: SyncApi;
 };
+
+type MatrixSyncApiTestInternals = {
+  connectionReturnedResolvers?: ReturnType<typeof createDeferred<boolean>>;
+};
+
+function createSyncApiHarness(state: SyncState): {
+  syncApi: SyncApi;
+  stop: ReturnType<typeof vi.fn>;
+} {
+  const syncApi = Object.create(SyncApi.prototype) as SyncApi;
+  const stop = vi.fn();
+  vi.spyOn(syncApi, "getSyncState").mockReturnValue(state);
+  vi.spyOn(syncApi, "stop").mockImplementation(stop);
+  return { stop, syncApi };
+}
 
 function createMatrixJsClientStub(): MatrixJsClientStub {
   const client = new EventEmitter() as unknown as MatrixJsClientStub;
@@ -771,6 +793,50 @@ describe("MatrixClient request hardening", () => {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  it.each([SyncState.Error, SyncState.Reconnecting])(
+    "memoizes %s quiescence through the production persistence path",
+    async (syncState) => {
+      vi.useFakeTimers();
+      const { stop, syncApi } = createSyncApiHarness(syncState);
+      const keepalive = createDeferred<boolean>();
+      const keepaliveOutcome = keepalive.promise.catch((error: unknown) => error);
+      (syncApi as unknown as MatrixSyncApiTestInternals).connectionReturnedResolvers = keepalive;
+      matrixJsClient.syncApi = syncApi;
+      const client = new MatrixClient("https://matrix.example.org", "token");
+      await client.start();
+
+      await client.quiesceSync();
+      await client.stopAndPersist();
+
+      expect(stop).toHaveBeenCalledTimes(1);
+      await expect(keepaliveOutcome).resolves.toBe("SyncApi.stop() was called");
+      expect(matrixJsClient.stopClient).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
+  it("memoizes failed quiescence instead of retrying protected sync stop", async () => {
+    vi.useFakeTimers();
+    const { stop, syncApi } = createSyncApiHarness(SyncState.Syncing);
+    matrixJsClient.syncApi = syncApi;
+    const client = new MatrixClient("https://matrix.example.org", "token");
+    await client.start();
+
+    const first = client.quiesceSync();
+    const firstRejection = expect(first).rejects.toThrow(
+      "Matrix classic sync did not reach STOPPED within 5000ms",
+    );
+    await vi.advanceTimersByTimeAsync(5_000);
+    await firstRejection;
+    await expect(client.quiesceSync()).rejects.toThrow(
+      "Matrix classic sync did not reach STOPPED within 5000ms",
+    );
+
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(matrixJsClient.stopClient).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
 });
 
 describe("MatrixClient event bridge", () => {
@@ -959,10 +1025,9 @@ describe("MatrixClient event bridge", () => {
     matrixJsClient.emit("event", encrypted);
     encrypted.emit("decrypted", encrypted, new Error("missing room key"));
 
-    client.stopSyncWithoutPersist();
     await client.drainPendingDecryptions("test shutdown");
 
-    expect(matrixJsClient.stopClient).toHaveBeenCalledTimes(1);
+    expect(matrixJsClient.stopClient).not.toHaveBeenCalled();
     expect(matrixJsClient.decryptEventIfNeeded).toHaveBeenCalledTimes(1);
     expect(delivered).toEqual(["m.room.message"]);
   });
@@ -1265,7 +1330,7 @@ describe("MatrixClient event bridge", () => {
       expect(encrypted.attemptDecryption).toHaveBeenCalledTimes(1);
       expect(delivered).toEqual(["m.room.message"]);
     } finally {
-      client.stopSyncWithoutPersist();
+      client.stopWithoutPersist();
     }
   });
 
@@ -1399,7 +1464,7 @@ describe("MatrixClient event bridge", () => {
       await Promise.resolve();
       expect(delivered).toEqual(["m.room.message"]);
     } finally {
-      client.stopSyncWithoutPersist();
+      client.stopWithoutPersist();
     }
   });
 
@@ -1561,34 +1626,15 @@ describe("MatrixClient event bridge", () => {
     await startExpectation;
   });
 
-  it("clears stale sync state before a restarted sync session waits for fresh readiness", async () => {
-    matrixJsClient.startClient = vi
-      .fn(async () => {
-        queueMicrotask(() => {
-          matrixJsClient.emit("sync", "PREPARED", null, undefined);
-        });
-      })
-      .mockImplementationOnce(async () => {
-        queueMicrotask(() => {
-          matrixJsClient.emit("sync", "PREPARED", null, undefined);
-        });
-      })
-      .mockImplementationOnce(async () => {});
-
+  it("rejects restarting a fully stopped client and requires a new shared generation", async () => {
     const client = new MatrixClient("https://matrix.example.org", "token");
 
     await client.start();
-    client.stopSyncWithoutPersist();
+    client.stopWithoutPersist();
 
-    vi.useFakeTimers();
-    const restartPromise = client.start();
-    const restartExpectation = expect(restartPromise).rejects.toThrow(
-      "Matrix client did not reach a ready sync state within 30000ms",
+    await expect(client.start()).rejects.toThrow(
+      "Matrix client has been fully stopped and cannot be restarted; acquire a new shared client generation",
     );
-
-    await vi.advanceTimersByTimeAsync(30_000);
-
-    await restartExpectation;
   });
 
   it("replays outstanding invite rooms at startup", async () => {
