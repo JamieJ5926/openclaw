@@ -1,6 +1,7 @@
 import { html, nothing, type TemplateResult } from "lit";
 import { ref } from "lit/directives/ref.js";
 import { repeat } from "lit/directives/repeat.js";
+import { PLUGIN_CATEGORY_SLUGS } from "../../../../packages/plugin-package-contract/src/index.js";
 import { icons } from "../../components/icons.ts";
 import { renderSettingsLoadingSkeleton } from "../../components/settings-ui.ts";
 import { t } from "../../i18n/index.ts";
@@ -11,20 +12,7 @@ import { renderArtTile } from "./consent-dialog.ts";
 import { renderPluginCardIdentity, type PluginCardAttribution } from "./plugin-card.ts";
 const INSTALLED_PLUGINS_ROW_LIMIT = 4;
 const UNCATEGORIZED = "uncategorized";
-const INSTALLED_CATEGORY_ORDER = [
-  "channels",
-  "models",
-  "memory",
-  "context",
-  "web",
-  "voice",
-  "media",
-  "tools",
-  "runtime",
-  "gateway",
-  "security",
-  "other",
-] as const;
+const INSTALLED_CATEGORY_ORDER = PLUGIN_CATEGORY_SLUGS;
 
 type InstalledPluginItem = PluginCatalogItem & { categories?: readonly string[] };
 type InstalledPluginGroup = {
@@ -44,6 +32,18 @@ const INSTALLED_CATEGORY_LABELS: Readonly<Record<string, string>> = {
   runtime: "pluginsPage.categoryRuntime",
   gateway: "pluginsPage.categoryGateway",
   security: "pluginsPage.categorySecurity",
+  integrations: "pluginsPage.categoryIntegrations",
+  "developer-tools": "pluginsPage.categoryDeveloperTools",
+  infrastructure: "pluginsPage.categoryInfrastructure",
+  "documents-files": "pluginsPage.categoryDocumentsFiles",
+  "inbox-collaboration": "pluginsPage.categoryInboxCollaboration",
+  productivity: "pluginsPage.categoryProductivity",
+  scheduling: "pluginsPage.categoryScheduling",
+  "finance-payments": "pluginsPage.categoryFinancePayments",
+  "sales-marketing": "pluginsPage.categorySalesMarketing",
+  "data-analytics": "pluginsPage.categoryDataAnalytics",
+  "agent-orchestration": "pluginsPage.categoryAgentOrchestration",
+  research: "pluginsPage.categoryResearch",
   other: "pluginsPage.categoryOther",
   uncategorized: "pluginsPage.categoryUncategorized",
 };
@@ -120,7 +120,10 @@ function matchesPlugin(plugin: InstalledPluginItem, query: string): boolean {
     plugin.name,
     plugin.id,
     plugin.description,
-    ...(plugin.categories ?? []),
+    ...(plugin.categories ?? []).flatMap((category) => [
+      category,
+      installedCategoryLabel(category),
+    ]),
     plugin.origin,
     ...(plugin.kind ?? []),
   ].some((value) => value?.toLocaleLowerCase().includes(needle));

@@ -56,20 +56,23 @@ describe("renderInstalledPlugins", () => {
 
   it("groups each plugin once by its primary category in product order", () => {
     const plugins = [
-      createPlugin({ id: "voice", name: "Voice" }),
-      createPlugin({ id: "web", name: "Web" }),
-      createPlugin({ id: "channel", name: "Channel" }),
-      createPlugin({ id: "model", name: "Model" }),
-      createPlugin({ id: "memory", name: "Memory" }),
-      createPlugin({ id: "context", name: "Context" }),
+      { ...createPlugin({ id: "voice", name: "Voice" }), categories: ["voice"] },
+      { ...createPlugin({ id: "web", name: "Web" }), categories: ["web", "channels"] },
+      { ...createPlugin({ id: "channel", name: "Channel" }), categories: ["channels", "web"] },
+      { ...createPlugin({ id: "model", name: "Model" }), categories: ["models"] },
+      { ...createPlugin({ id: "memory", name: "Memory" }), categories: ["memory"] },
+      { ...createPlugin({ id: "context", name: "Context" }), categories: ["context"] },
       createPlugin({ id: "uncategorized", name: "Uncategorized" }),
-    ] as Array<ReturnType<typeof createPlugin> & { categories?: string[] }>;
-    plugins[0].categories = ["voice"];
-    plugins[1].categories = ["web", "channels"];
-    plugins[2].categories = ["channels", "web"];
-    plugins[3].categories = ["models"];
-    plugins[4].categories = ["memory"];
-    plugins[5].categories = ["context"];
+      {
+        ...createPlugin({ id: "calendar", name: "Calendar" }),
+        categories: ["scheduling", "productivity"],
+      },
+      {
+        ...createPlugin({ id: "document", name: "Document" }),
+        categories: ["documents-files", "research"],
+      },
+      { ...createPlugin({ id: "legacy", name: "Legacy" }), categories: ["tools"] },
+    ];
 
     const container = mount(baseProps({ result: createResult(plugins) }));
     const groups = [...container.querySelectorAll<HTMLElement>("[data-plugin-category]")];
@@ -79,8 +82,11 @@ describe("renderInstalledPlugins", () => {
       "models",
       "memory",
       "context",
-      "web",
       "voice",
+      "web",
+      "documents-files",
+      "scheduling",
+      "tools",
       "uncategorized",
     ]);
     expect(groups.map((group) => group.querySelector("h3")?.textContent?.trim())).toEqual([
@@ -88,11 +94,14 @@ describe("renderInstalledPlugins", () => {
       "Models",
       "Memory",
       "Context",
-      "Web",
       "Voice",
+      "Web",
+      "Documents & files",
+      "Scheduling",
+      "Tools",
       "Uncategorized",
     ]);
-    expect(visiblePluginIds(container)).toHaveLength(7);
+    expect(visiblePluginIds(container)).toHaveLength(10);
     expect(
       groups
         .find((group) => group.dataset.pluginCategory === "channels")
@@ -109,7 +118,7 @@ describe("renderInstalledPlugins", () => {
     const channel = createPlugin({ id: "channel", name: "Channel" }) as ReturnType<
       typeof createPlugin
     > & { categories: string[] };
-    channel.categories = ["channels", "web"];
+    channel.categories = ["channels", "inbox-collaboration"];
     const model = createPlugin({ id: "model", name: "Model" }) as ReturnType<
       typeof createPlugin
     > & { categories: string[] };
@@ -119,7 +128,7 @@ describe("renderInstalledPlugins", () => {
       baseProps({
         result: createResult([channel, model]),
         searchOpen: true,
-        query: "web",
+        query: "Inbox & collaboration",
       }),
     );
 

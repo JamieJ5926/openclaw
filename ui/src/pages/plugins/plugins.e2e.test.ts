@@ -60,7 +60,7 @@ describeControlUiE2e("Control UI Plugins mocked Gateway E2E", () => {
       ).toEqual(["attention-a", "attention-b", "disabled-01", "disabled-02", "needs-setup"]);
       expect(
         await installedSection.locator(".installed-plugins__group-header h3").allTextContents(),
-      ).toEqual(["Channels", "Models", "Memory", "Context", "Web", "Voice", "Uncategorized"]);
+      ).toEqual(["Channels", "Models", "Memory", "Context", "Voice", "Web", "Uncategorized"]);
       expect(await visibleCards.count()).toBe(16);
       expect(
         await installedSection.getByRole("searchbox", { name: "Search plugins" }).count(),
@@ -660,7 +660,7 @@ describeControlUiE2e("Control UI Plugins mocked Gateway E2E", () => {
         label.trim(),
       );
       expect(categoryLabels.join(" | ")).toBe(
-        "All categories | Channels | Models | Memory | Context | Voice | Media | Web | Tools | Runtime | Gateway | Security | Other",
+        "All categories | Channels | Models | Memory | Context | Voice | Web | Media | Security | Integrations | Developer tools | Infrastructure | Documents & files | Inbox & collaboration | Productivity | Scheduling | Finance & payments | Sales & marketing | Data & analytics | Agent orchestration | Research | Other",
       );
       expect(await categories.getByRole("link").count()).toBe(0);
       expect(
@@ -797,18 +797,23 @@ describeControlUiE2e("Control UI Plugins mocked Gateway E2E", () => {
       await page.goto(`${server.baseUrl}plugins`);
       await page.getByRole("heading", { name: "Featured", exact: true }).waitFor();
       requestCount = (await gateway.getRequests("plugins.catalog.browse")).length;
-      await categories.getByRole("button", { name: "Channels", exact: true }).click();
+      await categories.getByRole("button", { name: "Documents & files", exact: true }).click();
       const categoryRequest = await gateway.waitForRequest("plugins.catalog.browse", {
         after: requestCount,
       });
-      expect(categoryRequest.params).toMatchObject({ category: "channels", pageSize: 25 });
+      expect(categoryRequest.params).toMatchObject({ category: "documents-files", pageSize: 25 });
 
       await page.setViewportSize({ height: 1024, width: 768 });
       const categorySelect = page.getByRole("combobox", { name: "Plugin categories" });
       await categorySelect.waitFor();
       expect(await categories.isVisible()).toBe(false);
-      await categorySelect.selectOption("models");
-      expect(await categorySelect.inputValue()).toBe("models");
+      requestCount = (await gateway.getRequests("plugins.catalog.browse")).length;
+      await categorySelect.selectOption("scheduling");
+      expect(await categorySelect.inputValue()).toBe("scheduling");
+      const mobileCategoryRequest = await gateway.waitForRequest("plugins.catalog.browse", {
+        after: requestCount,
+      });
+      expect(mobileCategoryRequest.params).toMatchObject({ category: "scheduling", pageSize: 25 });
     } finally {
       await context.close();
     }
