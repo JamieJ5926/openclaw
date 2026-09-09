@@ -1,0 +1,32 @@
+{
+  "status": "passed",
+  "mode": "before-after",
+  "scenario": "OpenClaw plugin product category navigation",
+  "provider": "built Control UI in real Playwright Chromium with registry fixtures",
+  "baseline": "8866696036684115cfba2dc27ca22c4bff5d919c",
+  "candidate": "5ee48626b8db9c97a443fc51c1edc631530c84a0",
+  "lanes": [
+    {
+      "name": "baseline",
+      "steps": [
+        {
+          "name": "baseline category navigation",
+          "slug": "categories",
+          "screenshot": "categories.png",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "name": "candidate",
+      "steps": [
+        {
+          "name": "candidate category navigation",
+          "slug": "categories",
+          "screenshot": "categories.png",
+          "status": "passed"
+        }
+      ]
+    }
+  ]
+}
