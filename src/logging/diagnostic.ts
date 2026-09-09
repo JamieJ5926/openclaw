@@ -3,10 +3,10 @@ import { monitorEventLoopDelay, performance } from "node:perf_hooks";
 import { resolveCompactionTimeoutMs } from "../agents/embedded-agent-runner/compaction-safety-timeout.js";
 import { resolveActiveEmbeddedRunRecoveryBlocker } from "../agents/embedded-agent-runner/run-state.js";
 import {
-  createUnknownDiagnosticIngressSnapshot,
   getDiagnosticIngressSnapshot,
-  resetDiagnosticIngressSnapshotProviderForTest,
+  resetRegisteredChannelIngressDiagnosticSourcesForTest,
 } from "../channels/message/ingress-diagnostic-registry.js";
+import { createUnknownChannelIngressObservabilitySnapshot as createUnknownDiagnosticIngressSnapshot } from "../channels/message/ingress-observability-snapshot.js";
 import { getRuntimeConfig } from "../config/config.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
@@ -1371,7 +1371,7 @@ function resetDiagnosticStateForTest(): void {
   resetDiagnosticMemoryForTest();
   resetDiagnosticPhasesForTest();
   resetDiagnosticStabilityRecorderForTest();
-  resetDiagnosticIngressSnapshotProviderForTest();
+  resetRegisteredChannelIngressDiagnosticSourcesForTest();
   diagnosticIngressLatestEmittedSampledAt = undefined;
 }
 

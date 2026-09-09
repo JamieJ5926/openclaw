@@ -6,10 +6,7 @@ import {
   type ChannelIngressObservationRecordRef,
   type ChannelIngressOperationKind,
 } from "./ingress-observability-contract.js";
-import {
-  buildChannelIngressObservabilitySnapshot,
-  createUnknownChannelIngressObservabilitySnapshot,
-} from "./ingress-observability-snapshot.js";
+import { buildChannelIngressObservabilitySnapshot } from "./ingress-observability-snapshot.js";
 
 type ChannelIngressDiagnosticActiveOperations =
   | readonly ChannelIngressActiveOperationSnapshot[]
@@ -35,14 +32,9 @@ type ChannelIngressDiagnosticRegistry = {
   sources: Map<symbol, ChannelIngressDiagnosticSource>;
 };
 
-export type DiagnosticIngressSnapshotProvider = (
-  now: number,
-) => ChannelIngressObservabilitySnapshot | Promise<ChannelIngressObservabilitySnapshot>;
-
 const CHANNEL_INGRESS_DIAGNOSTIC_REGISTRY_KEY = Symbol.for(
   "openclaw.channelIngress.diagnosticRegistry.v1",
 );
-let diagnosticIngressSnapshotProvider: DiagnosticIngressSnapshotProvider | undefined;
 
 function isChannelIngressDiagnosticRegistry(
   value: unknown,
@@ -108,8 +100,8 @@ export function registerChannelIngressDiagnosticSource(params: {
   };
 }
 
-export async function getRegisteredChannelIngressDiagnosticSnapshot(
-  now: number,
+export async function getDiagnosticIngressSnapshot(
+  now = Date.now(),
 ): Promise<ChannelIngressObservabilitySnapshot> {
   const sources = [...getChannelIngressDiagnosticRegistry().sources.values()];
   if (sources.length === 0) {
@@ -165,41 +157,6 @@ export async function getRegisteredChannelIngressDiagnosticSnapshot(
       status: "unknown",
     });
   }
-}
-
-export function createUnknownDiagnosticIngressSnapshot(
-  now = Date.now(),
-): ChannelIngressObservabilitySnapshot {
-  return createUnknownChannelIngressObservabilitySnapshot(now);
-}
-
-export function setDiagnosticIngressSnapshotProvider(
-  provider: DiagnosticIngressSnapshotProvider,
-): () => void {
-  diagnosticIngressSnapshotProvider = provider;
-  return () => {
-    if (diagnosticIngressSnapshotProvider === provider) {
-      diagnosticIngressSnapshotProvider = undefined;
-    }
-  };
-}
-
-export async function getDiagnosticIngressSnapshot(
-  now = Date.now(),
-): Promise<ChannelIngressObservabilitySnapshot> {
-  const provider = diagnosticIngressSnapshotProvider;
-  try {
-    if (!provider) {
-      return await getRegisteredChannelIngressDiagnosticSnapshot(now);
-    }
-    return await provider(now);
-  } catch {
-    return createUnknownDiagnosticIngressSnapshot(now);
-  }
-}
-
-export function resetDiagnosticIngressSnapshotProviderForTest(): void {
-  diagnosticIngressSnapshotProvider = undefined;
 }
 
 export function resetRegisteredChannelIngressDiagnosticSourcesForTest(): void {

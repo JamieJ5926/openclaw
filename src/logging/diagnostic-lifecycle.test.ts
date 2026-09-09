@@ -2,12 +2,10 @@ import { afterEach, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { recordCommandPoll } from "../agents/command-poll-backoff.js";
 import { detectToolCallLoop, recordToolCall } from "../agents/tool-loop-detection.js";
-import {
-  createUnknownDiagnosticIngressSnapshot,
-  setDiagnosticIngressSnapshotProvider,
-} from "../channels/message/ingress-diagnostic-registry.js";
+import { registerChannelIngressDiagnosticSource } from "../channels/message/ingress-diagnostic-registry.js";
 import { createChannelIngressMonitor } from "../channels/message/ingress-monitor.js";
 import type { ChannelIngressObservabilitySnapshot } from "../channels/message/ingress-observability-contract.js";
+import { createUnknownChannelIngressObservabilitySnapshot as createUnknownDiagnosticIngressSnapshot } from "../channels/message/ingress-observability-snapshot.js";
 import { createChannelIngressQueue } from "../channels/message/ingress-queue.js";
 import {
   onDiagnosticEvent,
@@ -30,6 +28,17 @@ import {
   stopDiagnosticHeartbeat,
 } from "./diagnostic.js";
 import { resetDiagnosticStateForTest } from "./diagnostic.test-support.js";
+
+function setDiagnosticIngressSnapshotProvider(
+  provider: (
+    now: number,
+  ) => ChannelIngressObservabilitySnapshot | Promise<ChannelIngressObservabilitySnapshot>,
+): () => void {
+  return registerChannelIngressDiagnosticSource({
+    getActiveOperations: () => [],
+    getSnapshot: provider,
+  });
+}
 
 type Deferred<T> = {
   promise: Promise<T>;
