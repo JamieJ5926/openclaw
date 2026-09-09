@@ -934,6 +934,7 @@ enum class GatewayMethod(
   PluginsCatalogCategories("plugins.catalog.categories"),
   PluginsCatalogGet("plugins.catalog.get"),
   TasksHistory("tasks.history"),
+  SessionsStatus("sessions.status"),
 }
 
 enum class GatewayEvent(
