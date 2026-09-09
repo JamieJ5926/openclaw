@@ -34,9 +34,10 @@ describe("plugin-boundary-report", () => {
 
     expect(summaryResult.exitCode).toBe(0);
     expect(summaryResult.stderr).toBe("");
-    expect(summary.compat?.removalPendingCount).toBe(8);
+    expect(summary.compat?.removalPendingCount).toBe(9);
     expect(summary.compat?.removalPendingDueCount).toEqual(expect.any(Number));
     expect(summary.compat?.removalPending?.map((record) => record.code)).toEqual([
+      "sdk-untrusted-context-identifier-aliases",
       "plugin-sdk-media-understanding-public-demotion",
       "plugin-sdk-memory-host-core-public-demotion",
       "plugin-sdk-channel-lifecycle-subpath",
@@ -76,7 +77,7 @@ describe("plugin-boundary-report", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
-    expect(result.stdout).toContain("removalPending=8");
+    expect(result.stdout).toContain("removalPending=9");
     expect(result.stdout).not.toContain("agent-harness-sdk-alias");
     expect(result.stdout).toMatch(/blocker=.*retain the public/iu);
     expect(result.stdout).toMatch(/readerRefs=\d+ readers=/u);

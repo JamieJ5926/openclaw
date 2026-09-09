@@ -282,14 +282,14 @@ export const PLUGIN_COMPAT_RECORDS = [
   },
   {
     code: "sdk-untrusted-context-identifier-aliases",
-    status: "deprecated",
+    status: "removal-pending",
     owner: "sdk",
     introduced: "2026-07-22",
     deprecated: "2026-07-22",
     warningStarts: "2026-07-22",
     removeAfter: "2026-09-08",
     replacement:
-      "`MsgContext.ChannelPromptContext`, `MsgContext.ChannelStructuredContext`, `ChannelStructuredContextEntry`, `SupplementalContextFacts.channelStructuredContext`, and `buildChannelMetadata`",
+      "`MsgContext.ChannelPromptContext`, `MsgContext.ChannelStructuredContext`, `ChannelStructuredContextEntry`, `SupplementalContextFacts.channelStructuredContext`, and `buildChannelMetadata`; retain until published-plugin reader migration is verified and removal has explicit breaking-release approval",
     docsPath: "/plugins/compatibility",
     surfaces: [
       "openclaw/plugin-sdk reply-runtime MsgContext.UntrustedContext and UntrustedStructuredContext",
