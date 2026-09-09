@@ -18,6 +18,7 @@ import { CONTROL_UI_BUILD_ID_ATTRIBUTE } from "../src/gateway/control-ui-root-as
 import { controlUiCodeSplitting } from "./config/control-ui-chunking.ts";
 import { controlUiHoverGuardPlugin } from "./config/control-ui-hover-guard.ts";
 import { controlUiLocaleModulesPlugin } from "./config/control-ui-locales.ts";
+import { controlUiSocialCardPlugin } from "./config/control-ui-social-card.ts";
 import { normalizeControlUiBuildInfo } from "./src/build-info-normalizers.ts";
 import type { ControlUiBuildInfo } from "./src/build-info.ts";
 
@@ -315,18 +316,21 @@ function sourcePackageAlias(packageId: string, subpath?: string): ControlUiViteA
 export function resolveSourcePackageAliasesForVite(): ControlUiViteAlias[] {
   return [
     sourcePackageAlias("normalization-core", "agent-id"),
+    sourcePackageAlias("normalization-core", "code-points"),
     sourcePackageAlias("normalization-core", "json-schema"),
     sourcePackageAlias("normalization-core", "markdown-plain-text"),
     sourcePackageAlias("normalization-core", "number-coercion"),
     sourcePackageAlias("normalization-core", "phone-presentation"),
     sourcePackageAlias("normalization-core", "record-coerce"),
     sourcePackageAlias("normalization-core", "result"),
+    sourcePackageAlias("normalization-core", "stable-stringify"),
     sourcePackageAlias("normalization-core", "string-coerce"),
     sourcePackageAlias("normalization-core", "string-normalization"),
     sourcePackageAlias("normalization-core", "utf16-slice"),
     sourcePackageAlias("normalization-core"),
     sourcePackageAlias("session-url-contract", "parse"),
     sourcePackageAlias("session-url-contract", "share-build"),
+    sourcePackageAlias("session-url-contract", "public-share"),
     sourcePackageAlias("session-url-contract"),
     sourcePackageAlias("workboard-contract"),
   ];
@@ -626,6 +630,7 @@ export default function controlUiViteConfig(options: { outDir?: string } = {}): 
       strictPort: true,
     },
     plugins: [
+      controlUiSocialCardPlugin(),
       controlUiLocaleModulesPlugin(),
       controlUiBrowserOnlySharedModuleAliases(),
       controlUiPrecompressedAssetsPlugin(buildOutDir),
