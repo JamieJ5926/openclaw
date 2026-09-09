@@ -264,6 +264,7 @@ export function projectChatTranscript(
   const turnRecapByGroupKey = new Map<string, TurnRecap>();
   const loadedReplySources = new Map<string, LoadedReplySource>();
   const messageRowKeysById = new Map<string, string>();
+  const transcriptMessageKeys = new Set<string>();
   const resolveReplyPreview = createReplyPreviewResolver(loadedReplySources, props);
   const sharedMessageRenderOptions = {
     onReply: props.onSetReply
@@ -537,6 +538,7 @@ export function projectChatTranscript(
     });
     for (const group of groups) {
       for (const source of group.messages) {
+        transcriptMessageKeys.add(source.key);
         const sourceMessageId = persistedMessageEntryId(source.message);
         // The preview resolves content lazily; indexing only needs persisted identities.
         if (sourceMessageId) {
@@ -550,7 +552,7 @@ export function projectChatTranscript(
       }
     }
   }
-  transcript.syncMessageRows(messageRowKeysById);
+  transcript.syncMessageRows(messageRowKeysById, transcriptMessageKeys);
   let turnRecapOwnerKey: string | null = null;
   if (turnRecap !== null && tailStatusOwner?.runId === turnRecap.runId) {
     turnRecapByGroupKey.set(tailStatusOwner.key, turnRecap);

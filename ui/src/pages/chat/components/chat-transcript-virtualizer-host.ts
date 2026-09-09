@@ -39,6 +39,11 @@ import {
 } from "./chat-transcript-interaction-anchor.ts";
 import { renderChatTranscriptLayout, type TranscriptRow } from "./chat-transcript-layout.ts";
 import {
+  captureTranscriptPrependAnchor,
+  restoreTranscriptPrependAnchor,
+  type ChatTranscriptPrependAnchor,
+} from "./chat-transcript-prepend-anchor.ts";
+import {
   extractTranscriptRange,
   previewTranscriptRowKeys,
   focusedTranscriptRowKey,
@@ -194,7 +199,10 @@ export class ChatSessionVirtualizerHost implements ReactiveControllerHost, ChatT
   }
   private rowKeys: readonly string[] = [];
   private rowIndexesByKey = new Map<string, number>();
-  private messageRowKeysById = new Map<string, string>();
+  private messageRowKeysById: ReadonlyMap<string, string> = new Map();
+  private messageKeys: ReadonlySet<string> = new Set();
+  private firstRenderedMessageKey: string | undefined;
+  private pendingPrependAnchor: (ChatTranscriptPrependAnchor & { measured: boolean }) | null = null;
   private focusedRowKey: string | null = null;
   private readonly announcement = new TranscriptAnnouncementState();
   private readonly mcpAppUnmountGate = new McpAppUnmountGate(this);
@@ -350,6 +358,25 @@ export class ChatSessionVirtualizerHost implements ReactiveControllerHost, ChatT
       controller.hostUpdated?.();
     }
     this.reconcileInteractionResize();
+    const anchor = this.pendingPrependAnchor;
+    if (anchor && !anchor.measured) {
+      // New overscan rows still carry estimates. Commit their measured block
+      // offsets before compensating a message inside the retained group.
+      this.measureConnectedRows();
+      anchor.measured = true;
+      this.host.requestUpdate();
+    } else if (anchor) {
+      this.pendingPrependAnchor = null;
+      if (
+        restoreTranscriptPrependAnchor(
+          anchor,
+          this.scrollElement,
+          this.virtualizerController.getVirtualizer(),
+        )
+      ) {
+        this.host.requestUpdate();
+      }
+    }
     this.reconcileImplicitEndAnchor();
     this.applyPendingScrollOffset();
   }
@@ -360,6 +387,7 @@ export class ChatSessionVirtualizerHost implements ReactiveControllerHost, ChatT
     this.expandedAssistantMessages.clear();
     this.expandedAssistantMessages = new Map();
     this.scrollCommand = null;
+    this.pendingPrependAnchor = null;
     if (this.pendingRowMeasureFrame !== null) {
       cancelAnimationFrame(this.pendingRowMeasureFrame);
       this.pendingRowMeasureFrame = null;
@@ -387,7 +415,9 @@ export class ChatSessionVirtualizerHost implements ReactiveControllerHost, ChatT
     this.measureRowRefs.clear();
     this.rowKeys = [];
     this.rowIndexesByKey.clear();
-    this.messageRowKeysById.clear();
+    this.messageRowKeysById = new Map();
+    this.firstRenderedMessageKey = undefined;
+    this.messageKeys = new Set();
     this.focusedRowKey = null;
     this.pendingScrollOffset = null;
   }
@@ -411,6 +441,20 @@ export class ChatSessionVirtualizerHost implements ReactiveControllerHost, ChatT
     return this.mcpAppUnmountGate.render(
       rowModelChanged ? nextKeys : JSON.stringify(nextRowKeys),
       () => {
+        // Capture only when the unmount gate allows this projection to commit.
+        // Row keys alone cannot anchor a bubble inside a group growing upward.
+        const prependAnchor =
+          this.pendingScrollOffset || this.scrollCommand
+            ? null
+            : captureTranscriptPrependAnchor(
+                this.scrollElement,
+                this.firstRenderedMessageKey,
+                this.messageKeys,
+              );
+        if (prependAnchor) {
+          this.pendingPrependAnchor = { ...prependAnchor, measured: false };
+        }
+        this.firstRenderedMessageKey = this.messageKeys.keys().next().value;
         this.headerHeight = header?.height ?? 0;
         if (rowModelChanged) {
           this.syncRows(nextKeys);
@@ -471,6 +515,7 @@ export class ChatSessionVirtualizerHost implements ReactiveControllerHost, ChatT
   }
 
   private cancelScroll(): void {
+    this.pendingPrependAnchor = null;
     if (this.scrollCommand === null && !this.pendingScrollOffset) {
       return;
     }
@@ -495,8 +540,12 @@ export class ChatSessionVirtualizerHost implements ReactiveControllerHost, ChatT
     }
   }
 
-  syncMessageRows(messageRowKeysById: ReadonlyMap<string, string>): void {
+  syncMessageRows(
+    messageRowKeysById: ReadonlyMap<string, string>,
+    messageKeys: ReadonlySet<string>,
+  ): void {
     this.messageRowKeysById = new Map(messageRowKeysById);
+    this.messageKeys = messageKeys;
   }
 
   revealMessage(messageId: string): boolean {

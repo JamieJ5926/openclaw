@@ -399,7 +399,7 @@ export class ChatPane extends ChatPaneLayoutRender {
           ? {
               hasMore: historyHasMore,
               loading: this.loadingOlder,
-              onShowEarlier: () => void this.showEarlierMessages(),
+              onShowEarlier: () => void this.loadOlderMessages(),
             }
           : undefined,
       toolMessages: catalogKey ? [] : state.chatToolMessages,

@@ -37,7 +37,10 @@ export type ChatTranscriptSession = {
     overlay?: unknown,
     header?: TranscriptHeader | null,
   ): TemplateResult;
-  syncMessageRows(messageRowKeysById: ReadonlyMap<string, string>): void;
+  syncMessageRows(
+    messageRowKeysById: ReadonlyMap<string, string>,
+    messageKeys: ReadonlySet<string>,
+  ): void;
   revealMessage(messageId: string): boolean;
   setContentReady(ready: boolean): void;
   handleFocusIn(event: FocusEvent): void;

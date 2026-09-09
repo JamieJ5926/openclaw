@@ -951,6 +951,7 @@ describe("chat transcript controller", () => {
             ["first", "first"],
             ["second", "second"],
           ]),
+          new Set(["first", "second"]),
         );
         if (interruption === "idle at end") {
           vi.useFakeTimers();
