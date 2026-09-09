@@ -330,8 +330,9 @@ suite.define(() => {
     { width: 390, height: 844 },
     { width: 700, height: 900 },
     { width: 900, height: 400 },
+    { width: 1440, height: 900, split: true },
   ])(
-    "keeps group skeleton geometry fixed through late route CSS at $width x $height",
+    "keeps header and group skeleton geometry fixed through late route CSS at $width x $height",
     async (viewport) => {
       await suite.withPage({ viewport, colorScheme: "dark" }, async ({ page }) => {
         const sessionKey = "agent:main:telegram:group:startup";
@@ -340,28 +341,70 @@ suite.define(() => {
           heldMethods: ["agent.identity.get", "chat.startup"],
           historyMessages: [{ role: "assistant", content: [{ type: "text", text: historyText }] }],
         });
-        const styles = await holdModuleResponse(page, /\/styles\/chat\/grouped\.css(?:\?|$)/u);
+        if ("split" in viewport) {
+          await page.addInitScript(
+            ({ sessionKey: selectedSessionKey, settingsKey }) => {
+              localStorage.setItem(
+                settingsKey,
+                JSON.stringify({
+                  chatSplitLayout: {
+                    activePaneId: "p1",
+                    columns: [
+                      {
+                        id: "c1",
+                        panes: [{ id: "p1", sessionKey: selectedSessionKey }],
+                        paneWeights: [1],
+                      },
+                      {
+                        id: "c2",
+                        panes: [{ id: "p2", sessionKey: "agent:main:main" }],
+                        paneWeights: [1],
+                      },
+                    ],
+                    columnWeights: [0.35, 0.65],
+                  },
+                }),
+              );
+            },
+            { sessionKey, settingsKey: "openclaw.control.settings.v1:ws://127.0.0.1:18789" },
+          );
+        }
+        const styles = await Promise.all([
+          holdModuleResponse(page, /\/styles\/chat\/grouped\.css(?:\?|$)/u),
+          holdModuleResponse(page, /\/styles\/chat\/composer-progress\.css(?:\?|$)/u),
+          holdModuleResponse(page, /\/styles\/chat\/split-view\.css(?:\?|$)/u),
+        ]);
         try {
           await page.goto(controlUiSessionUrl(suite.server.baseUrl, sessionKey));
-          const styleUrl = await styles.request;
+          const styleUrls = await Promise.all(styles.map((style) => style.request));
           await page.waitForFunction(() => {
             const bubble = document.querySelector("openclaw-startup-chat-pane .chat-bubble");
             return bubble && Number(getComputedStyle(bubble, "::after").opacity) === 1;
           });
           const geometry = () =>
-            page.locator("openclaw-startup-chat-pane").evaluate((pane) =>
-              [
-                ...pane.querySelectorAll(
-                  ".chat-group, .chat-avatar, .chat-group-messages, .chat-bubble",
-                ),
-              ].map((element) => {
-                const box = element.getBoundingClientRect();
-                return [getComputedStyle(element).display, box.x, box.y, box.width, box.height];
-              }),
-            );
+            page
+              .locator("openclaw-startup-chat-pane")
+              .first()
+              .evaluate((pane) =>
+                [
+                  ...pane.querySelectorAll(
+                    ".chat-pane__crumbs, .chat-pane__workspace-chip, .chat-pane__crumb-sep, .chat-pane__session-title, .chat-group, .chat-avatar, .chat-group-messages, .chat-bubble",
+                  ),
+                ].map((element) => {
+                  const box = element.getBoundingClientRect();
+                  return [getComputedStyle(element).display, box.x, box.y, box.width, box.height];
+                }),
+              );
           const before = await geometry();
-          styles.release();
-          await page.addScriptTag({ type: "module", url: styleUrl });
+          if ("split" in viewport) {
+            expect(
+              (await page.locator("openclaw-startup-chat-pane").first().boundingBox())!.width,
+            ).toBeLessThan(480);
+          }
+          for (const [index, style] of styles.entries()) {
+            style.release();
+            await page.addScriptTag({ type: "module", url: styleUrls[index] });
+          }
           await page.evaluate(
             () =>
               new Promise<void>((resolve) => {
@@ -375,7 +418,9 @@ suite.define(() => {
           await gateway.resolveDeferred("chat.startup");
           await page.locator('.shell[data-startup-stage="ready"]').waitFor();
         } finally {
-          styles.release();
+          for (const style of styles) {
+            style.release();
+          }
         }
       });
     },

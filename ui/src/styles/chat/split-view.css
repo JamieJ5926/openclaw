@@ -727,20 +727,6 @@
 }
 
 @container (max-width: 480px) {
-  .chat-pane__workspace-chip {
-    max-width: none;
-  }
-
-  .chat-pane__workspace-chip span {
-    display: none;
-  }
-
-  /* The project name is gone at this width, so the separator would trail an
-     icon-only pill and read as punctuation with nothing on its left. */
-  .chat-pane__project-row + .chat-pane__session-trail > .chat-pane__crumb-sep:first-child {
-    display: none;
-  }
-
   .chat-pane__presence {
     display: none;
   }
