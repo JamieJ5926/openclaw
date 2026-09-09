@@ -1,5 +1,7 @@
 {
   "id": "codex",
+  "providers": ["codex"],
+  "syntheticAuthRefs": ["codex"],
   "backupResources": [
     {
       "disposition": "regenerable",
