@@ -8,6 +8,7 @@ import type {
 import { resolveConfigWidePluginMetadataSnapshot } from "../config/io.plugin-metadata.js";
 import { resolveIsConfigReadOnly } from "../config/paths.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { resolveClawHubBaseUrl } from "../infra/clawhub-client.js";
 import { fetchClawHubPluginVersionCategories } from "../infra/clawhub-plugin-catalog.js";
 import { resolvePendingPluginCapabilityReview } from "./capability-consent.js";
 import {
@@ -257,13 +258,17 @@ export const listManagedPlugins = withManagedPluginCache(
     const installedIconsById = new Map<string, ManagedPluginIconSource | undefined>();
     const installedClawHubPackages = new Set<string>();
     const capabilityConsentDiagnostics: PluginDiagnostic[] = [];
-    const categoryTargets = new Map<
+    const categoryTargetsByRegistry = new Map<
       string,
-      {
-        request: { name: string; version: string };
-        plugins: ManagedPluginCatalogEntry[];
-      }
+      Map<
+        string,
+        {
+          request: { name: string; version: string };
+          plugins: ManagedPluginCatalogEntry[];
+        }
+      >
     >();
+    let categoryTargetCount = 0;
     // Hosted loading can yield; prepare this phase from the current config.
     const isEnabled = createInstalledPluginEnabledPredicate(
       metadata.index.plugins,
@@ -400,22 +405,33 @@ export const listManagedPlugins = withManagedPluginCache(
         const name = normalizeOptionalString(installRecord.clawhubPackage);
         const version = normalizeOptionalString(installRecord.version);
         if (name && version) {
+          const baseUrl = resolveClawHubBaseUrl(installRecord.clawhubUrl);
+          let categoryTargets = categoryTargetsByRegistry.get(baseUrl);
+          if (!categoryTargets) {
+            categoryTargets = new Map();
+            categoryTargetsByRegistry.set(baseUrl, categoryTargets);
+          }
           const key = pluginVersionKey(name, version);
           const target = categoryTargets.get(key);
           if (target) {
             target.plugins.push(plugin);
-          } else if (categoryTargets.size < CLAWHUB_CATEGORY_BATCH_LIMIT) {
+          } else if (categoryTargetCount < CLAWHUB_CATEGORY_BATCH_LIMIT) {
             categoryTargets.set(key, { request: { name, version }, plugins: [plugin] });
+            categoryTargetCount += 1;
           }
         }
       }
       return plugin;
     });
-    if (categoryTargets.size > 0) {
+    const cache = getManagedPluginCache();
+    const categoryCache = cache.pluginVersionCategories ?? new Map();
+    cache.pluginVersionCategories = categoryCache;
+    for (const [baseUrl, categoryTargets] of categoryTargetsByRegistry) {
       try {
-        const cache = getManagedPluginCache();
-        if (!cache.pluginVersionCategories) {
-          const load = fetchClawHubPluginVersionCategories({
+        let load = categoryCache.get(baseUrl);
+        if (!load) {
+          load = fetchClawHubPluginVersionCategories({
+            baseUrl,
             packages: [...categoryTargets.values()].map((target) => target.request),
           }).then(
             (results) =>
@@ -426,14 +442,14 @@ export const listManagedPlugins = withManagedPluginCache(
                 ),
               ),
           );
-          cache.pluginVersionCategories = load;
+          categoryCache.set(baseUrl, load);
           void load.catch(() => {
-            if (cache.pluginVersionCategories === load) {
-              cache.pluginVersionCategories = undefined;
+            if (categoryCache.get(baseUrl) === load) {
+              categoryCache.delete(baseUrl);
             }
           });
         }
-        const resolved = await cache.pluginVersionCategories;
+        const resolved = await load;
         for (const [key, target] of categoryTargets) {
           const categories = resolved.get(key);
           if (!categories?.length) {

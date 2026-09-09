@@ -373,6 +373,7 @@ describe("plugin management service", () => {
 
     expect(mocks.pluginVersionCategories).toHaveBeenCalledOnce();
     expect(mocks.pluginVersionCategories).toHaveBeenCalledWith({
+      baseUrl: "https://clawhub.ai",
       packages: [{ name: "community/memory", version: "4.5.6" }],
     });
     expect(catalog.plugins[0]).toMatchObject({
@@ -383,6 +384,60 @@ describe("plugin management service", () => {
       categories: ["memory", "tools"],
       category: "memory",
     });
+  });
+
+  it("keeps category enrichment scoped to the installed ClawHub registry", async () => {
+    const installedAt = (clawhubUrl: string) =>
+      metadataSnapshot({
+        enabled: true,
+        id: "community-memory",
+        name: "Community Memory",
+        origin: "global",
+        packageVersion: "4.5.6",
+        installRecord: {
+          source: "clawhub",
+          clawhubUrl,
+          clawhubPackage: "community/memory",
+          version: "4.5.6",
+        },
+      });
+    mocks.pluginVersionCategories.mockImplementation(async ({ baseUrl }: { baseUrl: string }) => [
+      {
+        name: "community/memory",
+        version: "4.5.6",
+        categories: [baseUrl.includes("private") ? "tools" : "memory"],
+      },
+    ]);
+
+    mocks.metadata.mockReturnValue(installedAt("https://private.example/clawhub/"));
+    const privateCatalog = await listManagedPlugins({
+      config: {},
+      env: {},
+      officialCatalog: { entries: [] },
+    });
+    mocks.metadata.mockReturnValue(installedAt("https://public.example/"));
+    const publicCatalog = await listManagedPlugins({
+      config: {},
+      env: {},
+      officialCatalog: { entries: [] },
+    });
+
+    expect(mocks.pluginVersionCategories.mock.calls).toEqual([
+      [
+        {
+          baseUrl: "https://private.example/clawhub",
+          packages: [{ name: "community/memory", version: "4.5.6" }],
+        },
+      ],
+      [
+        {
+          baseUrl: "https://public.example",
+          packages: [{ name: "community/memory", version: "4.5.6" }],
+        },
+      ],
+    ]);
+    expect(privateCatalog.plugins[0]?.categories).toEqual(["tools"]);
+    expect(publicCatalog.plugins[0]?.categories).toEqual(["memory"]);
   });
 
   it("keeps installed plugins uncategorized when ClawHub enrichment is unavailable", async () => {
