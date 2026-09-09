@@ -1,3 +1,4 @@
+import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import { t } from "../../i18n/index.ts";
 import type { RuntimeConfigCapability } from "../../lib/config/runtime-config-capability.ts";
 import { formatUiError } from "../../lib/format-error.ts";
@@ -100,6 +101,53 @@ export async function runModelProviderConfigMutation(
     return { ok: false };
   } finally {
     if (owner.isCurrentClient() && owner.isCurrentAgent()) {
+      owner.setBusy(false);
+    }
+  }
+}
+
+/** Shared key mutations retain the selected agent through final dispatch and feedback. */
+export async function runModelProviderApiKeyMutation(
+  owner: Omit<ModelProviderConfigMutationOwner, "refreshProviders"> & { canMutate: () => boolean },
+  params: {
+    client: GatewayBrowserClient;
+    agentId: string;
+    provider: string;
+    apiKey: string | null;
+    success: string;
+  },
+): Promise<ModelProviderConfigMutationResult> {
+  const isCurrent = () => owner.isCurrentClient() && owner.isCurrentAgent();
+  owner.setBusy(true);
+  owner.setMessage(null);
+  try {
+    const result = await owner.runtimeConfig.runExternalMutation(
+      (client) => {
+        if (client !== params.client) {
+          throw new Error(t("modelProviders.requestFailed"));
+        }
+        const target = { provider: params.provider, agentId: params.agentId };
+        return params.apiKey === null
+          ? client.request("models.authLogout", { ...target, credentialType: "api_key" })
+          : client.request("models.authSetApiKey", { ...target, apiKey: params.apiKey });
+      },
+      {
+        canDispatch: () => isCurrent() && owner.canMutate(),
+        dispatchError: t("modelProviders.requestFailed"),
+      },
+    );
+    if (!isCurrent()) {
+      return { ok: false };
+    }
+    if (!result.ok) {
+      owner.setMessage({ kind: "error", text: result.error });
+      return { ok: false };
+    }
+    const warning = result.refresh.ok ? null : result.refresh.error;
+    owner.setMessage({ kind: "success", text: params.success, ...(warning ? { warning } : {}) });
+    return { ok: true, agentEpoch: owner.agentEpoch, warning };
+  } finally {
+    if (isCurrent()) {
       owner.setBusy(false);
     }
   }

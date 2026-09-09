@@ -1,11 +1,11 @@
 /** Command for removing one saved model auth profile. */
 import {
-  type AuthProfileStore,
   ensureAuthProfileStoreWithoutExternalProfiles,
   listProfilesForProvider,
   removeAuthProfilesAcrossOwnerStores,
 } from "../../agents/auth-profiles.js";
 import { resolveProviderEntryApiKeyProfileReference } from "../../agents/model-auth-provider-config.js";
+import { resolveProviderIdForAuth } from "../../agents/provider-auth-aliases.js";
 import { formatCliCommand } from "../../cli/command-format.js";
 import { logConfigUpdated } from "../../config/logging.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
@@ -19,28 +19,62 @@ import { refreshRunningGatewayAuthState } from "./auth-refresh.js";
 import { loadModelsConfig } from "./load-config.js";
 import { resolveModelsTargetAgent, updateConfig } from "./shared.js";
 
-// A provider entry can name an auth profile as its `apiKey`. Removing such a
-// profile would leave that config key pointing at nothing and silently degrade
-// the provider to an unresolvable literal key, so refuse instead.
-function findProviderEntryBoundToProfile(params: {
+/** Clears selected config references before deleting the credentials they name. */
+export async function removeModelAuthCredentials(params: {
   cfg: OpenClawConfig;
-  store: AuthProfileStore;
-  profileId: string;
-}): string | undefined {
-  for (const provider of Object.keys(params.cfg.models?.providers ?? {})) {
-    const reference = resolveProviderEntryApiKeyProfileReference({
-      cfg: params.cfg,
-      provider,
-      store: params.store,
+  agentDir: string;
+  profileIds: readonly string[];
+  apiKeyProvider?: string;
+  provider?: string;
+}): Promise<void> {
+  const apiKeyOwner =
+    params.apiKeyProvider === undefined
+      ? undefined
+      : resolveProviderIdForAuth(params.apiKeyProvider, { config: params.cfg });
+  const hasConfiguredKey = Object.entries(params.cfg.models?.providers ?? {}).some(
+    ([provider, entry]) =>
+      apiKeyOwner !== undefined &&
+      entry.apiKey !== undefined &&
+      resolveProviderIdForAuth(provider, { config: params.cfg }) === apiKeyOwner,
+  );
+  if (
+    hasConfiguredKey ||
+    params.profileIds.some((id) => configReferencesAuthProfile(params.cfg, id))
+  ) {
+    await updateConfig((current) => {
+      let next = current;
+      for (const id of params.profileIds) {
+        next = removeAuthProfileConfig(next, id);
+      }
+      if (params.apiKeyProvider !== undefined && next.models?.providers) {
+        const owner = resolveProviderIdForAuth(params.apiKeyProvider, { config: next });
+        const store = ensureAuthProfileStoreWithoutExternalProfiles(params.agentDir);
+        const providers = { ...next.models.providers };
+        for (const [provider, entry] of Object.entries(providers)) {
+          if (
+            resolveProviderIdForAuth(provider, { config: next }) === owner &&
+            resolveProviderEntryApiKeyProfileReference({ cfg: next, provider, store }).kind ===
+              "literal"
+          ) {
+            const { apiKey: _removed, ...connection } = entry;
+            providers[provider] = connection;
+          }
+        }
+        next = { ...next, models: { ...next.models, providers } };
+      }
+      return next;
     });
-    if (
-      (reference.kind === "profile" || reference.kind === "profile-incompatible") &&
-      reference.profileId === params.profileId
-    ) {
-      return provider;
-    }
   }
-  return undefined;
+  if (
+    !(await removeAuthProfilesAcrossOwnerStores({
+      cfg: params.cfg,
+      agentDir: params.agentDir,
+      profileIds: params.profileIds,
+      ...(params.provider !== undefined ? { provider: params.provider } : {}),
+    }))
+  ) {
+    throw new Error("Saved credentials could not be removed. Wait a moment and retry.");
+  }
 }
 
 /** Removes a saved auth profile from the agent auth store and from config. */
@@ -67,13 +101,6 @@ export async function modelsAuthLogoutCommand(
     );
   }
 
-  const boundProvider = findProviderEntryBoundToProfile({ cfg, store, profileId });
-  if (boundProvider) {
-    throw new Error(
-      `Auth profile "${profileId}" is referenced by models.providers.${boundProvider}.apiKey. Change that config value first, then rerun ${formatCliCommand(`openclaw models auth logout ${profileId}`)}.`,
-    );
-  }
-
   const description = `${profileId} (${credential.provider}/${credential.type})`;
   if (!opts.yes) {
     if (!process.stdin.isTTY) {
@@ -95,20 +122,9 @@ export async function modelsAuthLogoutCommand(
   // store, and a failed config write after the credential is gone would leave a
   // dangling reference that logout can no longer repair (the profile lookup
   // above would then fail). This order makes a partial failure retryable.
+  await removeModelAuthCredentials({ cfg, agentDir, profileIds: [profileId] });
   if (configReferencesAuthProfile(cfg, profileId)) {
-    await updateConfig((current) => removeAuthProfileConfig(current, profileId));
     logConfigUpdated(runtime);
-  }
-
-  const removed = await removeAuthProfilesAcrossOwnerStores({
-    cfg,
-    agentDir,
-    profileIds: [profileId],
-  });
-  if (!removed) {
-    throw new Error(
-      `Failed to remove auth profile "${profileId}"; the auth store lock may be busy. Wait a moment and retry.`,
-    );
   }
 
   await refreshRunningGatewayAuthState(agentId, runtime);

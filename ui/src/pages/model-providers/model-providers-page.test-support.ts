@@ -6,6 +6,10 @@ import type {
   ModelsProbeResult,
 } from "../../api/types.ts";
 import type { ApplicationContext, ApplicationGatewaySnapshot } from "../../app/context.ts";
+import type {
+  RuntimeConfigExternalMutationOptions,
+  RuntimeConfigExternalMutationResult,
+} from "../../lib/config/config-gateway-operations.ts";
 import type { DefaultModelSelection } from "./data.ts";
 import { EMPTY_MODEL_PROVIDERS_DATA, type ModelProvidersData } from "./load.ts";
 import type { ModelBehaviorConfig } from "./model-behavior.ts";
@@ -34,7 +38,6 @@ export type ModelProvidersPageTestElement = HTMLElement & {
   routeData: ModelProvidersRouteData | undefined;
   requestUpdate: () => void;
   saveDefaults: () => Promise<void>;
-  saveKey: (provider: string, configKey: string) => Promise<void>;
   selectedAgentId: string;
 };
 
@@ -161,6 +164,28 @@ export function createHarness(initialScopeId: string) {
     },
     ensureLoaded: vi.fn(async (): Promise<void> => undefined),
     patch: vi.fn(async () => true),
+    beforeExternalDispatch: vi.fn(async (): Promise<void> => undefined),
+    runExternalMutation: vi.fn(
+      async <T>(
+        task: (client: GatewayBrowserClient) => Promise<T>,
+        options: RuntimeConfigExternalMutationOptions<T> = {},
+      ): Promise<RuntimeConfigExternalMutationResult<T>> => {
+        await runtimeConfig.beforeExternalDispatch();
+        const client = snapshot.client;
+        if (!client || (options.canDispatch && !options.canDispatch())) {
+          return { ok: false, reason: "unavailable", error: "Scope changed before dispatch" };
+        }
+        const value = await task(client);
+        await runtimeConfig.refresh();
+        return {
+          ok: true,
+          value,
+          refresh: runtimeConfig.state.lastError
+            ? { ok: false, error: runtimeConfig.state.lastError }
+            : { ok: true },
+        };
+      },
+    ),
     patchForm: vi.fn(),
     removeFormValue: vi.fn(),
     refresh: vi.fn(async () => undefined),

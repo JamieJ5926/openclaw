@@ -19,6 +19,43 @@ import {
   type ModelProvidersPageTestElement,
 } from "./model-providers-page.test-support.ts";
 
+async function openKeyEditor(page: ModelProvidersPageTestElement, value: string) {
+  page.data = {
+    ...EMPTY_MODEL_PROVIDERS_DATA,
+    config: {},
+    authStatus: {
+      providerCapabilities: [{ provider: "openai", apiKeySupported: true, quickApiKeySetup: true }],
+      ...createAuthStatus([
+        {
+          provider: "openai",
+          profiles: [
+            { profileId: "openai:key", type: "api_key", status: "static", logoutSupported: true },
+          ],
+        },
+      ]),
+    },
+  };
+  await page.updateComplete;
+  page.querySelector<HTMLButtonElement>('[data-model-key-action="edit"]')!.click();
+  await page.updateComplete;
+  const input = page.querySelector<HTMLInputElement>(".model-providers__inline-form input")!;
+  input.value = value;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  await page.updateComplete;
+}
+
+async function fillProviderAdd(page: ModelProvidersPageTestElement, value: string) {
+  page.addProviderOpen = true;
+  await page.updateComplete;
+  const select = page.querySelector<HTMLSelectElement>(".model-providers__add-form select")!;
+  select.value = "anthropic";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  const input = page.querySelector<HTMLInputElement>(".model-providers__add-form input")!;
+  input.value = value;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  await page.updateComplete;
+}
+
 afterEach(() => {
   document.body.replaceChildren();
   vi.useRealTimers();
@@ -448,12 +485,11 @@ describe("ModelProvidersPage agent scope", () => {
     });
     const page = appendPage(context);
     await waitForFast(() => expect(page.data?.config).toEqual({}));
-    page.keyEditorProvider = "openai";
-    page.keyDraft = "replacement";
+    await openKeyEditor(page, "replacement");
+    page.querySelector<HTMLButtonElement>('[data-model-key-action="save"]')!.click();
+    await waitForFast(() => expect(page.messages.openai?.kind).toBe("success"));
 
-    await page.saveKey("openai", "openai");
-
-    expect(runtimeConfig.patch).toHaveBeenCalledOnce();
+    expect(runtimeConfig.patch).not.toHaveBeenCalled();
     expect(page.keyEditorProvider).toBeNull();
     expect(page.messages.openai).toEqual({
       kind: "success",
@@ -469,14 +505,12 @@ describe("ModelProvidersPage agent scope", () => {
     });
     const page = appendPage(context);
     await waitForFast(() => expect(page.data?.config).toEqual({}));
-    page.addProviderOpen = true;
-    page.addProviderId = "anthropic";
-    page.addProviderKey = "new-provider-key";
-
-    await page.addProvider();
+    await fillProviderAdd(page, "new-provider-key");
+    page.querySelector<HTMLButtonElement>(".model-providers__add-form button")!.click();
+    await waitForFast(() => expect(page.messages.add?.kind).toBe("success"));
     await page.updateComplete;
 
-    expect(runtimeConfig.patch).toHaveBeenCalledOnce();
+    expect(runtimeConfig.patch).not.toHaveBeenCalled();
     expect(page.addProviderOpen).toBe(true);
     expect(page.addProviderKey).toBe("");
     const form = page.querySelector(".model-providers__add-form")?.parentElement;
@@ -537,64 +571,78 @@ describe("ModelProvidersPage agent scope", () => {
     expect(page.messages.defaults).toBeUndefined();
   });
 
-  it("keeps global provider writes without clearing a replacement agent's credential draft", async () => {
-    const { agentSelection, context, notifySelection, runtimeConfig } = createHarness("main");
+  it("cancels a queued key save when the selected agent changes", async () => {
+    const { agentSelection, context, notifySelection, runtimeConfig, request } =
+      createHarness("main");
     const gate = deferred<void>();
-    runtimeConfig.ensureLoaded.mockImplementationOnce(async () => gate.promise);
+    runtimeConfig.beforeExternalDispatch.mockImplementationOnce(() => gate.promise);
     const page = appendPage(context);
     await waitForFast(() => expect(page.data?.config).toEqual({}));
-    page.keyEditorProvider = "openai";
-    page.keyDraft = "main-agent-key";
-
-    const saving = page.saveKey("openai", "openai");
-    await vi.waitFor(() => expect(runtimeConfig.ensureLoaded).toHaveBeenCalledOnce());
+    await openKeyEditor(page, "main-agent-key");
+    page.querySelector<HTMLButtonElement>('[data-model-key-action="save"]')!.click();
+    await waitForFast(() => expect(runtimeConfig.beforeExternalDispatch).toHaveBeenCalledOnce());
     agentSelection.state.selectedId = "writer";
     agentSelection.state.scopeId = "writer";
     notifySelection();
-    await vi.waitFor(() => expect(page.selectedAgentId).toBe("writer"));
+    await waitForFast(() => expect(page.selectedAgentId).toBe("writer"));
     page.keyEditorProvider = "anthropic";
     page.keyDraft = "writer-agent-unsaved-key";
     gate.resolve();
-    await saving;
+    await runtimeConfig.runExternalMutation.mock.results[0]?.value;
 
-    expect(runtimeConfig.patch).toHaveBeenCalledOnce();
-    expect(runtimeConfig.patch).toHaveBeenCalledWith(
-      expect.objectContaining({
-        raw: { models: { providers: { openai: { apiKey: "main-agent-key" } } } },
-      }),
-    );
+    expect(request.mock.calls.map(([method]) => method)).not.toContain("models.authSetApiKey");
     expect(page.keyEditorProvider).toBe("anthropic");
     expect(page.keyDraft).toBe("writer-agent-unsaved-key");
     expect(page.messages.openai).toBeUndefined();
   });
 
-  it("keeps a replacement agent's matching add-provider draft after a global write", async () => {
-    const { agentSelection, context, notifySelection, runtimeConfig } = createHarness("main");
-    const gate = deferred<void>();
-    runtimeConfig.ensureLoaded.mockImplementationOnce(async () => gate.promise);
+  it("ignores an add-key response after switching to another agent", async () => {
+    const { agentSelection, context, notifySelection, runtimeConfig, request } =
+      createHarness("main");
+    const gate = deferred<unknown>();
+    const originalRequest = request.getMockImplementation()!;
+    request.mockImplementation((method) =>
+      method === "models.authSetApiKey" ? gate.promise : originalRequest(method),
+    );
     const page = appendPage(context);
     await waitForFast(() => expect(page.data?.config).toEqual({}));
-    page.addProviderOpen = true;
-    page.addProviderId = "anthropic";
-    page.addProviderKey = "shared-provider-key";
-
-    const adding = page.addProvider();
-    await vi.waitFor(() => expect(runtimeConfig.ensureLoaded).toHaveBeenCalledOnce());
+    await fillProviderAdd(page, "shared-provider-key");
+    page.querySelector<HTMLButtonElement>(".model-providers__add-form button")!.click();
+    await waitForFast(() =>
+      expect(request).toHaveBeenCalledWith("models.authSetApiKey", {
+        provider: "anthropic",
+        agentId: "main",
+        apiKey: "shared-provider-key",
+      }),
+    );
     agentSelection.state.selectedId = "writer";
     agentSelection.state.scopeId = "writer";
     notifySelection();
-    await vi.waitFor(() => expect(page.selectedAgentId).toBe("writer"));
+    await waitForFast(() => expect(page.selectedAgentId).toBe("writer"));
     page.addProviderOpen = true;
     page.addProviderId = "anthropic";
-    page.addProviderKey = "shared-provider-key";
-    gate.resolve();
-    await adding;
+    page.addProviderKey = "writer-provider-key";
+    gate.resolve({ profileId: "anthropic:manual-api-key" });
+    await runtimeConfig.runExternalMutation.mock.results[0]?.value;
 
-    expect(runtimeConfig.patch).toHaveBeenCalledOnce();
     expect(page.addProviderOpen).toBe(true);
-    expect(page.addProviderId).toBe("anthropic");
-    expect(page.addProviderKey).toBe("shared-provider-key");
+    expect(page.addProviderKey).toBe("writer-provider-key");
     expect(page.messages.add).toBeUndefined();
+  });
+
+  it("routes the rendered Remove key action to API-key-only logout", async () => {
+    const { context, request } = createHarness("main");
+    const page = appendPage(context);
+    await waitForFast(() => expect(page.data?.config).toEqual({}));
+    await openKeyEditor(page, "replacement");
+    page.querySelector<HTMLButtonElement>('[data-model-key-action="remove"]')!.click();
+    await waitForFast(() => expect(page.messages.openai?.kind).toBe("success"));
+    expect(request).toHaveBeenCalledWith("models.authLogout", {
+      provider: "openai",
+      agentId: "main",
+      credentialType: "api_key",
+    });
+    expect(page.keyEditorProvider).toBeNull();
   });
 
   it("ignores logout completion after switching away from and back to the selected agent", async () => {

@@ -20,11 +20,8 @@ import {
   ensureAuthProfileStoreWithoutExternalProfiles,
   externalCliDiscoveryForConfigStatus,
   listProfilesForProvider,
-  removeAuthProfilesAcrossOwnerStores,
-  removeProviderAuthProfilesWithLock,
   resolveAuthProfileMetadata,
   resolveExplicitAuthOrderSelection,
-  resolvePersistedAuthProfileOwnerAgentDir,
   type RuntimeAuthProfileStore,
 } from "../../agents/auth-profiles.js";
 import { getRuntimeExternalCliProfileIds } from "../../agents/auth-profiles/runtime-external-profile-references.js";
@@ -176,37 +173,6 @@ function createAuthLogoutAbortOps(context: GatewayRequestContext): ChatAbortOps 
     broadcast: context.broadcast,
     nodeSendToSession: context.nodeSendToSession,
   };
-}
-
-// Auth profiles can be adopted by a provider-specific owner agent dir. Logout
-// must remove every owning store or stale profiles reappear on the next status
-// read and provider-auth warmup.
-async function removeProviderAuthProfilesAcrossOwnerStores(params: {
-  cfg: OpenClawConfig;
-  provider: string;
-  agentDir: string;
-  profileIds: string[];
-}): Promise<boolean> {
-  const ownerAgentDirs = new Set<string | undefined>([params.agentDir]);
-  for (const profileId of params.profileIds) {
-    ownerAgentDirs.add(
-      resolvePersistedAuthProfileOwnerAgentDir({
-        agentDir: params.agentDir,
-        profileId,
-      }),
-    );
-  }
-  for (const ownerAgentDir of ownerAgentDirs) {
-    const updatedStore = await removeProviderAuthProfilesWithLock({
-      cfg: params.cfg,
-      provider: params.provider,
-      agentDir: ownerAgentDir,
-    });
-    if (!updatedStore) {
-      return false;
-    }
-  }
-  return true;
 }
 
 // UI expiry fields are emitted only when both timestamp and remaining duration
@@ -379,11 +345,7 @@ function mapProvider(
           : {}),
         ...(includeProfileIdentity && metadata.email ? { email: metadata.email } : {}),
         ...(includeProfileIdentity && lastUsedAt ? { lastUsedAt } : {}),
-        ...((prof.type === "oauth" || prof.type === "token") &&
-        logoutProfileIds.has(prof.profileId) &&
-        !configBoundProfileIds.has(prof.profileId)
-          ? { logoutSupported: true }
-          : {}),
+        ...(logoutProfileIds.has(prof.profileId) ? { logoutSupported: true } : {}),
       };
     }),
     ...(profileOrder.order !== undefined ? { profileOrder: profileOrder.order } : {}),
@@ -467,7 +429,63 @@ function resolveConfiguredProviders(
   return { providers: Array.from(out), expectsOAuth };
 }
 
+async function refreshModelAuthAfterMutation(
+  context: GatewayRequestContext,
+  agentId: string,
+): Promise<void> {
+  invalidateModelAuthStatusCache();
+  await refreshActiveProviderAuthRuntimeSnapshot();
+  const cfg = context.getRuntimeConfig();
+  void warmCurrentProviderAuthStateOffMainThread(cfg).catch((error: unknown) => {
+    log.warn(`provider auth state rewarm after mutation failed: ${formatForLog(error)}`);
+  });
+  // The existing loader republishes auth facts without starting catalog discovery.
+  await loadDeferredCatalog(context, agentId, {
+    readOnly: true,
+    authScope: resolveAuthRefreshScope(cfg),
+    refreshAuth: true,
+    refreshFullCatalog: false,
+  });
+}
+
 export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
+  "models.authSetApiKey": async ({ params, respond, context }) => {
+    const provider = readProviderParam(params);
+    const apiKey = typeof params.apiKey === "string" ? params.apiKey.trim() : "";
+    if (!provider || !apiKey) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, "provider and apiKey are required"),
+      );
+      return;
+    }
+    await respondUnavailableOnThrow(respond, async () => {
+      const { saveModelProviderApiKey } = await import("../../commands/models/auth-api-key.js");
+      const config = context.getRuntimeConfig();
+      const scope = resolveModelAuthAgentScope(config, params.agentId);
+      if (!scope.ok) {
+        respond(false, undefined, modelAuthAgentScopeError(scope));
+        return;
+      }
+      const profileId = await saveModelProviderApiKey({
+        config,
+        provider,
+        apiKey,
+        agentDir: scope.agentDir,
+        bindProviderConfig: true,
+      });
+      try {
+        await refreshModelAuthAfterMutation(context, scope.agentId);
+      } catch (error) {
+        throw new Error(
+          "API key saved, but authentication state could not be refreshed: " + formatForLog(error),
+          { cause: error },
+        );
+      }
+      respond(true, { provider, profileId }, undefined);
+    });
+  },
   "models.authLogout": async ({ params, respond, context }) => {
     const provider = readProviderParam(params);
     if (!provider) {
@@ -479,7 +497,20 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
       respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, selection.message));
       return;
     }
+    if (
+      (params.credentialType !== undefined && params.credentialType !== "api_key") ||
+      (params.credentialType !== undefined && selection.profileIds !== undefined)
+    ) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, "Choose either API keys or specific profiles"),
+      );
+      return;
+    }
+    const apiKeyOnly = params.credentialType === "api_key";
     await respondUnavailableOnThrow(respond, async () => {
+      const { removeModelAuthCredentials } = await import("../../commands/models/auth-logout.js");
       const cfg = context.getRuntimeConfig();
       const scope = resolveModelAuthAgentScope(cfg, params.agentId);
       if (!scope.ok) {
@@ -490,16 +521,12 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
       const authProvider = resolveProviderIdForAuth(provider, { config: cfg });
       const store = ensureAuthProfileStoreWithoutExternalProfiles(agentDir);
       const availableProfiles = listProfilesForProvider(store, provider);
-      const removedProfiles = selection.profileIds ?? availableProfiles;
+      const removedProfiles =
+        selection.profileIds ??
+        availableProfiles.filter((id) => !apiKeyOnly || store.profiles[id]?.type === "api_key");
       if (
         selection.profileIds &&
-        selection.profileIds.some((profileId) => {
-          const profile = store.profiles[profileId];
-          return (
-            !availableProfiles.includes(profileId) ||
-            (profile?.type !== "oauth" && profile?.type !== "token")
-          );
-        })
+        selection.profileIds.some((profileId) => !availableProfiles.includes(profileId))
       ) {
         respond(
           false,
@@ -508,62 +535,36 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
         );
         return;
       }
-      const configBoundProfileIds = selection.profileIds
-        ? resolveConfigBoundProfileIds(cfg, store)
-        : null;
-      if (selection.profileIds?.some((profileId) => configBoundProfileIds?.has(profileId))) {
-        respond(
-          false,
-          undefined,
-          errorShape(ErrorCodes.INVALID_REQUEST, "profileIds contain config-bound auth profiles"),
+      await removeModelAuthCredentials({
+        cfg,
+        agentDir,
+        profileIds: removedProfiles,
+        ...(apiKeyOnly ? { apiKeyProvider: provider } : {}),
+        ...(!apiKeyOnly && !selection.profileIds ? { provider } : {}),
+      });
+      try {
+        await refreshModelAuthAfterMutation(context, scope.agentId);
+      } catch (error) {
+        throw new Error(
+          "Saved credentials removed, but authentication state could not be refreshed: " +
+            formatForLog(error),
+          { cause: error },
         );
-        return;
       }
-      const removed = selection.profileIds
-        ? await removeAuthProfilesAcrossOwnerStores({
-            cfg,
-            agentDir,
-            profileIds: removedProfiles,
-          })
-        : await removeProviderAuthProfilesAcrossOwnerStores({
-            cfg,
-            provider,
-            agentDir,
-            profileIds: removedProfiles,
-          });
-      if (!removed) {
-        respond(
-          false,
-          undefined,
-          errorShape(
-            ErrorCodes.UNAVAILABLE,
-            `failed to remove saved auth profiles for provider ${provider}`,
-          ),
-        );
-        return;
-      }
-      // Fence auxiliary usage work that captured the removed profiles before
-      // logout. Its later completion must not repopulate the cache.
-      invalidateModelAuthStatusCache();
-      await refreshActiveProviderAuthRuntimeSnapshot();
-      void warmCurrentProviderAuthStateOffMainThread(context.getRuntimeConfig()).catch(
-        (err: unknown) => {
-          log.warn(`provider auth state rewarm after logout failed: ${formatForLog(err)}`);
-        },
-      );
       // A provider-wide abort would terminate runs using credentials this
       // logout preserved (other profiles, tokens, or the config API key). Abort
       // entries do not carry the profile id, so a targeted logout cannot scope
       // the abort and instead leaves in-flight runs to fail on their next
       // request; only a full-provider logout revokes everything and aborts.
-      const { runIds: abortedRunIds } = selection.profileIds
-        ? { runIds: [] as string[] }
-        : abortChatRunsForProvider(createAuthLogoutAbortOps(context), {
-            cfg,
-            providerId: authProvider,
-            agentId: scope.agentId,
-            stopReason: "auth-revoked",
-          });
+      const { runIds: abortedRunIds } =
+        selection.profileIds || apiKeyOnly
+          ? { runIds: [] as string[] }
+          : abortChatRunsForProvider(createAuthLogoutAbortOps(context), {
+              cfg,
+              providerId: authProvider,
+              agentId: scope.agentId,
+              stopReason: "auth-revoked",
+            });
       const result: ModelAuthLogoutResult = {
         provider,
         removedProfiles,
@@ -693,11 +694,7 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
       const externalCliProfileIds = new Set(getRuntimeExternalCliProfileIds(store));
       const logoutProfileIds = new Set(
         Object.entries(store.profiles)
-          .filter(
-            ([profileId, profile]) =>
-              !externalProfileIds.has(profileId) &&
-              (profile.type === "oauth" || profile.type === "token"),
-          )
+          .filter(([profileId]) => !externalProfileIds.has(profileId))
           .map(([profileId]) => profileId),
       );
       const configBoundProfileIds = resolveConfigBoundProfileIds(cfg, store, authAliasLookupParams);

@@ -50,7 +50,7 @@ vi.mock("../../wizard/clack-prompter.js", () => ({
   createClackPrompter: () => ({ confirm: mocks.confirm }),
 }));
 
-const { modelsAuthLogoutCommand } = await import("./auth-logout.js");
+const { modelsAuthLogoutCommand, removeModelAuthCredentials } = await import("./auth-logout.js");
 
 function createRuntime(): RuntimeEnv & { logs: string[] } {
   const logs: string[] = [];
@@ -207,20 +207,90 @@ describe("models auth logout", () => {
     expect(calls).toEqual(["config", "store"]);
   });
 
+  it("removes a config-bound API key while keeping the connection and its sibling", async () => {
+    const cfg: OpenClawConfig = {
+      agents: { defaults: { model: "other/current" } },
+      models: {
+        providers: {
+          sample: { baseUrl: "https://provider.example/v1", models: [], apiKey: "sample:bound" },
+        },
+      },
+      auth: {
+        profiles: {
+          "sample:bound": { provider: "sample", mode: "api_key" },
+          "sample:backup": { provider: "sample", mode: "api_key" },
+        },
+        order: { sample: ["sample:bound", "sample:backup"], untouched: [] },
+      },
+    };
+    const store: AuthProfileStore = {
+      version: 1,
+      profiles: {
+        "sample:bound": { type: "api_key", provider: "sample", key: "bound-key" },
+        "sample:backup": { type: "api_key", provider: "sample", key: "backup-key" },
+      },
+    };
+    mocks.loadModelsConfig.mockResolvedValue(cfg);
+    mocks.ensureAuthProfileStoreWithoutExternalProfiles.mockReturnValue(store);
+    await modelsAuthLogoutCommand({ profileId: "sample:bound", yes: true }, createRuntime());
+    const next = applyCapturedConfigUpdate(cfg);
+    expect(next.models?.providers?.sample).toEqual({
+      baseUrl: "https://provider.example/v1",
+      models: [],
+    });
+    expect(next.auth?.order).toEqual({ sample: ["sample:backup"], untouched: [] });
+    expect(next.agents?.defaults?.model).toBe("other/current");
+    expect(mocks.removeAuthProfilesAcrossOwnerStores).toHaveBeenCalledWith({
+      cfg,
+      agentDir: "/tmp/agent-main",
+      profileIds: ["sample:bound"],
+    });
+  });
+
+  it("keeps a credential when its config references cannot be cleared", async () => {
+    const cfg: OpenClawConfig = {
+      auth: { profiles: { "openai:manual": { provider: "openai", mode: "oauth" } } },
+    };
+    mocks.loadModelsConfig.mockResolvedValue(cfg);
+    mocks.updateConfig.mockRejectedValueOnce(new Error("Config is read-only"));
+    await expect(
+      modelsAuthLogoutCommand({ profileId: "openai:manual", yes: true }, createRuntime()),
+    ).rejects.toThrow("Config is read-only");
+    expect(mocks.removeAuthProfilesAcrossOwnerStores).not.toHaveBeenCalled();
+  });
+
+  it("clears an inline key while preserving SecretRef and unrelated connection settings", async () => {
+    const ref = { source: "env", provider: "default", id: "SAMPLE_API_KEY" } as const;
+    const cfg: OpenClawConfig = {
+      models: {
+        providers: {
+          sample: { baseUrl: "https://provider.example/v1", models: [], apiKey: "inline-key" },
+          other: { baseUrl: "https://other.example/v1", models: [], apiKey: ref },
+        },
+      },
+    };
+    mocks.ensureAuthProfileStoreWithoutExternalProfiles.mockReturnValue({
+      version: 1,
+      profiles: {},
+    });
+    await removeModelAuthCredentials({
+      cfg,
+      agentDir: "/tmp/agent-main",
+      profileIds: [],
+      apiKeyProvider: "sample",
+    });
+    const next = applyCapturedConfigUpdate(cfg);
+    expect(next.models?.providers?.sample?.apiKey).toBeUndefined();
+    expect(next.models?.providers?.sample?.baseUrl).toBe("https://provider.example/v1");
+    expect(next.models?.providers?.other?.apiKey).toEqual(ref);
+  });
+
   it.each([
     {
       label: "unknown profile id",
       profileId: "openai:missing",
       cfg: {} as OpenClawConfig,
       expected: 'Auth profile "openai:missing" not found for agent "main"',
-    },
-    {
-      label: "profile bound to a provider apiKey entry",
-      profileId: "openai:manual",
-      cfg: {
-        models: { providers: { openai: { apiKey: "openai:manual" } } },
-      } as unknown as OpenClawConfig,
-      expected: "referenced by models.providers.openai.apiKey",
     },
     {
       label: "blank profile id",
@@ -242,7 +312,7 @@ describe("models auth logout", () => {
 
     await expect(
       modelsAuthLogoutCommand({ profileId: "openai:manual", yes: true }, createRuntime()),
-    ).rejects.toThrow('Failed to remove auth profile "openai:manual"');
+    ).rejects.toThrow("Saved credentials could not be removed");
   });
 
   it("keeps the profile when an interactive confirmation is declined", async () => {

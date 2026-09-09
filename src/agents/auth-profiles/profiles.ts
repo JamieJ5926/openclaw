@@ -376,6 +376,7 @@ async function removeAuthProfileTargetsWithLocks(
  */
 export async function removeAuthProfilesAcrossOwnerStores(params: {
   cfg?: OpenClawConfig;
+  provider?: string;
   agentDir?: string;
   profileIds: readonly string[];
 }): Promise<boolean> {
@@ -397,6 +398,20 @@ export async function removeAuthProfilesAcrossOwnerStores(params: {
       const ownerProfiles = profilesByOwner.get(ownerAgentDir) ?? new Set<string>();
       ownerProfiles.add(profileId);
       profilesByOwner.set(ownerAgentDir, ownerProfiles);
+    }
+    if (params.provider !== undefined) {
+      for (const agentDir of profilesByOwner.keys()) {
+        if (
+          !(await removeProviderAuthProfilesWithLock({
+            cfg: params.cfg,
+            provider: params.provider,
+            agentDir,
+          }))
+        ) {
+          return false;
+        }
+      }
+      return true;
     }
     const result = await removeAuthProfileTargetsWithLocks(
       [...profilesByOwner].map(([agentDir, ownerProfileIds]) =>

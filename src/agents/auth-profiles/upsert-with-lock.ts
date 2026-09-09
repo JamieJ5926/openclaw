@@ -338,6 +338,7 @@ export async function persistAuthProfileBatch(
 
 type AuthProfileUpsertParams = {
   profileId: string;
+  validateCurrentCredential?: (credential: AuthProfileCredential | undefined) => void;
   credential: AuthProfileCredential;
   agentDir?: string;
   stateDir?: string;
@@ -361,6 +362,8 @@ export async function upsertAuthProfileWithLock(
         syncExternalCli: false,
       },
       updater: (store) => {
+        // Consumers can reject a changed profile kind under the same lock as the write.
+        params.validateCurrentCredential?.(store.profiles[params.profileId]);
         if (
           supersedesOAuthRefreshGenerationObservedAtAdmission({
             profileId: params.profileId,
