@@ -168,6 +168,7 @@ describe("renderInstalledPlugins", () => {
     closeSearch.click();
     expect(container.querySelector('input[type="search"]')).toBeNull();
     expect(visiblePluginIds(container)).toHaveLength(9);
+    await Promise.resolve();
     expect(document.activeElement?.getAttribute("aria-label")).toBe("Search plugins");
 
     const showAll = expectDefined(
