@@ -42,7 +42,7 @@ suite.define(() => {
       });
       await installTalkBrowserFixtures(page);
       await page.goto(`${suite.server.baseUrl}chat`);
-      const textarea = page.locator(".agent-chat__composer-combobox textarea");
+      const textarea = page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea");
       await textarea.fill("ship it");
       await textarea.evaluate(
         (element: HTMLTextAreaElement, selection) =>

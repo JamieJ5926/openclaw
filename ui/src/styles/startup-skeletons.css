@@ -150,10 +150,9 @@ openclaw-app:has(.shell:not([data-startup-stage="ready"])) {
     .chat-pane__session-title-text,
     .chat-pane__workspace-chip,
     .assistant-panel-icon,
-    .chat-bubble,
+    .startup-transcript-skeleton .chat-bubble,
     .startup-transcript-lines > .skeleton-line,
-    .chat-avatar,
-    .assistant .chat-group-footer
+    .startup-transcript-skeleton .chat-avatar
   ) {
   :where(&) {
     position: relative;
@@ -237,6 +236,10 @@ openclaw-app:has(.shell:not([data-startup-stage="ready"])) {
   padding-block: calc((1lh - 14px) / 2);
 }
 
+.startup-transcript-lines > .skeleton-line {
+  margin-block: 0;
+}
+
 .startup-transcript-line--short {
   width: 45%;
 }
@@ -250,42 +253,13 @@ openclaw-app:has(.shell:not([data-startup-stage="ready"])) {
   content: none;
 }
 
-/* Keep measured assistant boxes flat through the history-to-reveal handoff. */
-.shell[data-startup-stage] .assistant .chat-bubble::after {
-  inset: 4px 0;
-  font-size: var(--chat-text-size);
-  line-height: 1.5;
-  mask-image:
-    linear-gradient(var(--text) 0 0), linear-gradient(var(--text) 0 0),
-    linear-gradient(var(--text) 0 0), linear-gradient(var(--text) 0 0);
-  mask-size:
-    100% 14px,
-    85% 14px,
-    65% 14px,
-    45% 14px;
-  mask-position:
-    0 calc((1lh - 14px) / 2),
-    0 calc((3lh - 14px) / 2),
-    0 calc((5lh - 14px) / 2),
-    0 calc((7lh - 14px) / 2);
-  mask-repeat: no-repeat;
-}
-
-.shell[data-startup-stage] .user .chat-bubble::after {
+.shell[data-startup-stage] .startup-transcript-skeleton .user .chat-bubble::after {
   inset-inline-start: auto;
   inset-block-end: auto;
   width: min(100%, calc(12ch + 32px + 2px));
   height: min(100%, calc(1lh + 32px + 2px));
   font-size: var(--chat-text-size);
   line-height: 1.5;
-}
-
-.shell[data-startup-stage] .assistant .chat-group-footer::after {
-  inset-block-start: calc((100% - 14px) / 2);
-  inset-block-end: auto;
-  width: 65%;
-  height: 14px;
-  border-radius: var(--radius-sm);
 }
 
 .shell[data-startup-managed] openclaw-app-sidebar .sidebar,

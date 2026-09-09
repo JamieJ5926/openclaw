@@ -1,3 +1,170 @@
+@property --chat-dictation-edge-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+/* Dictation remains the same writing surface. A masked gradient paints inside
+   its actual radius and corner-shape, so capture never introduces a competing
+   rounded-rectangle geometry. */
+.agent-chat__input--dictating,
+.agent-chat__input--dictating:focus-within {
+  isolation: isolate;
+}
+
+.agent-chat__input--dictating::after {
+  content: "";
+  position: absolute;
+  z-index: 5;
+  inset: -1px;
+  padding: 1px;
+  border-radius: inherit;
+  corner-shape: superellipse(1.5);
+  /* Comet, not a ring: a long fading tail behind a bright head, dark again
+     right in front of it, so the light reads as travelling, not as a ring. */
+  background: conic-gradient(
+    from var(--chat-dictation-edge-angle),
+    transparent 0deg 200deg,
+    color-mix(in srgb, var(--accent) 10%, transparent) 252deg,
+    color-mix(in srgb, var(--accent) 45%, transparent) 286deg,
+    color-mix(in srgb, var(--accent) 92%, white) 294deg,
+    transparent 301deg 360deg
+  );
+  -webkit-mask:
+    linear-gradient(white 0 0) content-box,
+    linear-gradient(white 0 0);
+  mask-composite: exclude;
+  animation: chat-dictation-edge-orbit 6.6s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes chat-dictation-edge-orbit {
+  to {
+    --chat-dictation-edge-angle: 360deg;
+  }
+}
+
+:root[data-theme-mode="light"] .agent-chat__input--dictating,
+:root[data-theme-mode="light"] .agent-chat__input--dictating:focus-within {
+  border-color: transparent;
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 6%),
+    0 4px 18px rgb(0 0 0 / 6%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-chat__input--dictating::after {
+    --chat-dictation-edge-angle: 238deg;
+    animation: none;
+  }
+}
+
+.agent-chat__input--prefill-attention {
+  animation: chat-composer-prefill-attention 600ms ease-out;
+}
+
+@keyframes chat-composer-prefill-attention {
+  0%,
+  20% {
+    background: color-mix(in srgb, var(--accent) 14%, var(--card));
+    border-color: color-mix(in srgb, var(--accent) 88%, var(--border));
+    box-shadow:
+      0 0 0 5px color-mix(in srgb, var(--accent) 32%, transparent),
+      0 0 28px color-mix(in srgb, var(--accent) 42%, transparent);
+  }
+  100% {
+    background: var(--card);
+    border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+    box-shadow: 0 0 0 3px var(--accent-subtle);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-chat__input--prefill-attention {
+    animation: none;
+    background: color-mix(in srgb, var(--accent) 14%, var(--card));
+    border-color: color-mix(in srgb, var(--accent) 88%, var(--border));
+    box-shadow:
+      0 0 0 5px color-mix(in srgb, var(--accent) 32%, transparent),
+      0 0 28px color-mix(in srgb, var(--accent) 42%, transparent);
+  }
+}
+
+.chat-send-btn--hold-enabled {
+  touch-action: none;
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+
+/* The hold threshold is functional feedback, not decoration: the ring fills
+   linearly until dictation latches, then the ordinary Stop state takes over. */
+.chat-send-btn--dictation-arming {
+  position: relative;
+}
+
+.chat-send-btn--dictation-arming::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  padding: 2px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from -90deg,
+    var(--accent) 0deg var(--chat-dictation-hold-angle),
+    transparent var(--chat-dictation-hold-angle) 360deg
+  );
+  -webkit-mask:
+    linear-gradient(white 0 0) content-box,
+    linear-gradient(white 0 0);
+  mask-composite: exclude;
+  /* Keep the visible fill aligned with HOLD_PROGRESS_MS in composer-dictation.ts. */
+  animation: chat-dictation-hold-progress 350ms linear forwards;
+  pointer-events: none;
+}
+
+@keyframes chat-dictation-hold-progress {
+  to {
+    --chat-dictation-hold-angle: 360deg;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-send-btn--dictation-arming::after {
+    --chat-dictation-hold-angle: 360deg;
+    background: color-mix(in srgb, var(--accent) 52%, transparent);
+    animation: none;
+  }
+}
+
+/* Capture button while dictating. Same element as the idle mic — swapping it
+   would release pointer capture mid-hold — so the mode only restyles it. Once
+   latched, this square is the explicit discard half of the action pair. */
+.chat-send-btn.chat-send-btn--dictating {
+  width: var(--chat-composer-send-size);
+  min-width: var(--chat-composer-send-size);
+  height: var(--chat-composer-send-size);
+  padding: 5px;
+  border-radius: var(--radius-full);
+  color: var(--text-strong);
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+  box-shadow: none;
+  touch-action: none;
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+
+.agent-chat__input .chat-send-btn.chat-send-btn--dictating:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text) 16%, transparent);
+  color: var(--text-strong);
+}
+
+.chat-send-btn--dictating > svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+  stroke: none;
+}
+
 .chat-controls__inline-select[open] > wa-popup::part(popup) {
   animation: chat-composer-picker-in var(--wa-transition-fast) ease;
 }

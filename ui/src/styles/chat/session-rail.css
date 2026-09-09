@@ -225,7 +225,6 @@ openclaw-chat-session-rail {
   color: var(--text);
   font-size: 10.5px;
   line-height: 1;
-  text-decoration: none;
 }
 
 .chat-session-rail__pr:hover {
