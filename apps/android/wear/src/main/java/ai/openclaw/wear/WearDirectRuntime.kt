@@ -351,7 +351,16 @@ internal class WearDirectRuntime(
         deviceAuthStore = tokens,
         onConnected = { hello -> connected(intent, endpoint, hello) },
         onDisconnected = {
-          publish(intent) { copy(connected = false, approvalsReady = false, status = "Disconnected") }
+          // The closed physical lease cannot commit its send failure, so settle the visible attempt here.
+          publish(intent) {
+            copy(
+              connected = false,
+              approvalsReady = false,
+              status = "Disconnected",
+              sending = false,
+              sendUnknown = sendUnknown || sending,
+            )
+          }
         },
         onConnectFailure = { error, _ ->
           publish(intent) {
@@ -580,8 +589,14 @@ internal class WearDirectRuntime(
   }
 
   private suspend fun loadHistory(request: RequestContext) {
-    val key = state.value.sessionKey ?: return
-    val revision = synchronized(lock) { historyRevision }
+    // Newer loads, admitted sends, send acknowledgements, and events supersede this snapshot.
+    var admitted: Pair<String, Long>? = null
+    commit(request) {
+      val key = mutableState.value.sessionKey ?: return@commit
+      historyRevision += 1
+      admitted = key to historyRevision
+    }
+    val (key, revision) = admitted ?: return
     val result =
       request(
         request,
@@ -593,9 +608,15 @@ internal class WearDirectRuntime(
         },
       )
     val messages = (result["messages"] as? JsonArray).orEmpty().takeLast(20).mapNotNull(::directChatMessage)
+    val inFlight = result["inFlightRun"] as? JsonObject
     commit(request) {
       if (revision == historyRevision) {
-        mutableState.value = mutableState.value.copy(messages = messages)
+        mutableState.value =
+          mutableState.value.copy(
+            messages = messages,
+            runId = inFlight?.text("runId"),
+            streamText = inFlight?.text("text")?.take(4000),
+          )
       }
     }
   }
@@ -636,6 +657,7 @@ internal class WearDirectRuntime(
     commit(request) {
       val state = mutableState.value
       if (state.pendingSend !== attempt || state.sending) return@commit
+      historyRevision += 1
       mutableState.value = state.copy(sending = true, error = null)
       admitted = true
     }
@@ -654,6 +676,7 @@ internal class WearDirectRuntime(
             },
           )
         commit(request) {
+          historyRevision += 1
           mutableState.value =
             mutableState.value.copy(
               sending = false,
@@ -679,15 +702,22 @@ internal class WearDirectRuntime(
 
   fun abort() {
     val request = capture() ?: return
-    val key = state.value.sessionKey ?: return
-    val run = state.value.runId ?: return
+    var target: Pair<String, String>? = null
+    commit(request) {
+      val state = mutableState.value
+      val key = state.sessionKey ?: return@commit
+      val run = state.runId ?: return@commit
+      target = key to run
+    }
+    val (key, run) = target ?: return
     scope.launch {
       try {
+        // Exact-run sessions.abort also reaches recovered embedded owners without retargeting a replacement.
         request(
           request,
-          "chat.abort",
+          "sessions.abort",
           buildJsonObject {
-            put("sessionKey", key)
+            put("key", key)
             put("runId", run)
           },
         )
