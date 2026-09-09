@@ -55,7 +55,10 @@ import {
   LIVE_TRANSPORT_BASELINE_STANDARD_SCENARIO_IDS,
   findMissingLiveTransportStandardScenarios,
 } from "../../shared/live-transport-scenarios.js";
-import type { MatrixQaObservedEvent } from "../../substrate/events.js";
+import {
+  normalizeMatrixQaObservedEvent,
+  type MatrixQaObservedEvent,
+} from "../../substrate/events.js";
 import {
   MATRIX_QA_MEDIA_TYPE_COVERAGE_CASES,
   MATRIX_QA_VOICE_PREFLIGHT_FILENAME,
@@ -840,6 +843,23 @@ describe("matrix live qa scenarios", () => {
         .findMatrixQaScenarios(["matrix-room-generated-image-delivery"], "fast")
         .map((scenario) => scenario.id),
     ).toEqual(["matrix-room-generated-image-delivery"]);
+  });
+
+  it("scopes image-provider setup to generated-image delivery", () => {
+    const scenarios = new Map(MATRIX_QA_SCENARIOS.map((scenario) => [scenario.id, scenario]));
+
+    expect(scenarios.get("matrix-room-quiet-streaming-preview")?.configOverrides).toEqual({
+      streaming: "quiet",
+    });
+    expect(scenarios.get("matrix-room-generated-image-delivery")?.configOverrides).toEqual({
+      agentDefaults: {
+        imageGenerationModel: {
+          primary: "openai/gpt-image-1",
+        },
+      },
+      requiredPluginIds: ["openai"],
+      streaming: "quiet",
+    });
   });
 
   it("fails when the Matrix profile is unknown", () => {
@@ -2291,21 +2311,32 @@ describe("matrix live qa scenarios", () => {
         },
         since: "driver-sync-preview",
       }))
-      .mockImplementationOnce(async () => ({
-        event: {
-          kind: "message",
-          roomId: "!main:matrix-qa.test",
-          eventId: "$quiet-final",
+      .mockImplementationOnce(async () => {
+        const normalizedFinalEvent = normalizeMatrixQaObservedEvent("!main:matrix-qa.test", {
+          event_id: "$quiet-final",
           sender: "@sut:matrix-qa.test",
           type: "m.room.message",
-          body: readFinalText(),
-          relatesTo: {
-            relType: "m.replace",
-            eventId: "$quiet-preview",
+          content: {
+            body: "* finalized",
+            msgtype: "m.text",
+            "m.new_content": {
+              body: readFinalText(),
+              msgtype: "m.text",
+            },
+            "m.relates_to": {
+              rel_type: "m.replace",
+              event_id: "$quiet-preview",
+            },
           },
-        },
-        since: "driver-sync-next",
-      }));
+        });
+        if (!normalizedFinalEvent) {
+          throw new Error("expected normalized Matrix replacement event");
+        }
+        return {
+          event: normalizedFinalEvent,
+          since: "driver-sync-next",
+        };
+      });
 
     createMatrixQaClient.mockReturnValue({
       primeRoom,
@@ -2378,10 +2409,7 @@ describe("matrix live qa scenarios", () => {
                 mockMessageBody(sendTextMessageItem, "sendTextMessage"),
                 fallbackFinalText,
               ),
-              relatesTo: {
-                relType: "m.replace",
-                eventId: previewEventId,
-              },
+              replacesEventId: previewEventId,
             }),
           since: "driver-sync-next",
         },
@@ -2515,10 +2543,7 @@ describe("matrix live qa scenarios", () => {
                 kind: "notice",
                 eventId: "$tool-progress-final",
                 body: token,
-                relatesTo: {
-                  relType: "m.replace",
-                  eventId: previewEventId,
-                },
+                replacesEventId: previewEventId,
               });
             },
             since: "driver-sync-next",
@@ -2578,10 +2603,7 @@ describe("matrix live qa scenarios", () => {
             kind: "notice",
             eventId: "$tool-progress-generic-update",
             body: "- `tool: exec_command`",
-            relatesTo: {
-              relType: "m.replace",
-              eventId: previewEventId,
-            },
+            replacesEventId: previewEventId,
           }),
           since: "driver-sync-progress",
         },
@@ -2594,10 +2616,7 @@ describe("matrix live qa scenarios", () => {
                 mockMessageBody(sendTextMessage, "sendTextMessage"),
                 "MATRIX_QA_TOOL_PROGRESS_FIXED",
               ),
-              relatesTo: {
-                relType: "m.replace",
-                eventId: previewEventId,
-              },
+              replacesEventId: previewEventId,
             }),
           since: "driver-sync-next",
         },
@@ -2637,10 +2656,7 @@ describe("matrix live qa scenarios", () => {
             kind: "notice",
             eventId: "$tool-progress-command-update",
             body: "Working\n`🔧 Exec: matrix-command-progress-start`\n`🔧 Exec: completed`",
-            relatesTo: {
-              relType: "m.replace",
-              eventId: previewEventId,
-            },
+            replacesEventId: previewEventId,
           }),
           since: "driver-sync-progress",
         },
@@ -2672,10 +2688,7 @@ describe("matrix live qa scenarios", () => {
             kind: "notice",
             eventId: "$tool-progress-command-clean-update",
             body: "Working\n`🔧 Exec: completed`",
-            relatesTo: {
-              relType: "m.replace",
-              eventId: previewEventId,
-            },
+            replacesEventId: previewEventId,
           }),
           since: "driver-sync-progress",
         },
@@ -2688,10 +2701,7 @@ describe("matrix live qa scenarios", () => {
                 mockMessageBody(sendTextMessage, "sendTextMessage"),
                 "MATRIX_QA_TOOL_PROGRESS_COMMAND",
               ),
-              relatesTo: {
-                relType: "m.replace",
-                eventId: previewEventId,
-              },
+              replacesEventId: previewEventId,
             }),
           since: "driver-sync-final",
         },
@@ -2734,10 +2744,7 @@ describe("matrix live qa scenarios", () => {
                 mockMessageBody(sendTextMessage, "sendTextMessage"),
                 "MATRIX_QA_TOOL_PROGRESS_COMMAND",
               ),
-              relatesTo: {
-                relType: "m.replace",
-                eventId: previewEventId,
-              },
+              replacesEventId: previewEventId,
             }),
           since: "driver-sync-final",
         },
@@ -2768,10 +2775,7 @@ describe("matrix live qa scenarios", () => {
       kind: "notice",
       eventId: "$tool-progress-timeout-update",
       body: "Working...\nstill deciding",
-      relatesTo: {
-        relType: "m.replace",
-        eventId: previewEvent.eventId,
-      },
+      replacesEventId: previewEvent.eventId,
     });
     const context = matrixQaScenarioContext();
     const primeRoom = vi.fn().mockResolvedValue("driver-sync-start");
@@ -2984,6 +2988,7 @@ describe("matrix live qa scenarios", () => {
       previewEventId?: unknown;
       reply?: {
         eventId?: unknown;
+        replacesEventId?: unknown;
         relatesTo?: {
           eventId?: unknown;
           relType?: unknown;
@@ -3027,10 +3032,7 @@ describe("matrix live qa scenarios", () => {
       kind: "notice",
       eventId: "$tool-progress-error-final-first-progress",
       body: "Working...\n`📖 Read: from /tmp/qa/workspace/missing-matrix-tool-progress-target.txt`",
-      relatesTo: {
-        relType: "m.replace",
-        eventId: previewEventId,
-      },
+      replacesEventId: previewEventId,
     });
     const context = matrixQaScenarioContext();
     const primeRoom = vi.fn().mockResolvedValue("driver-sync-start");
@@ -3067,6 +3069,7 @@ describe("matrix live qa scenarios", () => {
       previewEventId?: unknown;
       reply?: {
         eventId?: unknown;
+        replacesEventId?: unknown;
         relatesTo?: {
           eventId?: unknown;
           relType?: unknown;
@@ -3089,10 +3092,7 @@ describe("matrix live qa scenarios", () => {
       kind: "notice",
       eventId: "$tool-progress-error-placeholder-progress",
       body: "Working...\n`📖 Read: from /tmp/qa/workspace/missing-matrix-tool-progress-target.txt`",
-      relatesTo: {
-        relType: "m.replace",
-        eventId: previewEventId,
-      },
+      replacesEventId: previewEventId,
     });
     const { waitForRoomEvent } = mockMatrixQaRoomClient({
       driverEventId: "$tool-progress-error-placeholder-trigger",
@@ -3203,19 +3203,13 @@ describe("matrix live qa scenarios", () => {
       kind: "notice",
       eventId: "$tool-progress-final-timeout-update",
       body: "Working...\n- `tool: read`",
-      relatesTo: {
-        relType: "m.replace",
-        eventId: previewEvent.eventId,
-      },
+      replacesEventId: previewEvent.eventId,
     });
     const finalCandidate = matrixQaMessageEvent({
       kind: "message",
       eventId: "$tool-progress-final-timeout-candidate",
       body: "I read the file, but missed the exact marker.",
-      relatesTo: {
-        relType: "m.replace",
-        eventId: previewEvent.eventId,
-      },
+      replacesEventId: previewEvent.eventId,
     });
     const context = matrixQaScenarioContext();
     const primeRoom = vi.fn().mockResolvedValue("driver-sync-start");
@@ -3285,10 +3279,7 @@ describe("matrix live qa scenarios", () => {
       kind: "notice",
       eventId: "$tool-progress-error-progress",
       body: "Pearling...\n`📖 Read: from /tmp/qa/workspace/missing-matrix-tool-progress-target.txt`",
-      relatesTo: {
-        relType: "m.replace",
-        eventId: previewEventId,
-      },
+      replacesEventId: previewEventId,
     });
     const { sendTextMessage, waitForRoomEvent } = mockMatrixQaRoomClient({
       driverEventId: "$tool-progress-error-trigger",
@@ -3306,10 +3297,7 @@ describe("matrix live qa scenarios", () => {
                 mockMessageBody(sendTextMessageResult, "sendTextMessage"),
                 "MATRIX_QA_TOOL_PROGRESS_ERROR_FIXED",
               ),
-              relatesTo: {
-                relType: "m.replace",
-                eventId: previewEventId,
-              },
+              replacesEventId: previewEventId,
             }),
           since: "driver-sync-next",
         },
@@ -3325,6 +3313,7 @@ describe("matrix live qa scenarios", () => {
       previewEventId?: unknown;
       reply?: {
         eventId?: unknown;
+        replacesEventId?: unknown;
         relatesTo?: {
           eventId?: unknown;
           relType?: unknown;
@@ -3337,8 +3326,8 @@ describe("matrix live qa scenarios", () => {
     );
     expect(artifacts.previewEventId).toBe("$tool-progress-error-preview");
     expect(artifacts.reply?.eventId).toBe("$tool-progress-error-final");
-    expect(artifacts.reply?.relatesTo?.eventId).toBe("$tool-progress-error-preview");
-    expect(artifacts.reply?.relatesTo?.relType).toBe("m.replace");
+    expect(artifacts.reply?.replacesEventId).toBe("$tool-progress-error-preview");
+    expect(artifacts.reply?.relatesTo).toBeUndefined();
 
     const progressWait = mockObjectArg(waitForRoomEvent, "waitForRoomEvent");
     expect(
@@ -3374,10 +3363,7 @@ describe("matrix live qa scenarios", () => {
                 mockMessageBody(sendTextMessage, "sendTextMessage"),
                 "MATRIX_QA_TOOL_PROGRESS_ERROR_SHORT_FIXED",
               ),
-              relatesTo: {
-                relType: "m.replace",
-                eventId: previewEventId,
-              },
+              replacesEventId: previewEventId,
             }),
           since: "driver-sync-next",
         },
@@ -3392,6 +3378,7 @@ describe("matrix live qa scenarios", () => {
       previewEventId?: unknown;
       reply?: {
         eventId?: unknown;
+        replacesEventId?: unknown;
         relatesTo?: {
           eventId?: unknown;
           relType?: unknown;
@@ -3403,8 +3390,8 @@ describe("matrix live qa scenarios", () => {
     );
     expect(artifacts.previewEventId).toBe(previewEventId);
     expect(artifacts.reply?.eventId).toBe("$tool-progress-error-short-final");
-    expect(artifacts.reply?.relatesTo?.eventId).toBe(previewEventId);
-    expect(artifacts.reply?.relatesTo?.relType).toBe("m.replace");
+    expect(artifacts.reply?.replacesEventId).toBe(previewEventId);
+    expect(artifacts.reply?.relatesTo).toBeUndefined();
 
     expect(waitForRoomEvent).toHaveBeenCalledTimes(2);
   });
@@ -3430,10 +3417,7 @@ describe("matrix live qa scenarios", () => {
             formattedBody:
               "Working...<br><ul><li><code>read matrix-progress-@room-@alice:matrix-qa.test-!room:matrix-qa.test.txt failed</code></li></ul>",
             mentions: {},
-            relatesTo: {
-              relType: "m.replace",
-              eventId: previewEventId,
-            },
+            replacesEventId: previewEventId,
           }),
           since: "driver-sync-progress",
         },
@@ -3446,10 +3430,7 @@ describe("matrix live qa scenarios", () => {
                 mockMessageBody(sendTextMessageValue, "sendTextMessage"),
                 "MATRIX_QA_TOOL_PROGRESS_MENTION_SAFE_FIXED",
               ),
-              relatesTo: {
-                relType: "m.replace",
-                eventId: previewEventId,
-              },
+              replacesEventId: previewEventId,
             }),
           since: "driver-sync-next",
         },
@@ -3817,29 +3798,24 @@ describe("matrix live qa scenarios", () => {
   it("waits for a real Matrix image attachment after image generation", async () => {
     const primeRoom = vi.fn().mockResolvedValue("driver-sync-start");
     const sendTextMessage = vi.fn().mockResolvedValue("$image-generate-trigger");
-    const waitForOptionalRoomEvent = vi
-      .fn()
-      .mockResolvedValueOnce({
-        matched: false,
-        since: "driver-sync-start",
-      })
-      .mockResolvedValueOnce({
-        event: {
-          kind: "message",
-          roomId: "!media:matrix-qa.test",
-          eventId: "$sut-image",
-          sender: "@sut:matrix-qa.test",
-          type: "m.room.message",
-          body: "Protocol note: generated the QA lighthouse image successfully.",
-          msgtype: "m.image",
-          attachment: {
-            kind: "image",
-            filename: "qa-lighthouse.png",
-          },
+    const waitForOptionalRoomEvent = vi.fn().mockResolvedValueOnce({
+      event: {
+        kind: "message",
+        roomId: "!media:matrix-qa.test",
+        eventId: "$sut-image",
+        sender: "@sut:matrix-qa.test",
+        type: "m.room.message",
+        body: "Protocol note: generated the QA lighthouse image successfully.",
+        originServerTs: Date.now() + 1_000,
+        msgtype: "m.image",
+        attachment: {
+          kind: "image",
+          filename: "qa-lighthouse.png",
         },
-        matched: true,
-        since: "driver-sync-next",
-      });
+      },
+      matched: true,
+      since: "driver-sync-next",
+    });
 
     createMatrixQaClient.mockReturnValue({
       primeRoom,
@@ -3895,6 +3871,7 @@ describe("matrix live qa scenarios", () => {
     expect(artifacts.attachmentKind).toBe("image");
     expect(artifacts.attachmentMsgtype).toBe("m.image");
     expect(artifacts.driverEventId).toBe("$image-generate-trigger");
+    expect(waitForOptionalRoomEvent).toHaveBeenCalledTimes(1);
 
     expectSentTextMessage(sendTextMessage, {
       bodyIncludes: "/tool image_generate action=generate",

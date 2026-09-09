@@ -85,6 +85,12 @@ describe("matrix observed event normalization", () => {
           "m.new_content": {
             body: "finalized",
             msgtype: "m.text",
+            // Matrix ignores relations inside replacement content. The
+            // observer inherits the original event's relation separately.
+            "m.relates_to": {
+              rel_type: "m.thread",
+              event_id: "$wrong-root",
+            },
           },
           "m.relates_to": {
             rel_type: "m.replace",
@@ -104,12 +110,7 @@ describe("matrix observed event normalization", () => {
       formattedBody: undefined,
       msgtype: "m.text",
       membership: undefined,
-      relatesTo: {
-        eventId: "$draft",
-        inReplyToId: undefined,
-        isFallingBack: undefined,
-        relType: "m.replace",
-      },
+      replacesEventId: "$draft",
     });
   });
 
@@ -336,6 +337,7 @@ describe("matrix observed event normalization", () => {
         event_id: "$redaction",
         sender: "@driver:matrix-qa.test",
         type: "m.room.redaction",
+        redacts: "$top-level-target",
         content: {},
       }),
     ).toEqual({
@@ -350,6 +352,33 @@ describe("matrix observed event normalization", () => {
       formattedBody: undefined,
       msgtype: undefined,
       membership: undefined,
+      redactsEventId: "$top-level-target",
+    });
+  });
+
+  it("normalizes legacy content-level Matrix redaction targets", () => {
+    expect(
+      normalizeMatrixQaObservedEvent("!room:matrix-qa.test", {
+        event_id: "$legacy-redaction",
+        sender: "@driver:matrix-qa.test",
+        type: "m.room.redaction",
+        content: {
+          redacts: "$content-target",
+        },
+      }),
+    ).toEqual({
+      kind: "redaction",
+      roomId: "!room:matrix-qa.test",
+      eventId: "$legacy-redaction",
+      sender: "@driver:matrix-qa.test",
+      stateKey: undefined,
+      type: "m.room.redaction",
+      originServerTs: undefined,
+      body: undefined,
+      formattedBody: undefined,
+      msgtype: undefined,
+      membership: undefined,
+      redactsEventId: "$content-target",
     });
   });
 });

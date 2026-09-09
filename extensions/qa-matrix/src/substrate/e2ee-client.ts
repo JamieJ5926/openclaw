@@ -24,7 +24,11 @@ import type {
   PluginStateSyncKeyedStore,
 } from "openclaw/plugin-sdk/plugin-state-runtime";
 import { buildMatrixQaMessageContent } from "./client.js";
-import { findMatrixQaObservedEventMatch, normalizeMatrixQaObservedEvent } from "./events.js";
+import {
+  findMatrixQaObservedEventMatch,
+  inheritMatrixQaReplacementRelation,
+  normalizeMatrixQaObservedEvent,
+} from "./events.js";
 import type { MatrixQaObservedEvent } from "./events.js";
 import type { MatrixQaRoomEventWaitResult } from "./sync.js";
 
@@ -206,6 +210,81 @@ function shouldRecordMatrixQaObservedEventUpdate(params: {
   );
 }
 
+function recordMatrixQaE2eeObservedEvent(params: {
+  event: MatrixRawEvent;
+  localEvents: MatrixQaObservedEvent[];
+  observedEvents: MatrixQaObservedEvent[];
+  observedEventsById: Map<string, MatrixQaObservedEvent>;
+  pendingReplacementIds: Set<string>;
+  roomId: string;
+}): MatrixQaObservedEvent | null {
+  const normalized = normalizeMatrixQaObservedEvent(params.roomId, params.event);
+  if (!normalized) {
+    return null;
+  }
+  const observed = inheritMatrixQaReplacementRelation({
+    event: normalized,
+    replacedEvent: normalized.replacesEventId
+      ? params.observedEventsById.get(normalized.replacesEventId)
+      : undefined,
+  });
+  if (
+    !shouldRecordMatrixQaObservedEventUpdate({
+      next: observed,
+      previous: params.observedEventsById.get(observed.eventId),
+    })
+  ) {
+    return null;
+  }
+  params.observedEventsById.set(observed.eventId, observed);
+  const append = (event: MatrixQaObservedEvent) => {
+    params.observedEventsById.set(event.eventId, event);
+    params.localEvents.push(event);
+    params.observedEvents.push(event);
+  };
+
+  if (observed.replacesEventId && !params.observedEventsById.has(observed.replacesEventId)) {
+    // Until the encrypted target arrives, this edit's logical relation is
+    // unknown. Do not expose it to top-level waiters as relation-free.
+    params.pendingReplacementIds.add(observed.eventId);
+    return observed;
+  }
+  append(observed);
+
+  for (const replacementId of params.pendingReplacementIds) {
+    const candidate = params.observedEventsById.get(replacementId);
+    if (!candidate || candidate.replacesEventId !== observed.eventId) {
+      continue;
+    }
+    const enriched = inheritMatrixQaReplacementRelation({
+      event: candidate,
+      replacedEvent: observed,
+    });
+    append(enriched);
+    params.pendingReplacementIds.delete(replacementId);
+  }
+
+  if (observed.relatesTo) {
+    for (const candidate of params.observedEventsById.values()) {
+      if (
+        candidate.replacesEventId !== observed.eventId ||
+        candidate.relatesTo ||
+        params.pendingReplacementIds.has(candidate.eventId)
+      ) {
+        continue;
+      }
+      const enriched = inheritMatrixQaReplacementRelation({
+        event: candidate,
+        replacedEvent: observed,
+      });
+      if (enriched !== candidate) {
+        append(enriched);
+      }
+    }
+  }
+  return observed;
+}
+
 export type MatrixQaE2eeScenarioClient = {
   acceptVerification(id: string): Promise<MatrixVerificationSummary>;
   bootstrapOwnDeviceVerification(params?: {
@@ -376,22 +455,18 @@ export async function createMatrixQaE2eeScenarioClient(
   const localEvents: MatrixQaObservedEvent[] = [];
   const verificationSummaries: MatrixVerificationSummary[] = [];
   const observedEventsById = new Map<string, MatrixQaObservedEvent>();
+  const pendingReplacementIds = new Set<string>();
   let cursorIndex = 0;
 
   const recordEvent = (roomId: string, event: MatrixRawEvent) => {
-    const normalized = normalizeMatrixQaObservedEvent(roomId, event);
-    if (
-      !normalized ||
-      !shouldRecordMatrixQaObservedEventUpdate({
-        next: normalized,
-        previous: observedEventsById.get(normalized.eventId),
-      })
-    ) {
-      return;
-    }
-    observedEventsById.set(normalized.eventId, normalized);
-    localEvents.push(normalized);
-    params.observedEvents.push(normalized);
+    recordMatrixQaE2eeObservedEvent({
+      event,
+      localEvents,
+      observedEvents: params.observedEvents,
+      observedEventsById,
+      pendingReplacementIds,
+      roomId,
+    });
   };
   client.on("room.message", recordEvent);
   const recordVerificationSummary = (summary: MatrixVerificationSummary) => {
@@ -583,6 +658,7 @@ export const testing = {
   MATRIX_QA_E2EE_SYNC_FILTER,
   buildMatrixQaE2eeStoragePaths,
   findMatrixQaObservedEventMatch,
+  recordMatrixQaE2eeObservedEvent,
   shouldRecordMatrixQaObservedEventUpdate,
 };
 export { testing as __testing };

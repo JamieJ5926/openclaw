@@ -3,6 +3,7 @@ export type MatrixQaRoomEvent = {
   content?: Record<string, unknown>;
   event_id?: string;
   origin_server_ts?: number;
+  redacts?: string;
   sender?: string;
   state_key?: string;
   type?: string;
@@ -63,6 +64,8 @@ export type MatrixQaObservedEvent = {
     eventId?: string;
     key?: string;
   };
+  replacesEventId?: string;
+  redactsEventId?: string;
   attachment?: MatrixQaObservedEventAttachment;
   approval?: MatrixQaObservedApproval;
 };
@@ -89,6 +92,25 @@ function resolveMatrixQaMessageContent(
     return newContent;
   }
   return content;
+}
+
+function normalizeMatrixQaRelation(value: unknown) {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  const relation = value as Record<string, unknown>;
+  const inReplyToRaw = relation["m.in_reply_to"];
+  const inReplyTo =
+    typeof inReplyToRaw === "object" && inReplyToRaw !== null
+      ? (inReplyToRaw as Record<string, unknown>)
+      : null;
+  return {
+    eventId: typeof relation.event_id === "string" ? relation.event_id : undefined,
+    inReplyToId: typeof inReplyTo?.event_id === "string" ? inReplyTo.event_id : undefined,
+    isFallingBack:
+      typeof relation.is_falling_back === "boolean" ? relation.is_falling_back : undefined,
+    relType: typeof relation.rel_type === "string" ? relation.rel_type : undefined,
+  };
 }
 
 function resolveMatrixQaObservedEventKind(params: { msgtype?: string; type: string }) {
@@ -214,12 +236,15 @@ export function normalizeMatrixQaObservedEvent(
     typeof relatesToRaw === "object" && relatesToRaw !== null
       ? (relatesToRaw as Record<string, unknown>)
       : null;
-  const inReplyToRaw = relatesTo?.["m.in_reply_to"];
-  const inReplyTo =
-    typeof inReplyToRaw === "object" && inReplyToRaw !== null
-      ? (inReplyToRaw as Record<string, unknown>)
-      : null;
   const messageContent = resolveMatrixQaMessageContent(content, relatesTo);
+  const replacesEventId =
+    relatesTo?.rel_type === "m.replace" && typeof relatesTo.event_id === "string"
+      ? relatesTo.event_id
+      : undefined;
+  // An edit's outer m.replace relation describes wire delivery, not the
+  // logical relation of the edited message. Matrix ignores relations inside
+  // m.new_content, so the observer must inherit the original event's relation.
+  const logicalRelation = replacesEventId ? undefined : normalizeMatrixQaRelation(relatesToRaw);
   const normalizedMsgtype =
     typeof messageContent.msgtype === "string" ? messageContent.msgtype : msgtype;
   const normalizedFilename =
@@ -248,6 +273,14 @@ export function normalizeMatrixQaObservedEvent(
   const approval = normalizeMatrixQaApprovalMetadata(
     messageContent[MATRIX_QA_APPROVAL_METADATA_KEY] ?? content[MATRIX_QA_APPROVAL_METADATA_KEY],
   );
+  const redactsEventId =
+    type === "m.room.redaction"
+      ? typeof event.redacts === "string"
+        ? event.redacts
+        : typeof content.redacts === "string"
+          ? content.redacts
+          : undefined
+      : undefined;
 
   return {
     kind: resolveMatrixQaObservedEventKind({ msgtype: normalizedMsgtype, type }),
@@ -263,19 +296,7 @@ export function normalizeMatrixQaObservedEvent(
       typeof messageContent.formatted_body === "string" ? messageContent.formatted_body : undefined,
     msgtype: normalizedMsgtype,
     membership: typeof content.membership === "string" ? content.membership : undefined,
-    ...(relatesTo
-      ? {
-          relatesTo: {
-            eventId: typeof relatesTo.event_id === "string" ? relatesTo.event_id : undefined,
-            inReplyToId: typeof inReplyTo?.event_id === "string" ? inReplyTo.event_id : undefined,
-            isFallingBack:
-              typeof relatesTo.is_falling_back === "boolean"
-                ? relatesTo.is_falling_back
-                : undefined,
-            relType: typeof relatesTo.rel_type === "string" ? relatesTo.rel_type : undefined,
-          },
-        }
-      : {}),
+    ...(logicalRelation ? { relatesTo: logicalRelation } : {}),
     ...(mentions
       ? {
           mentions: {
@@ -292,9 +313,21 @@ export function normalizeMatrixQaObservedEvent(
           },
         }
       : {}),
+    ...(redactsEventId ? { redactsEventId } : {}),
+    ...(replacesEventId ? { replacesEventId } : {}),
     ...(attachment ? { attachment } : {}),
     ...(approval ? { approval } : {}),
   };
+}
+
+export function inheritMatrixQaReplacementRelation(params: {
+  event: MatrixQaObservedEvent;
+  replacedEvent?: MatrixQaObservedEvent;
+}) {
+  if (!params.event.replacesEventId || params.event.relatesTo || !params.replacedEvent?.relatesTo) {
+    return params.event;
+  }
+  return { ...params.event, relatesTo: params.replacedEvent.relatesTo };
 }
 
 export function findMatrixQaObservedEventMatch(params: {

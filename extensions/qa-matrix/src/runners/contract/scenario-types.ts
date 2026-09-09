@@ -6,6 +6,7 @@ export type MatrixQaReplyArtifact = {
   eventId: string;
   mentions?: MatrixQaObservedEvent["mentions"];
   relatesTo?: MatrixQaObservedEvent["relatesTo"];
+  replacesEventId?: string;
   sender?: string;
   tokenMatched?: boolean;
 };

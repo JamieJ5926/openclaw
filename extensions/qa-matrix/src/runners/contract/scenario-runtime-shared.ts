@@ -193,6 +193,7 @@ export function buildMatrixReplyArtifact(
     eventId: event.eventId,
     mentions: event.mentions,
     relatesTo: event.relatesTo,
+    replacesEventId: event.replacesEventId,
     sender: event.sender,
     ...(token ? { tokenMatched: doesMatrixQaReplyBodyMatchToken(event, token) } : {}),
   };
@@ -205,6 +206,7 @@ export function buildMatrixReplyDetails(label: string, artifact: MatrixQaReplyAr
       artifact.tokenMatched === undefined ? "n/a" : artifact.tokenMatched ? "yes" : "no"
     }`,
     `${label} rel_type: ${artifact.relatesTo?.relType ?? "<none>"}`,
+    `${label} replaces: ${artifact.replacesEventId ?? "<none>"}`,
     `${label} in_reply_to: ${artifact.relatesTo?.inReplyToId ?? "<none>"}`,
     `${label} is_falling_back: ${artifact.relatesTo?.isFallingBack === true ? "true" : "false"}`,
   ];

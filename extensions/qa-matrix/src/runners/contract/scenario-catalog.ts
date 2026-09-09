@@ -424,6 +424,12 @@ export const MATRIX_QA_SCENARIOS: MatrixQaScenarioDefinition[] = [
     title: "Matrix generated images deliver as real image attachments while streaming",
     topology: MATRIX_QA_MEDIA_ROOM_TOPOLOGY,
     configOverrides: {
+      agentDefaults: {
+        imageGenerationModel: {
+          primary: "openai/gpt-image-1",
+        },
+      },
+      requiredPluginIds: ["openai"],
       streaming: "quiet",
     },
   },

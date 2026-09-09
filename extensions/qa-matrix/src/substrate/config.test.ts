@@ -100,6 +100,9 @@ describe("matrix qa config", () => {
             maxChars: 48,
             minChars: 1,
           },
+          imageGenerationModel: {
+            primary: "openai/gpt-image-1",
+          },
         },
         blockStreaming: true,
         dm: {
@@ -121,6 +124,7 @@ describe("matrix qa config", () => {
           },
         },
         replyToMode: "all",
+        requiredPluginIds: ["openai"],
         streaming: "quiet",
         threadBindings: {
           enabled: true,
@@ -151,6 +155,11 @@ describe("matrix qa config", () => {
       maxChars: 48,
       minChars: 1,
     });
+    expect(next.agents?.defaults?.imageGenerationModel).toEqual({
+      primary: "openai/gpt-image-1",
+    });
+    expect(next.plugins?.allow).toEqual(["matrix", "openai"]);
+    expect(next.plugins?.entries?.openai).toEqual({ enabled: true });
     expect(next.tools?.profile).toBe("coding");
     expect(next.tools?.media?.audio).toEqual({
       echoTranscript: false,

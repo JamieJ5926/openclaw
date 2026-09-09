@@ -199,6 +199,21 @@ export async function createMatrixQaTransportAdapter(
         if (!logicalConversation) {
           continue;
         }
+        const replacedMessageId = event.replacesEventId
+          ? busMessageIds.get(event.replacesEventId)
+          : undefined;
+        if (replacedMessageId) {
+          const outbound = await context.messages.editMessage({
+            accountId,
+            messageId: replacedMessageId,
+            text,
+            timestamp: event.originServerTs,
+          });
+          // Replacements update the logical message but relations still target
+          // the original Matrix event; only the reverse replacement map changes.
+          busMessageIds.set(event.eventId, outbound.id);
+          continue;
+        }
         const outbound = await context.messages.addOutboundMessage({
           accountId,
           to: buildQaTarget({

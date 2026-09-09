@@ -33,6 +33,9 @@ type MatrixQaAgentDefaultsOverrides = {
     maxChars?: number;
     minChars?: number;
   };
+  imageGenerationModel?: {
+    primary: string;
+  };
 };
 
 type MatrixQaToolConfigOverrides = {
@@ -100,6 +103,7 @@ export type MatrixQaConfigOverrides = {
   configuredBotRoles?: MatrixQaActorRole[];
   groupsByKey?: Record<string, MatrixQaGroupConfigOverrides>;
   replyToMode?: MatrixQaReplyToMode;
+  requiredPluginIds?: string[];
   startupVerification?: "if-unverified" | "off";
   streaming?: MatrixQaStreamingMode | MatrixQaStreamingConfig | boolean;
   textChunkLimit?: number;
@@ -581,7 +585,11 @@ export function buildMatrixQaConfig(
     topology: MatrixQaProvisionedTopology;
   },
 ): OpenClawConfig {
-  const pluginAllow = uniqueStrings([...(baseCfg.plugins?.allow ?? []), "matrix"]);
+  const pluginAllow = uniqueStrings([
+    ...(baseCfg.plugins?.allow ?? []),
+    "matrix",
+    ...(params.overrides?.requiredPluginIds ?? []),
+  ]);
   const snapshot = buildMatrixQaConfigSnapshot({
     driverUserId: params.driverUserId,
     observerUserId: params.observerUserId,
@@ -673,6 +681,12 @@ export function buildMatrixQaConfig(
       entries: {
         ...baseCfg.plugins?.entries,
         matrix: { enabled: true },
+        ...Object.fromEntries(
+          (params.overrides?.requiredPluginIds ?? []).map((pluginId) => [
+            pluginId,
+            { enabled: true },
+          ]),
+        ),
       },
     },
     messages: {
