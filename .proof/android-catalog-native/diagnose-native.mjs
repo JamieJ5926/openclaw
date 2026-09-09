@@ -7,7 +7,7 @@ const rawGroup=fs.readFileSync('/proc/self/cgroup','utf8');
 const group=rawGroup.trim().split('\n').find(line=>line.startsWith('0::'))?.slice(3);
 assert(/^[/]system[.]slice[/]android-catalog-hosted-[0-9]+-native[.]service$/.test(group));
 const counters={};for(const name of ['cpu.stat','memory.events'])counters[name]=fs.readFileSync('/sys/fs/cgroup'+group+'/'+name,'utf8');
-const commands=[['logcat',['logcat','-d','-v','time']],['system-ui-memory',['shell','dumpsys','meminfo','com.android.systemui']]];
+const commands=[['logcat',['logcat','-d','-v','time']],['system-ui-memory',['shell','dumpsys','meminfo','--local','com.android.systemui']]];
 const results=[];
 for(const [name,args] of commands){
  const stdout=prefix+'-'+name+'.stdout.txt',stderr=prefix+'-'+name+'.stderr.txt';
