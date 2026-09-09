@@ -11,6 +11,7 @@ import {
   executeSqliteQueryTakeFirstSync,
   getNodeSqliteKysely,
 } from "../../infra/kysely-sync.js";
+import { openClawStateDatabaseCache } from "../../state/openclaw-state-db-cache.js";
 import type {
   ChannelIngressEvents,
   DB as OpenClawStateKyselyDatabase,
@@ -20,6 +21,7 @@ import {
   openOpenClawStateDatabase,
   runOpenClawStateWriteTransaction,
 } from "../../state/openclaw-state-db.js";
+import { resolveOpenClawStateSqlitePath } from "../../state/openclaw-state-db.paths.js";
 import { registerChannelIngressDiagnosticSource } from "./ingress-diagnostic-registry.js";
 import type {
   ChannelIngressActiveOperationsSnapshot,
@@ -359,66 +361,64 @@ async function getChannelIngressDiagnosticSnapshot(
     channelId?: string;
     accountId?: string;
     queueName?: string;
-    access?: "read-write" | "read-only";
     activeOperations?:
       | ChannelIngressActiveOperationsSnapshot["operations"]
       | ChannelIngressActiveOperationsSnapshot;
   } = {},
 ): Promise<ChannelIngressObservabilitySnapshot> {
-  const handle = await openChannelIngressDatabaseForListing(
-    options.stateDir,
-    options.access ?? "read-only",
+  const env = options.stateDir ? createStateDirEnv(options.stateDir) : process.env;
+  const snapshot = openClawStateDatabaseCache.withCachedOpenClawStateDatabaseOwnerRead(
+    resolveOpenClawStateSqlitePath(env),
+    ({ db }) => {
+      const kysely = getChannelIngressKysely(db);
+      let activeQuery = kysely
+        .selectFrom("channel_ingress_events")
+        .select([
+          "event_id",
+          "channel_id",
+          "account_id",
+          "queue_name",
+          "status",
+          "metadata_json",
+          "received_at",
+          "updated_at",
+          "claimed_at",
+        ])
+        .where("status", "in", ["pending", "claimed"]);
+      let failedQuery = kysely
+        .selectFrom("channel_ingress_events")
+        .select((eb) => eb.fn.countAll<number>().as("count"))
+        .where("status", "=", "failed");
+      if (options.queueName) {
+        activeQuery = activeQuery.where("queue_name", "=", options.queueName);
+        failedQuery = failedQuery.where("queue_name", "=", options.queueName);
+      }
+      if (options.channelId) {
+        activeQuery = activeQuery.where("channel_id", "=", options.channelId);
+        failedQuery = failedQuery.where("channel_id", "=", options.channelId);
+      }
+      if (options.accountId) {
+        activeQuery = activeQuery.where("account_id", "=", options.accountId);
+        failedQuery = failedQuery.where("account_id", "=", options.accountId);
+      }
+      const failed = executeSqliteQueryTakeFirstSync(db, failedQuery);
+      return buildChannelIngressObservabilitySnapshot({
+        rows: executeSqliteQuerySync(db, activeQuery).rows,
+        sampledAt: now,
+        activeOperations: options.activeOperations,
+        failedCount: failed?.count ?? 0,
+      });
+    },
   );
-  if (!handle) {
-    return buildChannelIngressObservabilitySnapshot({
+  return (
+    snapshot ??
+    buildChannelIngressObservabilitySnapshot({
       rows: [],
       sampledAt: now,
       activeOperations: options.activeOperations,
       status: "unknown",
-    });
-  }
-  try {
-    const kysely = getChannelIngressKysely(handle.db);
-    let activeQuery = kysely
-      .selectFrom("channel_ingress_events")
-      .select([
-        "event_id",
-        "channel_id",
-        "account_id",
-        "queue_name",
-        "status",
-        "metadata_json",
-        "received_at",
-        "updated_at",
-        "claimed_at",
-      ])
-      .where("status", "in", ["pending", "claimed"]);
-    let failedQuery = kysely
-      .selectFrom("channel_ingress_events")
-      .select((eb) => eb.fn.countAll<number>().as("count"))
-      .where("status", "=", "failed");
-    if (options.queueName) {
-      activeQuery = activeQuery.where("queue_name", "=", options.queueName);
-      failedQuery = failedQuery.where("queue_name", "=", options.queueName);
-    }
-    if (options.channelId) {
-      activeQuery = activeQuery.where("channel_id", "=", options.channelId);
-      failedQuery = failedQuery.where("channel_id", "=", options.channelId);
-    }
-    if (options.accountId) {
-      activeQuery = activeQuery.where("account_id", "=", options.accountId);
-      failedQuery = failedQuery.where("account_id", "=", options.accountId);
-    }
-    const failed = executeSqliteQueryTakeFirstSync(handle.db, failedQuery);
-    return buildChannelIngressObservabilitySnapshot({
-      rows: executeSqliteQuerySync(handle.db, activeQuery).rows,
-      sampledAt: now,
-      activeOperations: options.activeOperations,
-      failedCount: failed?.count ?? 0,
-    });
-  } finally {
-    handle.release();
-  }
+    })
+  );
 }
 
 function affectedRows(result: { numAffectedRows?: bigint }): number {
@@ -1731,7 +1731,6 @@ export function createChannelIngressQueue<
       getChannelIngressDiagnosticSnapshot(sampledAt ?? now(), {
         stateDir: options.stateDir,
         queueName,
-        access: "read-only",
         activeOperations: snapshotOptions?.activeOperations,
       }),
     registerDiagnosticSource: (getActiveOperations) =>
@@ -1741,7 +1740,6 @@ export function createChannelIngressQueue<
         getSnapshot: (sampledAt, activeOperations) =>
           getChannelIngressDiagnosticSnapshot(sampledAt, {
             stateDir: options.stateDir,
-            access: "read-only",
             activeOperations,
           }),
       }),

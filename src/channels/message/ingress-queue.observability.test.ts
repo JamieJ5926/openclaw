@@ -247,7 +247,7 @@ describe("channel ingress queue observability", () => {
     });
   });
 
-  it("reports unknown without recreating storage when the registered queue database disappears", async () => {
+  it("reports unknown without recreating storage when the registered queue database path disappears", async () => {
     await withTempState(async (stateDir) => {
       const queue = createTestIngressQueue<{ text: string }>(stateDir);
       await queue.enqueue("event-1", { text: "stored" }, { receivedAt: 10 });
@@ -259,7 +259,6 @@ describe("channel ingress queue observability", () => {
         throw new Error("Expected queue diagnostic source registration");
       }
       try {
-        closeOpenClawStateDatabaseForTest();
         await fs.rm(databasePath, { force: true });
         await expect(fs.access(databasePath)).rejects.toMatchObject({ code: "ENOENT" });
 
@@ -292,6 +291,77 @@ describe("channel ingress queue observability", () => {
         );
         await expect(fs.access(databasePath)).rejects.toMatchObject({ code: "ENOENT" });
       } finally {
+        unregister();
+      }
+    });
+  });
+
+  it("reports unknown when a registered queue owner is closed before sampling", async () => {
+    await withTempState(async (stateDir) => {
+      const queue = createTestIngressQueue<{ text: string }>(stateDir);
+      await queue.enqueue("event-1", { text: "stored" }, { receivedAt: 10 });
+
+      const unregister = queue.registerDiagnosticSource?.(() => []);
+      if (!unregister) {
+        throw new Error("Expected queue diagnostic source registration");
+      }
+      try {
+        closeOpenClawStateDatabaseForTest();
+
+        const snapshot = await getDiagnosticIngressSnapshot(200);
+
+        expect(snapshot).toMatchObject({
+          type: "ingress.snapshot",
+          sampledAt: 200,
+          status: "unknown",
+          unknown: {
+            total: 0,
+            pending: 0,
+            claimed: 0,
+            unknownProgress: 0,
+          },
+        });
+      } finally {
+        unregister();
+      }
+    });
+  });
+
+  it("reports unknown instead of reading dirty rows from a registered queue transaction", async () => {
+    await withTempState(async (stateDir) => {
+      const queue = createTestIngressQueue<{ text: string }>(stateDir);
+      await queue.enqueue("event-1", { text: "stored" }, { receivedAt: 10 });
+      const database = openIngressStateDatabase(stateDir);
+
+      const unregister = queue.registerDiagnosticSource?.(() => []);
+      if (!unregister) {
+        throw new Error("Expected queue diagnostic source registration");
+      }
+      try {
+        database.db.exec("BEGIN;");
+        database.db
+          .prepare(
+            `UPDATE channel_ingress_events
+                SET received_at = ?, updated_at = ?
+              WHERE queue_name = ? AND event_id = ?`,
+          )
+          .run(20, 20, JSON.stringify(["test", "account"]), "event-1");
+
+        const snapshot = await getDiagnosticIngressSnapshot(200);
+
+        expect(snapshot).toMatchObject({
+          status: "unknown",
+          unknown: {
+            total: 0,
+            pending: 0,
+            claimed: 0,
+            unknownProgress: 0,
+          },
+        });
+      } finally {
+        if (database.db.isTransaction) {
+          database.db.exec("ROLLBACK;");
+        }
         unregister();
       }
     });
