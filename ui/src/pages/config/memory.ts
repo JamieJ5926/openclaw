@@ -14,6 +14,7 @@ import {
   renderSettingsValue,
 } from "../../components/settings-ui.ts";
 import { t } from "../../i18n/index.ts";
+import { registerDreamingEnglish } from "../../i18n/locales/en-dreaming.ts";
 import { registerMemoryImportEnglish } from "../../i18n/locales/en-memory-import.ts";
 import type { PluginCatalogItem } from "../../lib/plugins/index.ts";
 import {
@@ -23,6 +24,7 @@ import {
   type MemoryTab,
 } from "./memory-schema.ts";
 
+registerDreamingEnglish();
 registerMemoryImportEnglish();
 
 /** One installed plugin that can claim the exclusive `plugins.slots.memory` slot. */

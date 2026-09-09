@@ -93,8 +93,6 @@
   margin-block-start: calc(var(--chat-run-block-gap) - 2px);
 }
 
-
-
 .chat-group.tool {
   --chat-message-column-max: var(--chat-message-max-width, min(980px, 100%));
   display: block;
