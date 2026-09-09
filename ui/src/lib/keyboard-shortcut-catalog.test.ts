@@ -156,6 +156,7 @@ describe("keyboard shortcut catalog presentation", () => {
         .find((entry) => entry.id === id)?.combos;
 
     expect(entryCombos("startNewSession")).toEqual([KEYBOARD_SHORTCUT_COMBOS.modifiedEnter]);
+    expect(entryCombos("newSession")).toEqual([KEYBOARD_SHORTCUT_COMBOS.newSession]);
     expect(entryCombos("sendMessage")).toEqual([KEYBOARD_SHORTCUT_COMBOS.modifiedEnter]);
   });
 

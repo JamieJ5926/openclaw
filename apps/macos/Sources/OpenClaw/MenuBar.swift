@@ -91,7 +91,7 @@ struct OpenClawApp: App {
                 Button("New Thread") {
                     DashboardManager.shared.dispatchNativeCommand(.newSession)
                 }
-                .keyboardShortcut("n", modifiers: [.command, .shift])
+                .keyboardShortcut("n", modifiers: [.command, .option])
             }
             CommandGroup(replacing: .appSettings) {
                 Button("Settings…") {

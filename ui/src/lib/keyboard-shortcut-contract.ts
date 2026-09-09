@@ -9,6 +9,7 @@ type ShortcutDefinition<Key extends string> = {
 
 export const KEYBOARD_SHORTCUT_COMBOS = {
   commandPalette: { modifiers: ["mod"], key: "k", platformSpecific: true },
+  newSession: { modifiers: ["mod", "alt"], key: "n", platformSpecific: true },
   keyboardShortcuts: { modifiers: ["mod"], key: "/" },
   toggleSidebar: { modifiers: ["mod"], key: "b", platformSpecific: true },
   debugOverlay: { modifiers: ["mod", "shift"], key: "d" },
@@ -80,7 +81,13 @@ export function formatKeyboardShortcutCombo(
 // Most mod-chords accept either modifier. Platform-specific chords reserve
 // native editing keys (Mac Ctrl+B/F/K) for the focused text field.
 export function matchesShortcutCombo(combo: KeyboardShortcutCombo, event: KeyboardEvent): boolean {
-  if (event.isComposing || event.key === "Dead" || event.keyCode === 229) {
+  // AltGr is text input even on layouts where it reports Control+Alt.
+  if (
+    event.isComposing ||
+    event.key === "Dead" ||
+    event.keyCode === 229 ||
+    event.getModifierState("AltGraph")
+  ) {
     return false;
   }
   const wantsMod = combo.modifiers.includes("mod");
