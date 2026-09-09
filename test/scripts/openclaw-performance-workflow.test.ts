@@ -179,7 +179,7 @@ esac
 const CANONICAL_SCHEMA = "    mediaModels: z\n";
 const LEGACY_SCHEMA = "    imageGenerationModel: AgentToolModelSchema.optional(),\n";
 const SCHEMA_PATH = "src/config/zod-schema.agent-defaults.ts";
-const CALIBRATED_KOVA_REF = "cf6e26f0ca1241c9e7a626e96e66f392ff58012d";
+const CALIBRATED_KOVA_REF = "18c9eb8c3950a35794d196f4e40ad471e9308e27";
 
 function contentsMetadata(sourcePath: string, bytes: Buffer) {
   return {
@@ -520,9 +520,9 @@ describe("OpenClaw performance workflow", () => {
 
   it("pins the Kova evaluator with release validation contracts", () => {
     const workflow = readFileSync(WORKFLOW, "utf8");
-    const canonicalKovaRef = "cf6e26f0ca1241c9e7a626e96e66f392ff58012d";
-    const legacyKovaRef = "cf6e26f0ca1241c9e7a626e96e66f392ff58012d";
-    const trustedLiveKovaRef = "cf6e26f0ca1241c9e7a626e96e66f392ff58012d";
+    const canonicalKovaRef = "3da9582e9c3eef970ef102dc3950595e0876a1d5";
+    const legacyKovaRef = "3da9582e9c3eef970ef102dc3950595e0876a1d5";
+    const trustedLiveKovaRef = "3da9582e9c3eef970ef102dc3950595e0876a1d5";
     const install = findStep("Install OCM and Kova");
     const installRun = install.run ?? "";
     const resolveTarget = findStep("Resolve OpenClaw target ref", "resolve_target");
@@ -548,6 +548,8 @@ describe("OpenClaw performance workflow", () => {
     expect(resolveTarget.run).toContain("KOVA_CANONICAL_CONFIG_REF");
     expect(resolveTarget.run).toContain('kova_ref="${KOVA_REF_INPUT:-}"');
     expect(resolveTarget.run).not.toContain("OPENCLAW_CANONICAL_CONFIG_SINCE");
+    expect(resolveTarget.run).toContain('kova_ref="18c9eb8c3950a35794d196f4e40ad471e9308e27"');
+    expect(resolveTarget.run).toContain('kova_ref="${kova_ref:-$default_kova_ref}"');
     expect(resolveTarget.run).toContain(
       'kova_sha="$(gh api "repos/${KOVA_REPOSITORY}/commits/${encoded_kova_ref}" --jq .sha)"',
     );
@@ -589,30 +591,37 @@ describe("OpenClaw performance workflow", () => {
     expect(workflow).toContain("Kova live OpenAI GPT 5.6 agent turn");
   });
 
-  it("selects calibrated Kova only for the exact historical release", async () => {
-    const run = await runTargetResolution({
-      packageJson: JSON.stringify({ version: "2026.7.33" }),
-    });
-    expect(run.result.status, run.result.stderr).toBe(0);
-    expect(run.outputs.kova_ref).toBe(CALIBRATED_KOVA_REF);
-    expect(run.outputs.kova_config_contract).toBe("canonical");
-    expect(run.outputs.kova_ref_trusted_for_live).toBe("false");
-    expect(run.requestedPaths).toEqual(["package.json", SCHEMA_PATH]);
-    expect(run.requests).toBe(2);
-    const trust = runCandidateTrustClassification({
-      candidateSha: run.outputs.tested_sha,
-      eventName: "workflow_dispatch",
-      kovaSha: run.outputs.kova_ref,
-      ref: "refs/heads/main",
-      workflowSha: run.outputs.tested_sha,
-    });
-    expect(trust.result.status, trust.result.stderr).toBe(0);
-    expect(trust.outputs).toEqual({
-      secret_eligible: "false",
-      cache_write_allowed: "false",
-      external_required: "true",
-    });
-  });
+  it.each([false, true])(
+    "selects calibrated Kova for the exact historical release (external: %s)",
+    async (external) => {
+      const run = await runTargetResolution({
+        external,
+        packageJson: JSON.stringify({ version: "2026.7.33" }),
+      });
+      const workflowSha = (external ? "e" : "c").repeat(40);
+      expect(run.result.status, run.result.stderr).toBe(0);
+      expect(run.outputs.tested_sha).toBe("c".repeat(40));
+      expect(run.outputs.tested_sha === workflowSha).toBe(!external);
+      expect(run.outputs.kova_ref).toBe(CALIBRATED_KOVA_REF);
+      expect(run.outputs.kova_config_contract).toBe("canonical");
+      expect(run.outputs.kova_ref_trusted_for_live).toBe("false");
+      expect(run.requestedPaths).toEqual(["package.json", SCHEMA_PATH]);
+      expect(run.requests).toBe(2);
+      const trust = runCandidateTrustClassification({
+        candidateSha: run.outputs.tested_sha,
+        eventName: "workflow_dispatch",
+        kovaSha: run.outputs.kova_ref,
+        ref: "refs/heads/main",
+        workflowSha,
+      });
+      expect(trust.result.status, trust.result.stderr).toBe(0);
+      expect(trust.outputs).toEqual({
+        secret_eligible: "false",
+        cache_write_allowed: "false",
+        external_required: "true",
+      });
+    },
+  );
 
   it.each([
     { name: "historical candidate", workflowSha: "e".repeat(40), eligible: "false" },
@@ -620,17 +629,13 @@ describe("OpenClaw performance workflow", () => {
   ])(
     "resolves the shared calibrated pin without granting $name extra trust",
     async ({ workflowSha, eligible }) => {
-      const pins = expectDefined(readWorkflow().env, "performance workflow pins");
-      const canonicalRef = expectDefined(pins.KOVA_CANONICAL_CONFIG_REF, "canonical Kova pin");
+      const canonicalRef = CALIBRATED_KOVA_REF;
       const run = await runTargetResolution({
         packageJson: JSON.stringify({ version: "2026.7.33" }),
         overrides: {
           KOVA_CANONICAL_CONFIG_REF: canonicalRef,
-          KOVA_LEGACY_LIST_CONFIG_REF: expectDefined(
-            pins.KOVA_LEGACY_LIST_CONFIG_REF,
-            "legacy Kova pin",
-          ),
-          KOVA_TRUSTED_LIVE_REF: expectDefined(pins.KOVA_TRUSTED_LIVE_REF, "trusted live Kova pin"),
+          KOVA_LEGACY_LIST_CONFIG_REF: canonicalRef,
+          KOVA_TRUSTED_LIVE_REF: canonicalRef,
         },
       });
       expect(run.result.status, run.result.stderr).toBe(0);
@@ -2235,6 +2240,12 @@ printf '%s\\n' \
   it("requires Kova evidence before uploading selected lane artifacts", () => {
     const validateEvidence = findStep("Validate Kova evidence");
     const upload = findStep("Upload Kova artifacts");
+    const retryUpload = findStep("Retry Kova artifact upload");
+    const sourceUpload = findStep("Upload source performance artifacts", "source_performance");
+    const retrySourceUpload = findStep(
+      "Retry source performance artifact upload",
+      "source_performance",
+    );
 
     expect(validateEvidence.if).toContain("always()");
     expect(validateEvidence.if).toContain("steps.lane.outputs.run == 'true'");
@@ -2243,5 +2254,15 @@ printf '%s\\n' \
     expect(validateEvidence.run).toContain('"$SUMMARY_DIR/${LANE_ID}.md"');
     expect(validateEvidence.run).toContain("exit 1");
     expect(upload.with?.["if-no-files-found"]).toBe("error");
+    expect(upload.id).toBe("upload_kova_artifacts");
+    expect(upload["continue-on-error"]).toBe(true);
+    expect(retryUpload.if).toContain("steps.upload_kova_artifacts.outcome == 'failure'");
+    expect(retryUpload.with?.overwrite).toBe(true);
+    expect(sourceUpload.id).toBe("upload_source_performance_artifacts");
+    expect(sourceUpload["continue-on-error"]).toBe(true);
+    expect(retrySourceUpload.if).toContain(
+      "steps.upload_source_performance_artifacts.outcome == 'failure'",
+    );
+    expect(retrySourceUpload.with?.overwrite).toBe(true);
   });
 });

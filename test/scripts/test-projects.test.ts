@@ -1103,7 +1103,10 @@ describe("scripts/test-projects changed-target routing", () => {
     },
     {
       changedPath: ".github/actions/setup-node-env/action.yml",
-      exactTargets: ["test/scripts/install-trufflehog.test.ts"],
+      exactTargets: [
+        "test/scripts/install-trufflehog.test.ts",
+        "test/scripts/setup-node-env-bun.test.ts",
+      ],
     },
   ])("unions exact owners and references for $changedPath", ({ changedPath, exactTargets }) => {
     withTinyGitRepo(
@@ -1120,6 +1123,13 @@ describe("scripts/test-projects changed-target routing", () => {
         expect(targets).toContain("test/scripts/direct-workflow-reference.test.ts");
         expect(targets).toContain("test/scripts/ci-workflow-guards.test.ts");
       },
+    );
+  });
+
+  it("routes the Bun image consumer to its executable action regression", () => {
+    expectChangedTargets(
+      [".github/actions/setup-node-env/seed-bun-from-image.mjs"],
+      ["test/scripts/setup-node-env-bun.test.ts"],
     );
   });
 
@@ -1174,6 +1184,7 @@ describe("scripts/test-projects changed-target routing", () => {
         "test/scripts/npm-prepared-bundle.test.ts",
         "test/scripts/openclaw-npm-resume-run.test.ts",
         "test/scripts/release-candidate-checklist.test.ts",
+        "test/scripts/verify-stable-main-closeout.test.ts",
         "test/scripts/ci-workflow-guards.test.ts",
       ],
     );
@@ -1335,6 +1346,7 @@ describe("scripts/test-projects changed-target routing", () => {
         [
           "test/scripts/ci-workflow-guards.test.ts",
           "test/scripts/package-acceptance-workflow.test.ts",
+          "test/scripts/setup-pnpm-store-cache-image.test.ts",
         ],
       ],
     ]);

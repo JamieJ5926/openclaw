@@ -93,11 +93,11 @@ env:
   OCM_VERSION: v0.2.33
   OCM_LINUX_X64_SHA256: 06b0e46791e750eb044e4a898b6643ad5e7b20224fe0c64f160e35a42f08d00a
   KOVA_REPOSITORY: openclaw/Kova
-  KOVA_CANONICAL_CONFIG_REF: cf6e26f0ca1241c9e7a626e96e66f392ff58012d
-  KOVA_LEGACY_LIST_CONFIG_REF: cf6e26f0ca1241c9e7a626e96e66f392ff58012d
-  KOVA_TRUSTED_LIVE_REF: cf6e26f0ca1241c9e7a626e96e66f392ff58012d
+  KOVA_CANONICAL_CONFIG_REF: 3da9582e9c3eef970ef102dc3950595e0876a1d5
+  KOVA_LEGACY_LIST_CONFIG_REF: 3da9582e9c3eef970ef102dc3950595e0876a1d5
+  KOVA_TRUSTED_LIVE_REF: 3da9582e9c3eef970ef102dc3950595e0876a1d5
   # Reviewed cross-user evaluator for secretless external runs.
-  KOVA_ISOLATED_REF: da14529c14f0e485fead894c322ae593964e56cf
+  KOVA_ISOLATED_REF: ca0705a20f4d5a1f09dfcc59ce0e5de921b89a2b
   PERFORMANCE_OCM_COMMIT: 46496ba70f20cabf5a0b96fb88bc26e77567126f
   PERFORMANCE_OCM_RUST_TOOLCHAIN: 1.95.0
   OPENCLAW_CANONICAL_CONFIG_SINCE: edecdbd05efc98c4f580309ac89e8459462f00c9
@@ -151,6 +151,7 @@ jobs:
 
           kova_ref="${KOVA_REF_INPUT:-}"
           kova_config_contract="${KOVA_CONFIG_CONTRACT_INPUT:-}"
+          calibrated=false
           [[ "$kova_ref" != *$'\n'* && "$kova_ref" != *$'\r'* ]] ||
             { echo "::error::kova_ref must be a single line."; exit 1; }
           [[ "$kova_config_contract" != *$'\n'* && "$kova_config_contract" != *$'\r'* ]] ||
@@ -279,11 +280,11 @@ jobs:
           });
           NODE
             )"
-            if [[ "$(jq -r '.calibrated' <<<"$metadata")" == true ]]; then
-              # Kova #116 carries the historical 250% status CLI calibration for this release only;
-              # Kova #118 keeps process-census time out of CPU scan uncertainty;
-              # Kova #119 discovers a starting gateway before its zero baseline is lost.
-              kova_ref="cf6e26f0ca1241c9e7a626e96e66f392ff58012d"
+            calibrated="$(jq -r '.calibrated' <<<"$metadata")"
+            if [[ "$calibrated" == true ]]; then
+              # This compatibility ref keeps Kova #116's historical 250% status CLI calibration
+              # while backporting #118-#120's complete CPU-accounting fixes for this release only.
+              kova_ref="18c9eb8c3950a35794d196f4e40ad471e9308e27"
             fi
             detected_contract="$(jq -r '.contract' <<<"$metadata")"
             default_kova_ref=""
@@ -304,7 +305,7 @@ jobs:
             kova_ref="${kova_ref:-$default_kova_ref}"
             kova_config_contract="${kova_config_contract:-$detected_contract}"
           fi
-          if [[ -z "${KOVA_REF_INPUT:-}" &&
+          if [[ -z "${KOVA_REF_INPUT:-}" && "$calibrated" != true &&
             ( "$GITHUB_REF" != "refs/heads/${DEFAULT_BRANCH}" || "$resolved_sha" != "$WORKFLOW_SHA" ) ]]; then
             [[ "$KOVA_ISOLATED_REF" =~ ^[0-9a-f]{40}$ ]] ||
               { echo "::error::The reviewed cross-user Kova dependency is not pinned."; exit 1; }
@@ -848,7 +849,9 @@ jobs:
           fi
 
       - name: Upload Kova artifacts
+        id: upload_kova_artifacts
         if: ${{ always() && steps.lane.outputs.run == 'true' }}
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: openclaw-performance-${{ matrix.lane }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -858,6 +861,19 @@ jobs:
             .artifacts/kova/summaries/${{ matrix.lane }}.md
           if-no-files-found: error
           retention-days: ${{ matrix.deep_profile == 'true' && 14 || 30 }}
+
+      - name: Retry Kova artifact upload
+        if: ${{ always() && steps.lane.outputs.run == 'true' && steps.upload_kova_artifacts.outcome == 'failure' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: openclaw-performance-${{ matrix.lane }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .artifacts/kova/reports/${{ matrix.lane }}
+            .artifacts/kova/bundles/${{ matrix.lane }}
+            .artifacts/kova/summaries/${{ matrix.lane }}.md
+          if-no-files-found: error
+          retention-days: ${{ matrix.deep_profile == 'true' && 14 || 30 }}
+          overwrite: true
 
   source_performance:
     name: OpenClaw source performance probes
@@ -1188,7 +1204,9 @@ jobs:
           cat "$SOURCE_PERF_DIR/index.md" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload source performance artifacts
+        id: upload_source_performance_artifacts
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: openclaw-performance-source-${{ github.run_id }}-${{ github.run_attempt }}
@@ -1196,10 +1214,20 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Retry source performance artifact upload
+        if: ${{ always() && steps.upload_source_performance_artifacts.outcome == 'failure' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: openclaw-performance-source-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .artifacts/openclaw-performance/source
+          if-no-files-found: error
+          retention-days: 30
+          overwrite: true
+
   external_performance:
     name: External ${{ matrix.title }}
     needs: resolve_target
-    if: ${{ (github.event_name == 'schedule' || inputs.mode != 'vitest-pair') && needs.resolve_target.outputs.external_required == 'true' }}
+    if: ${{ (github.event_name == 'schedule' || inputs.mode != 'vitest-pair') && (needs.resolve_target.outputs.external_required == 'true' || inputs.cleanup_probe) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     strategy:
@@ -1242,7 +1270,10 @@ jobs:
         run: |
           set -euo pipefail
           run=true
-          if [[ "${{ matrix.lane }}" == "mock-deep-profile" &&
+          if [[ "${{ matrix.lane }}" != "cleanup-probe" &&
+            "${{ needs.resolve_target.outputs.external_required }}" != "true" ]]; then
+            run=false
+          elif [[ "${{ matrix.lane }}" == "mock-deep-profile" &&
             "$GITHUB_EVENT_NAME" != "schedule" &&
             "${{ inputs.deep_profile || 'false' }}" != "true" ]]; then
             run=false

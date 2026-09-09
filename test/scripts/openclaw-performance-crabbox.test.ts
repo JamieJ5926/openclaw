@@ -1279,6 +1279,94 @@ validate_kova mock-provider "$ROOT" diagnostic 1 scenario:probe - "$GATED" "$ROO
     ]);
   });
 
+  it.each([
+    {
+      name: "exact-main cleanup with deep profiling requested",
+      external: false,
+      cleanup: true,
+      deep: true,
+      event: "workflow_dispatch",
+      enabled: ["cleanup-probe"],
+    },
+    {
+      name: "exact-main without cleanup",
+      external: false,
+      cleanup: false,
+      deep: true,
+      event: "workflow_dispatch",
+      enabled: [],
+    },
+    {
+      name: "external defaults",
+      external: true,
+      cleanup: false,
+      deep: false,
+      event: "workflow_dispatch",
+      enabled: ["mock-provider", "source"],
+    },
+    {
+      name: "external deep profiling and cleanup",
+      external: true,
+      cleanup: true,
+      deep: true,
+      event: "workflow_dispatch",
+      enabled: ["mock-provider", "mock-deep-profile", "source", "cleanup-probe"],
+    },
+    {
+      name: "external scheduled deep profiling",
+      external: true,
+      cleanup: false,
+      deep: false,
+      event: "schedule",
+      enabled: ["mock-provider", "mock-deep-profile", "source"],
+    },
+    {
+      name: "exact-main schedule without cleanup",
+      external: false,
+      cleanup: false,
+      deep: false,
+      event: "schedule",
+      enabled: [],
+    },
+  ])("enables only requested external lanes: $name", (entry) => {
+    const workflow = parse(readFileSync(WORKFLOW, "utf8"));
+    const step = workflow.jobs.external_performance.steps.find(
+      (candidate: { name: string }) => candidate.name === "Decide external lane",
+    );
+    const run: unknown = step?.run;
+    if (typeof run !== "string") {
+      throw new Error("External lane decision must be a shell step");
+    }
+    const root = tempDirs.make("openclaw-performance-lane-");
+    for (const lane of ["mock-provider", "mock-deep-profile", "source", "cleanup-probe"]) {
+      const output = join(root, lane);
+      const result = spawnSync(
+        "/bin/bash",
+        [
+          "-c",
+          run
+            .replaceAll("${{ matrix.lane }}", lane)
+            .replaceAll(
+              "${{ needs.resolve_target.outputs.external_required }}",
+              String(entry.external),
+            )
+            .replaceAll("${{ inputs.deep_profile || 'false' }}", String(entry.deep))
+            .replaceAll("${{ inputs.cleanup_probe || 'false' }}", String(entry.cleanup)),
+        ],
+        {
+          env: {
+            PATH: process.env.PATH,
+            GITHUB_EVENT_NAME: entry.event,
+            GITHUB_OUTPUT: output,
+          },
+          encoding: "utf8",
+        },
+      );
+      expect(result.status, `${lane}: ${result.stderr}`).toBe(0);
+      expect(readFileSync(output, "utf8"), lane).toBe(`run=${entry.enabled.includes(lane)}\n`);
+    }
+  });
+
   it("keeps candidate bytes off Actions runners and stops every lease", () => {
     const workflow = readFileSync(WORKFLOW, "utf8");
     const script = readFileSync(SCRIPT, "utf8");
@@ -1366,7 +1454,9 @@ validate_kova mock-provider "$ROOT" diagnostic 1 scenario:probe - "$GATED" "$ROO
     expect(sourcePerformance.if).toContain(
       "needs.resolve_target.outputs.external_required != 'true'",
     );
-    expect(external.if).toContain("needs.resolve_target.outputs.external_required == 'true'");
+    expect(external.if).toBe(
+      "${{ (github.event_name == 'schedule' || inputs.mode != 'vitest-pair') && (needs.resolve_target.outputs.external_required == 'true' || inputs.cleanup_probe) }}",
+    );
     expect(checkout?.with?.ref).toBe("${{ github.workflow_sha }}");
     expect(checkouts?.map((step) => step.with?.ref)).toEqual(["${{ github.workflow_sha }}"]);
     expect(secretSteps?.map((step) => step.name)).toEqual([
