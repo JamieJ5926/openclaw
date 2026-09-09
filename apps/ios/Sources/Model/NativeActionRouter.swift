@@ -250,8 +250,11 @@ final class NativeActionRouter: OpenClawNativeActionHost {
                transport.nativeBinding?.matches(binding) == true
             {
                 let presented = PresentedChat(
-                    gateway: captured.gateway, binding: binding, chat: chat,
-                    transport: transport, presentationID: presentation.id)
+                    gateway: captured.gateway,
+                    binding: binding,
+                    chat: chat,
+                    transport: transport,
+                    presentationID: presentation.id)
                 if self.isCurrent(presented), run == nil || self.presentedInspection == run {
                     return presented
                 }

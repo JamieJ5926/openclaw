@@ -16,12 +16,6 @@ private struct ChatScrollEdgeTreatment: ViewModifier {
 }
 
 struct ChatProTab: View {
-    enum GatewayStatusTone: Equatable {
-        case success
-        case warning
-        case error
-    }
-
     private struct TranscriptShareItem: Identifiable {
         let id = UUID()
         let fileURL: URL
@@ -850,26 +844,6 @@ struct ChatProTab: View {
             currentOwnerID: self.appModel.chatViewModelOwnerID)
     }
 
-    nonisolated static func presentationGatewayState(
-        current: GatewayDisplayState,
-        isAttachmentOwnerPinned: Bool,
-        capturedOwnerID: String,
-        currentOwnerID: String) -> GatewayDisplayState
-    {
-        if isAttachmentOwnerPinned, capturedOwnerID != currentOwnerID {
-            return .disconnected
-        }
-        return current
-    }
-
-    /// Attachment pinning blocks new capture, but starting or active capture must keep its stop control.
-    nonisolated static func shouldExposeCaptureControl(
-        isAttachmentOwnerPinned: Bool,
-        isCaptureInFlight: Bool) -> Bool
-    {
-        !isAttachmentOwnerPinned || isCaptureInFlight
-    }
-
     private var gatewayAccessibilityLabel: String {
         "Gateway: \(Self.gatewayStatusTitle(state: self.gatewayDisplayState, isGatewayUsable: self.gatewayConnected))"
     }
@@ -885,43 +859,6 @@ struct ChatProTab: View {
             OpenClawBrand.statusWarning
         case .error:
             OpenClawBrand.statusError
-        }
-    }
-
-    nonisolated static func gatewayStatusTone(
-        state: GatewayDisplayState,
-        isGatewayUsable: Bool) -> GatewayStatusTone
-    {
-        switch state {
-        case .connected:
-            isGatewayUsable ? .success : .warning
-        case .connecting, .error:
-            .warning
-        case .disconnected:
-            .error
-        }
-    }
-
-    nonisolated static func gatewayStatusShouldExpand(
-        state: GatewayDisplayState,
-        isGatewayUsable: Bool,
-        isManuallyExpanded: Bool) -> Bool
-    {
-        isManuallyExpanded || self.gatewayStatusTone(
-            state: state,
-            isGatewayUsable: isGatewayUsable) != .success
-    }
-
-    nonisolated static func gatewayStatusTitle(state: GatewayDisplayState, isGatewayUsable: Bool) -> String {
-        switch state {
-        case .connected:
-            isGatewayUsable ? "Connected" : "Unavailable"
-        case .connecting:
-            "Connecting"
-        case .error:
-            "Attention"
-        case .disconnected:
-            "Offline"
         }
     }
 
@@ -1056,5 +993,70 @@ struct ChatProTab: View {
         guard let value else { return nil }
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+extension ChatProTab {
+    enum GatewayStatusTone: Equatable {
+        case success
+        case warning
+        case error
+    }
+
+    nonisolated static func presentationGatewayState(
+        current: GatewayDisplayState,
+        isAttachmentOwnerPinned: Bool,
+        capturedOwnerID: String,
+        currentOwnerID: String) -> GatewayDisplayState
+    {
+        if isAttachmentOwnerPinned, capturedOwnerID != currentOwnerID {
+            return .disconnected
+        }
+        return current
+    }
+
+    /// Attachment pinning blocks new capture, but starting or active capture must keep its stop control.
+    nonisolated static func shouldExposeCaptureControl(
+        isAttachmentOwnerPinned: Bool,
+        isCaptureInFlight: Bool) -> Bool
+    {
+        !isAttachmentOwnerPinned || isCaptureInFlight
+    }
+
+    nonisolated static func gatewayStatusTone(
+        state: GatewayDisplayState,
+        isGatewayUsable: Bool) -> GatewayStatusTone
+    {
+        switch state {
+        case .connected:
+            isGatewayUsable ? .success : .warning
+        case .connecting, .error:
+            .warning
+        case .disconnected:
+            .error
+        }
+    }
+
+    nonisolated static func gatewayStatusShouldExpand(
+        state: GatewayDisplayState,
+        isGatewayUsable: Bool,
+        isManuallyExpanded: Bool) -> Bool
+    {
+        isManuallyExpanded || self.gatewayStatusTone(
+            state: state,
+            isGatewayUsable: isGatewayUsable) != .success
+    }
+
+    nonisolated static func gatewayStatusTitle(state: GatewayDisplayState, isGatewayUsable: Bool) -> String {
+        switch state {
+        case .connected:
+            isGatewayUsable ? "Connected" : "Unavailable"
+        case .connecting:
+            "Connecting"
+        case .error:
+            "Attention"
+        case .disconnected:
+            "Offline"
+        }
     }
 }
