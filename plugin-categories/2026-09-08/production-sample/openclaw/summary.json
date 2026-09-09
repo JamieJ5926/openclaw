@@ -1,0 +1,1770 @@
+{
+  "status": "partial",
+  "mode": "before-after",
+  "scenario": "production-sample-plugin-categories-and-document-routing",
+  "provider": "real-local-gateway-local-convex-agent-host-chromium",
+  "baseline": "5ee48626b8db9c97a443fc51c1edc631530c84a0",
+  "candidate": "c8960487ad31f42647c2f133ad3a78b8dbab054a",
+  "scope": "100 public production plugins restored to disposable local Convex; 40 accepted bundled updates. Real model classification of 59 plugins remains pending credentials; one package lacks bounded manifest evidence.",
+  "gateway": {
+    "runtimeBuild": {
+      "version": "2026.9.3",
+      "commit": "c8960487ad31f42647c2f133ad3a78b8dbab054a",
+      "builtAt": "2026-09-09T03:13:11.843Z",
+      "buildId": "2026.9.3-c8960487ad31-2026-09-09T03-13-11.843Z"
+    },
+    "checkedAt": "2026-09-09T03:14:48.452Z",
+    "openclawHead": "c8960487ad31f42647c2f133ad3a78b8dbab054a",
+    "bundledInventoryHead": "5ee48626b8db9c97a443fc51c1edc631530c84a0",
+    "registry": "http://127.0.0.1:3321",
+    "categoryCount": 21,
+    "categoryCatalogMatchesLocal": true,
+    "categories": [
+      {
+        "slug": "channels",
+        "label": "Channels",
+        "description": "Messaging transports that let people talk to the agent through a channel.",
+        "icon": "message-circle",
+        "order": 0
+      },
+      {
+        "slug": "models",
+        "label": "Models",
+        "description": "Model providers, inference backends, and model routing.",
+        "icon": "brain",
+        "order": 1
+      },
+      {
+        "slug": "memory",
+        "label": "Memory",
+        "description": "Memory providers, embeddings, and retrieval.",
+        "icon": "database",
+        "order": 2
+      },
+      {
+        "slug": "context",
+        "label": "Context",
+        "description": "Context engines and context management.",
+        "icon": "book-open",
+        "order": 3
+      },
+      {
+        "slug": "voice",
+        "label": "Voice",
+        "description": "Speech synthesis, transcription, voice calls, and audio interaction.",
+        "icon": "message-square",
+        "order": 4
+      },
+      {
+        "slug": "web",
+        "label": "Web",
+        "description": "Web search providers, browser control, and fetching web pages.",
+        "icon": "globe",
+        "order": 5
+      },
+      {
+        "slug": "media",
+        "label": "Media",
+        "description": "Image, video, audio, and other media understanding or generation.",
+        "icon": "palette",
+        "order": 6
+      },
+      {
+        "slug": "security",
+        "label": "Security",
+        "description": "Authentication, authorization, security controls, and policy enforcement.",
+        "icon": "shield",
+        "order": 7
+      },
+      {
+        "slug": "integrations",
+        "label": "Integrations",
+        "description": "General connectors, API bridges, and service integration platforms. Prefer a specific use category when the connected service has a clear purpose.",
+        "icon": "plug",
+        "order": 8
+      },
+      {
+        "slug": "developer-tools",
+        "label": "Developer tools",
+        "description": "Writing, reviewing, testing, and debugging software; coding agents and development environments.",
+        "icon": "code-xml",
+        "order": 9
+      },
+      {
+        "slug": "infrastructure",
+        "label": "Infrastructure",
+        "description": "Deploying, hosting, monitoring, and operating systems, networks, services, and agent runtimes.",
+        "icon": "server",
+        "order": 10
+      },
+      {
+        "slug": "documents-files",
+        "label": "Documents & files",
+        "description": "Reading, creating, extracting, transferring, and managing documents and files.",
+        "icon": "files",
+        "order": 11
+      },
+      {
+        "slug": "inbox-collaboration",
+        "label": "Inbox & collaboration",
+        "description": "Managing email, inboxes, team communication, and collaborative workspaces. Channel transport alone belongs in Channels.",
+        "icon": "inbox",
+        "order": 12
+      },
+      {
+        "slug": "productivity",
+        "label": "Productivity",
+        "description": "Tasks, notes, projects, planning, and personal or team work management.",
+        "icon": "list-todo",
+        "order": 13
+      },
+      {
+        "slug": "scheduling",
+        "label": "Scheduling",
+        "description": "Calendars, appointments, availability, and booking. Technical job scheduling belongs with the workflow it supports.",
+        "icon": "calendar-days",
+        "order": 14
+      },
+      {
+        "slug": "finance-payments",
+        "label": "Finance & payments",
+        "description": "Payments, banking, accounting, financial markets, trading, and financial analysis.",
+        "icon": "wallet-cards",
+        "order": 15
+      },
+      {
+        "slug": "sales-marketing",
+        "label": "Sales & marketing",
+        "description": "Customer relationships, sales, support, outreach, campaigns, and marketing operations.",
+        "icon": "megaphone",
+        "order": 16
+      },
+      {
+        "slug": "data-analytics",
+        "label": "Data & analytics",
+        "description": "Querying databases, processing datasets, analysis, reporting, and business intelligence. Agent memory storage belongs in Memory.",
+        "icon": "chart-no-axes-combined",
+        "order": 17
+      },
+      {
+        "slug": "agent-orchestration",
+        "label": "Agent orchestration",
+        "description": "Coordinating agents, delegating work, and running multi-step agent workflows.",
+        "icon": "workflow",
+        "order": 18
+      },
+      {
+        "slug": "research",
+        "label": "Research",
+        "description": "Investigating topics, finding and evaluating sources, scientific literature, and synthesizing evidence. General web access belongs in Web.",
+        "icon": "search",
+        "order": 19
+      },
+      {
+        "slug": "other",
+        "label": "Other",
+        "description": "Plugins that do not yet fit another browse category.",
+        "icon": "package",
+        "order": 20
+      }
+    ],
+    "catalogComparisons": [
+      {
+        "name": "@openclaw/whatsapp",
+        "categories": [
+          "channels",
+          "voice"
+        ],
+        "expected": [
+          "channels",
+          "voice"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/matrix",
+        "categories": [
+          "channels"
+        ],
+        "expected": [
+          "channels"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/codex",
+        "categories": [
+          "developer-tools",
+          "agent-orchestration",
+          "web"
+        ],
+        "expected": [
+          "developer-tools",
+          "agent-orchestration",
+          "web"
+        ],
+        "matched": true
+      },
+      {
+        "name": "chrome-openclaw-sider",
+        "categories": [
+          "channels",
+          "runtime"
+        ],
+        "expected": [
+          "channels",
+          "runtime"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@gendigital/sage-openclaw",
+        "categories": [
+          "other"
+        ],
+        "expected": [
+          "other"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/discord",
+        "categories": [
+          "channels",
+          "voice"
+        ],
+        "expected": [
+          "channels",
+          "voice"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/feishu",
+        "categories": [
+          "channels",
+          "documents-files",
+          "inbox-collaboration"
+        ],
+        "expected": [
+          "channels",
+          "documents-files",
+          "inbox-collaboration"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/memory-lancedb",
+        "categories": [
+          "memory"
+        ],
+        "expected": [
+          "memory"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/acpx",
+        "categories": [
+          "developer-tools",
+          "agent-orchestration"
+        ],
+        "expected": [
+          "developer-tools",
+          "agent-orchestration"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/diagnostics-prometheus",
+        "categories": [
+          "infrastructure"
+        ],
+        "expected": [
+          "infrastructure"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openviking/openclaw-plugin",
+        "categories": [
+          "memory"
+        ],
+        "expected": [
+          "memory"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@qverisai/qveris",
+        "categories": [
+          "models",
+          "context",
+          "web"
+        ],
+        "expected": [
+          "models",
+          "context",
+          "web"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/diagnostics-otel",
+        "categories": [
+          "infrastructure"
+        ],
+        "expected": [
+          "infrastructure"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/lobster",
+        "categories": [
+          "agent-orchestration"
+        ],
+        "expected": [
+          "agent-orchestration"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/voice-call",
+        "categories": [
+          "voice"
+        ],
+        "expected": [
+          "voice"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@soimy/dingtalk",
+        "categories": [
+          "channels"
+        ],
+        "expected": [
+          "channels"
+        ],
+        "matched": true
+      },
+      {
+        "name": "octo",
+        "categories": [
+          "channels",
+          "tools"
+        ],
+        "expected": [
+          "channels",
+          "tools"
+        ],
+        "matched": true
+      },
+      {
+        "name": "clawlink-plugin",
+        "categories": [
+          "tools",
+          "channels",
+          "web"
+        ],
+        "expected": [
+          "tools",
+          "channels",
+          "web"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/slack",
+        "categories": [
+          "channels",
+          "inbox-collaboration"
+        ],
+        "expected": [
+          "channels",
+          "inbox-collaboration"
+        ],
+        "matched": true
+      },
+      {
+        "name": "memsearch",
+        "categories": [
+          "memory",
+          "models"
+        ],
+        "expected": [
+          "memory",
+          "models"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@tencentdb-agent-memory/memory-tencentdb",
+        "categories": [
+          "memory"
+        ],
+        "expected": [
+          "memory"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/tokenjuice",
+        "categories": [
+          "context",
+          "developer-tools"
+        ],
+        "expected": [
+          "context",
+          "developer-tools"
+        ],
+        "matched": true
+      },
+      {
+        "name": "web-search-plus-plugin-v2",
+        "categories": [
+          "tools",
+          "web"
+        ],
+        "expected": [
+          "tools",
+          "web"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@apify/apify-openclaw-plugin",
+        "categories": [
+          "tools",
+          "web"
+        ],
+        "expected": [
+          "tools",
+          "web"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/diffs",
+        "categories": [
+          "developer-tools",
+          "documents-files"
+        ],
+        "expected": [
+          "developer-tools",
+          "documents-files"
+        ],
+        "matched": true
+      },
+      {
+        "name": "email",
+        "categories": [
+          "web"
+        ],
+        "expected": [
+          "web"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@byterover/byterover",
+        "categories": [
+          "context",
+          "tools"
+        ],
+        "expected": [
+          "context",
+          "tools"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/zai-provider",
+        "categories": [
+          "models",
+          "media"
+        ],
+        "expected": [
+          "models",
+          "media"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/google-meet",
+        "categories": [
+          "voice",
+          "inbox-collaboration"
+        ],
+        "expected": [
+          "voice",
+          "inbox-collaboration"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/msteams",
+        "categories": [
+          "channels",
+          "inbox-collaboration"
+        ],
+        "expected": [
+          "channels",
+          "inbox-collaboration"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/mattermost",
+        "categories": [
+          "channels",
+          "inbox-collaboration"
+        ],
+        "expected": [
+          "channels",
+          "inbox-collaboration"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@jason-vaughan/openclaw-google-oauth",
+        "categories": [
+          "tools"
+        ],
+        "expected": [
+          "tools"
+        ],
+        "matched": true
+      },
+      {
+        "name": "openclaw-weixin",
+        "categories": [
+          "other"
+        ],
+        "expected": [
+          "other"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@manuelfedele/openclaw-gmail-plugin",
+        "categories": [
+          "tools",
+          "web"
+        ],
+        "expected": [
+          "tools",
+          "web"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/clickclack",
+        "categories": [
+          "channels",
+          "inbox-collaboration"
+        ],
+        "expected": [
+          "channels",
+          "inbox-collaboration"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@mem0/openclaw-mem0",
+        "categories": [
+          "memory",
+          "tools",
+          "models"
+        ],
+        "expected": [
+          "memory",
+          "tools",
+          "models"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/kitchen-sink",
+        "categories": [
+          "context",
+          "memory",
+          "channels"
+        ],
+        "expected": [
+          "context",
+          "memory",
+          "channels"
+        ],
+        "matched": true
+      },
+      {
+        "name": "openclaw-plugin-heygen",
+        "categories": [
+          "media"
+        ],
+        "expected": [
+          "media"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/signal",
+        "categories": [
+          "channels"
+        ],
+        "expected": [
+          "channels"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@honcho-ai/openclaw-honcho",
+        "categories": [
+          "memory",
+          "tools",
+          "channels"
+        ],
+        "expected": [
+          "memory",
+          "tools",
+          "channels"
+        ],
+        "matched": true
+      },
+      {
+        "name": "openclaw-code-agent",
+        "categories": [
+          "other"
+        ],
+        "expected": [
+          "other"
+        ],
+        "matched": true
+      },
+      {
+        "name": "holo-wechat-mp",
+        "categories": [
+          "media",
+          "channels"
+        ],
+        "expected": [
+          "media",
+          "channels"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@tensorfold/openclaw-google-workspace",
+        "categories": [
+          "tools"
+        ],
+        "expected": [
+          "tools"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@nowledge/openclaw-nowledge-mem",
+        "categories": [
+          "memory",
+          "context"
+        ],
+        "expected": [
+          "memory",
+          "context"
+        ],
+        "matched": true
+      },
+      {
+        "name": "openclaw-browser-automation",
+        "categories": [
+          "web"
+        ],
+        "expected": [
+          "web"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/googlechat",
+        "categories": [
+          "channels",
+          "inbox-collaboration"
+        ],
+        "expected": [
+          "channels",
+          "inbox-collaboration"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/zalouser",
+        "categories": [
+          "channels"
+        ],
+        "expected": [
+          "channels"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@expediagroup/expedia-openclaw",
+        "categories": [
+          "tools",
+          "web",
+          "channels"
+        ],
+        "expected": [
+          "tools",
+          "web",
+          "channels"
+        ],
+        "matched": true
+      },
+      {
+        "name": "hivemind",
+        "categories": [
+          "other"
+        ],
+        "expected": [
+          "other"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/line",
+        "categories": [
+          "channels"
+        ],
+        "expected": [
+          "channels"
+        ],
+        "matched": true
+      },
+      {
+        "name": "gc-provider",
+        "categories": [
+          "models",
+          "media"
+        ],
+        "expected": [
+          "models",
+          "media"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/nextcloud-talk",
+        "categories": [
+          "channels",
+          "inbox-collaboration"
+        ],
+        "expected": [
+          "channels",
+          "inbox-collaboration"
+        ],
+        "matched": true
+      },
+      {
+        "name": "apple-pim-cli",
+        "categories": [
+          "tools",
+          "security",
+          "web"
+        ],
+        "expected": [
+          "tools",
+          "security",
+          "web"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/copilot",
+        "categories": [
+          "developer-tools",
+          "agent-orchestration"
+        ],
+        "expected": [
+          "developer-tools",
+          "agent-orchestration"
+        ],
+        "matched": true
+      },
+      {
+        "name": "browser-use-plugin",
+        "categories": [
+          "web"
+        ],
+        "expected": [
+          "web"
+        ],
+        "matched": true
+      },
+      {
+        "name": "hirey",
+        "categories": [
+          "other"
+        ],
+        "expected": [
+          "other"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/zalo",
+        "categories": [
+          "channels"
+        ],
+        "expected": [
+          "channels"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@cyb3rb1ade/plur1bus-memory",
+        "categories": [
+          "other"
+        ],
+        "expected": [
+          "other"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/sherpa-onnx-tts",
+        "categories": [
+          "other"
+        ],
+        "expected": [
+          "other"
+        ],
+        "matched": true
+      },
+      {
+        "name": "google-ads-assistant",
+        "categories": [
+          "other"
+        ],
+        "expected": [
+          "other"
+        ],
+        "matched": true
+      },
+      {
+        "name": "excel",
+        "categories": [
+          "tools"
+        ],
+        "expected": [
+          "tools"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/synology-chat",
+        "categories": [
+          "channels"
+        ],
+        "expected": [
+          "channels"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/nostr",
+        "categories": [
+          "channels"
+        ],
+        "expected": [
+          "channels"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openguardrails/moltguard",
+        "categories": [
+          "security"
+        ],
+        "expected": [
+          "security"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/openshell-sandbox",
+        "categories": [
+          "security",
+          "infrastructure"
+        ],
+        "expected": [
+          "security",
+          "infrastructure"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/diffs-language-pack",
+        "categories": [
+          "developer-tools"
+        ],
+        "expected": [
+          "developer-tools"
+        ],
+        "matched": true
+      },
+      {
+        "name": "sequential-thinking",
+        "categories": [
+          "other"
+        ],
+        "expected": [
+          "other"
+        ],
+        "matched": true
+      },
+      {
+        "name": "openclaw-seatalk",
+        "categories": [
+          "channels",
+          "tools",
+          "security"
+        ],
+        "expected": [
+          "channels",
+          "tools",
+          "security"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/tlon",
+        "categories": [
+          "channels"
+        ],
+        "expected": [
+          "channels"
+        ],
+        "matched": true
+      },
+      {
+        "name": "claude-code-sync",
+        "categories": [
+          "other"
+        ],
+        "expected": [
+          "other"
+        ],
+        "matched": true
+      },
+      {
+        "name": "openclaw-memory-graph",
+        "categories": [
+          "tools",
+          "models",
+          "memory"
+        ],
+        "expected": [
+          "tools",
+          "models",
+          "memory"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@axonflow/openclaw",
+        "categories": [
+          "tools",
+          "security"
+        ],
+        "expected": [
+          "tools",
+          "security"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@shellbot/openclaw-pixcli",
+        "categories": [
+          "tools",
+          "media",
+          "voice"
+        ],
+        "expected": [
+          "tools",
+          "media",
+          "voice"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/imessage",
+        "categories": [
+          "channels"
+        ],
+        "expected": [
+          "channels"
+        ],
+        "matched": true
+      },
+      {
+        "name": "ocuclaw",
+        "categories": [
+          "other"
+        ],
+        "expected": [
+          "other"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/sms",
+        "categories": [
+          "channels"
+        ],
+        "expected": [
+          "channels"
+        ],
+        "matched": true
+      },
+      {
+        "name": "database",
+        "categories": [
+          "other"
+        ],
+        "expected": [
+          "other"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@natebjones/ob1-agent-memory",
+        "categories": [
+          "memory",
+          "tools"
+        ],
+        "expected": [
+          "memory",
+          "tools"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@jeehou/openclaw-cursor-cli",
+        "categories": [
+          "models",
+          "runtime",
+          "security"
+        ],
+        "expected": [
+          "models",
+          "runtime",
+          "security"
+        ],
+        "matched": true
+      },
+      {
+        "name": "imclaw",
+        "categories": [
+          "channels",
+          "tools",
+          "media"
+        ],
+        "expected": [
+          "channels",
+          "tools",
+          "media"
+        ],
+        "matched": true
+      },
+      {
+        "name": "100-percent-skill-vetter",
+        "categories": [
+          "runtime",
+          "security",
+          "gateway"
+        ],
+        "expected": [
+          "runtime",
+          "security",
+          "gateway"
+        ],
+        "matched": true
+      },
+      {
+        "name": "openclaw-ai-video-editor",
+        "categories": [
+          "tools",
+          "media"
+        ],
+        "expected": [
+          "tools",
+          "media"
+        ],
+        "matched": true
+      },
+      {
+        "name": "message-linter",
+        "categories": [
+          "other"
+        ],
+        "expected": [
+          "other"
+        ],
+        "matched": true
+      },
+      {
+        "name": "douyin-insights-openclaw-plugin",
+        "categories": [
+          "other"
+        ],
+        "expected": [
+          "other"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@robot-inventor/discord-ignore",
+        "categories": [
+          "other"
+        ],
+        "expected": [
+          "other"
+        ],
+        "matched": true
+      },
+      {
+        "name": "lobu",
+        "categories": [
+          "other"
+        ],
+        "expected": [
+          "other"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@xmoxmo/bncr",
+        "categories": [
+          "other"
+        ],
+        "expected": [
+          "other"
+        ],
+        "matched": true
+      },
+      {
+        "name": "xhs-insights-openclaw-plugin",
+        "categories": [
+          "other"
+        ],
+        "expected": [
+          "other"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/venice-provider",
+        "categories": [
+          "models"
+        ],
+        "expected": [
+          "models"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/volcengine-provider",
+        "categories": [
+          "models",
+          "voice"
+        ],
+        "expected": [
+          "models",
+          "voice"
+        ],
+        "matched": true
+      },
+      {
+        "name": "gog-extended",
+        "categories": [
+          "other"
+        ],
+        "expected": [
+          "other"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@agentmessier/openclaw-agent-messier",
+        "categories": [
+          "other"
+        ],
+        "expected": [
+          "other"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@alexbessarabenko/openclaw-max",
+        "categories": [
+          "channels",
+          "voice",
+          "models"
+        ],
+        "expected": [
+          "channels",
+          "voice",
+          "models"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@conan-scott/openclaw-fish-audio",
+        "categories": [
+          "voice",
+          "channels"
+        ],
+        "expected": [
+          "voice",
+          "channels"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@vauxr/openclaw",
+        "categories": [
+          "channels",
+          "tools",
+          "voice"
+        ],
+        "expected": [
+          "channels",
+          "tools",
+          "voice"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/buzz",
+        "categories": [
+          "channels"
+        ],
+        "expected": [
+          "channels"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/zoom-meetings",
+        "categories": [
+          "voice",
+          "inbox-collaboration"
+        ],
+        "expected": [
+          "voice",
+          "inbox-collaboration"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/teams-meetings",
+        "categories": [
+          "voice",
+          "inbox-collaboration"
+        ],
+        "expected": [
+          "voice",
+          "inbox-collaboration"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/mxc-sandbox",
+        "categories": [
+          "security",
+          "infrastructure"
+        ],
+        "expected": [
+          "security",
+          "infrastructure"
+        ],
+        "matched": true
+      },
+      {
+        "name": "@openclaw/team-reports",
+        "categories": [
+          "data-analytics",
+          "productivity",
+          "inbox-collaboration"
+        ],
+        "expected": [
+          "data-analytics",
+          "productivity",
+          "inbox-collaboration"
+        ],
+        "matched": true
+      }
+    ],
+    "catalogMatches": 100,
+    "catalogMismatches": [],
+    "bundledManifests": 152,
+    "bundledRuntimeMatches": 152,
+    "bundledRuntimeMismatches": [],
+    "browseCount": 100,
+    "remoteError": null
+  },
+  "build": {
+    "runtimeCommit": "c8960487ad31f42647c2f133ad3a78b8dbab054a",
+    "runtimeBuildId": "2026.9.3-c8960487ad31-2026-09-09T03-13-11.843Z",
+    "sourceCategoryCommit": "5ee48626b8db9c97a443fc51c1edc631530c84a0",
+    "present": 150,
+    "matched": 150,
+    "intentionallyExcluded": [
+      "qa-channel",
+      "qa-lab"
+    ],
+    "mismatches": []
+  },
+  "rootRouteBefore": {
+    "sourceCommit": "5ee48626b8db9c97a443fc51c1edc631530c84a0",
+    "checkedAt": "2026-09-09T03:00:05.662Z",
+    "rows": [
+      {
+        "path": "/plugins",
+        "method": "GET",
+        "accept": "text/html",
+        "status": 404,
+        "contentType": "text/plain; charset=utf-8"
+      },
+      {
+        "path": "/plugins",
+        "method": "HEAD",
+        "accept": "text/html",
+        "status": 404,
+        "contentType": "text/plain; charset=utf-8"
+      },
+      {
+        "path": "/plugins",
+        "method": "GET",
+        "accept": "application/json",
+        "status": 404,
+        "contentType": "text/plain; charset=utf-8"
+      },
+      {
+        "path": "/plugins",
+        "method": "POST",
+        "accept": "text/html",
+        "status": 404,
+        "contentType": "text/plain; charset=utf-8"
+      },
+      {
+        "path": "/plugins/unclaimed",
+        "method": "GET",
+        "accept": "text/html",
+        "status": 404,
+        "contentType": "text/plain; charset=utf-8"
+      }
+    ]
+  },
+  "detailRouteIntermediateBefore": {
+    "runtimeCommit": "ffbe00925f9d8d8113ed7e9d667b1de0e32c339e",
+    "rows": [
+      {
+        "path": "/plugins/ch_QG9wZW5jbGF3L3doYXRzYXBw",
+        "status": 404
+      },
+      {
+        "path": "/plugins/local_YWN0aXZlLW1lbW9yeQ",
+        "status": 404
+      }
+    ]
+  },
+  "routesAfter": {
+    "runtimeCommit": "c8960487ad31f42647c2f133ad3a78b8dbab054a",
+    "checkedAt": "2026-09-09T03:15:02.014Z",
+    "rows": [
+      {
+        "path": "/plugins",
+        "method": "GET",
+        "accept": "text/html",
+        "expected": 200,
+        "status": 200,
+        "contentType": "text/html; charset=utf-8",
+        "passed": true
+      },
+      {
+        "path": "/plugins",
+        "method": "HEAD",
+        "accept": "text/html",
+        "expected": 200,
+        "status": 200,
+        "contentType": "text/html; charset=utf-8",
+        "passed": true
+      },
+      {
+        "path": "/plugins",
+        "method": "GET",
+        "accept": "application/json",
+        "expected": 404,
+        "status": 404,
+        "contentType": "text/plain; charset=utf-8",
+        "passed": true
+      },
+      {
+        "path": "/plugins",
+        "method": "POST",
+        "accept": "text/html",
+        "expected": 404,
+        "status": 404,
+        "contentType": "text/plain; charset=utf-8",
+        "passed": true
+      },
+      {
+        "path": "/plugins/ch_QG9wZW5jbGF3L3doYXRzYXBw",
+        "method": "GET",
+        "accept": "text/html",
+        "expected": 200,
+        "status": 200,
+        "contentType": "text/html; charset=utf-8",
+        "passed": true
+      },
+      {
+        "path": "/plugins/ch_QG9wZW5jbGF3L3doYXRzYXBw",
+        "method": "HEAD",
+        "accept": "text/html",
+        "expected": 200,
+        "status": 200,
+        "contentType": "text/html; charset=utf-8",
+        "passed": true
+      },
+      {
+        "path": "/plugins/ch_QG9wZW5jbGF3L3doYXRzYXBw",
+        "method": "GET",
+        "accept": "application/json",
+        "expected": 404,
+        "status": 404,
+        "contentType": "text/plain; charset=utf-8",
+        "passed": true
+      },
+      {
+        "path": "/plugins/ch_QG9wZW5jbGF3L3doYXRzYXBw",
+        "method": "POST",
+        "accept": "text/html",
+        "expected": 404,
+        "status": 404,
+        "contentType": "text/plain; charset=utf-8",
+        "passed": true
+      },
+      {
+        "path": "/plugins/local_YWN0aXZlLW1lbW9yeQ",
+        "method": "GET",
+        "accept": "text/html",
+        "expected": 200,
+        "status": 200,
+        "contentType": "text/html; charset=utf-8",
+        "passed": true
+      },
+      {
+        "path": "/plugins/local_YWN0aXZlLW1lbW9yeQ",
+        "method": "HEAD",
+        "accept": "text/html",
+        "expected": 200,
+        "status": 200,
+        "contentType": "text/html; charset=utf-8",
+        "passed": true
+      },
+      {
+        "path": "/plugins/local_YWN0aXZlLW1lbW9yeQ",
+        "method": "GET",
+        "accept": "application/json",
+        "expected": 404,
+        "status": 404,
+        "contentType": "text/plain; charset=utf-8",
+        "passed": true
+      },
+      {
+        "path": "/plugins/local_YWN0aXZlLW1lbW9yeQ",
+        "method": "POST",
+        "accept": "text/html",
+        "expected": 404,
+        "status": 404,
+        "contentType": "text/plain; charset=utf-8",
+        "passed": true
+      },
+      {
+        "path": "/plugins/unclaimed",
+        "method": "GET",
+        "accept": "text/html",
+        "expected": 404,
+        "status": 404,
+        "contentType": "text/plain; charset=utf-8",
+        "passed": true
+      },
+      {
+        "path": "/plugins/ch_a",
+        "method": "GET",
+        "accept": "text/html",
+        "expected": 404,
+        "status": 404,
+        "contentType": "text/plain; charset=utf-8",
+        "passed": true
+      },
+      {
+        "path": "/plugins/ch_QG9wZW5jbGF3L3doYXRzYXBw/extra",
+        "method": "GET",
+        "accept": "text/html",
+        "expected": 404,
+        "status": 404,
+        "contentType": "text/plain; charset=utf-8",
+        "passed": true
+      }
+    ]
+  },
+  "browser": {
+    "runtimeCommit": "c8960487ad31f42647c2f133ad3a78b8dbab054a",
+    "runtimeBuildId": "2026.9.3-c8960487ad31-2026-09-09T03-13-11.843Z",
+    "detailPath": "/plugins/ch_QG9wZW5jbGF3L2ZlaXNodQ",
+    "detailName": "Feishu/Lark",
+    "detailReloadStatus": 200,
+    "localDetailPath": "/plugins/local_YWN0aXZlLW1lbW9yeQ",
+    "localDetailName": "Active Memory",
+    "localDetailStatus": 200,
+    "checkedAt": "2026-09-09T03:14:54.814Z",
+    "source": "realGatewayRealLocalClawHub",
+    "phase": "after",
+    "categoryButtons": 22,
+    "installedGroups": [
+      {
+        "category": "channels",
+        "heading": "Channels"
+      },
+      {
+        "category": "models",
+        "heading": "Models"
+      },
+      {
+        "category": "memory",
+        "heading": "Memory"
+      },
+      {
+        "category": "context",
+        "heading": "Context"
+      },
+      {
+        "category": "voice",
+        "heading": "Voice"
+      },
+      {
+        "category": "web",
+        "heading": "Web"
+      },
+      {
+        "category": "media",
+        "heading": "Media"
+      },
+      {
+        "category": "security",
+        "heading": "Security"
+      },
+      {
+        "category": "integrations",
+        "heading": "Integrations"
+      },
+      {
+        "category": "developer-tools",
+        "heading": "Developer tools"
+      },
+      {
+        "category": "infrastructure",
+        "heading": "Infrastructure"
+      },
+      {
+        "category": "documents-files",
+        "heading": "Documents & files"
+      },
+      {
+        "category": "inbox-collaboration",
+        "heading": "Inbox & collaboration"
+      },
+      {
+        "category": "productivity",
+        "heading": "Productivity"
+      },
+      {
+        "category": "data-analytics",
+        "heading": "Data & analytics"
+      },
+      {
+        "category": "agent-orchestration",
+        "heading": "Agent orchestration"
+      }
+    ],
+    "observedResponses": [
+      {
+        "method": "plugins.list",
+        "params": {},
+        "ok": true,
+        "pluginCount": 167,
+        "remoteError": null
+      },
+      {
+        "method": "plugins.catalog.browse",
+        "params": {
+          "intent": "all",
+          "pageSize": 25
+        },
+        "ok": true,
+        "itemCount": 25,
+        "remoteError": null
+      },
+      {
+        "method": "plugins.catalog.categories",
+        "params": {},
+        "ok": true,
+        "categoryCount": 21,
+        "remoteError": null
+      },
+      {
+        "method": "plugins.catalog.browse",
+        "params": {
+          "intent": "featured",
+          "pageSize": 9
+        },
+        "ok": true,
+        "itemCount": 0,
+        "remoteError": null
+      },
+      {
+        "method": "plugins.catalog.browse",
+        "params": {
+          "intent": "all",
+          "category": "developer-tools",
+          "pageSize": 25
+        },
+        "ok": true,
+        "itemCount": 6,
+        "remoteError": null
+      },
+      {
+        "method": "plugins.catalog.browse",
+        "params": {
+          "intent": "all",
+          "category": "documents-files",
+          "pageSize": 25
+        },
+        "ok": true,
+        "itemCount": 2,
+        "remoteError": null
+      },
+      {
+        "method": "plugins.list",
+        "params": {},
+        "ok": true,
+        "pluginCount": 167,
+        "remoteError": null
+      },
+      {
+        "method": "plugins.catalog.get",
+        "params": {
+          "id": "ch_QG9wZW5jbGF3L2ZlaXNodQ"
+        },
+        "ok": true,
+        "remoteError": null
+      },
+      {
+        "method": "plugins.list",
+        "params": {},
+        "ok": true,
+        "pluginCount": 167,
+        "remoteError": null
+      },
+      {
+        "method": "plugins.catalog.get",
+        "params": {
+          "id": "ch_QG9wZW5jbGF3L2ZlaXNodQ"
+        },
+        "ok": true,
+        "remoteError": null
+      },
+      {
+        "method": "plugins.list",
+        "params": {},
+        "ok": true,
+        "pluginCount": 167,
+        "remoteError": null
+      },
+      {
+        "method": "plugins.catalog.get",
+        "params": {
+          "id": "local_YWN0aXZlLW1lbW9yeQ"
+        },
+        "ok": true,
+        "remoteError": null
+      }
+    ],
+    "desktopCategorySelected": "developer-tools",
+    "mobileCategorySelected": "documents-files"
+  },
+  "sourceAudit": {
+    "sourceManifests": 152,
+    "namedInventoryMatches": 149,
+    "changedCategoryAssignments": 68,
+    "inventoryPinnedCommit": "5ee48626b8db9c97a443fc51c1edc631530c84a0",
+    "unnamedManifestIds": [
+      "active-memory",
+      "device-pair",
+      "talk-voice"
+    ]
+  },
+  "lanes": [
+    {
+      "name": "baseline",
+      "steps": [
+        {
+          "name": "Before: /plugins returns HTTP 404",
+          "slug": "catalog",
+          "screenshot": "catalog.png",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "name": "candidate",
+      "steps": [
+        {
+          "name": "After: /plugins loads the production sample",
+          "slug": "catalog",
+          "screenshot": "catalog.png",
+          "status": "passed"
+        },
+        {
+          "name": "Candidate: Developer tools, six matching plugins",
+          "slug": "developer-tools",
+          "screenshot": "developer-tools.png",
+          "status": "passed"
+        },
+        {
+          "name": "Candidate: Documents & files on mobile",
+          "slug": "mobile-documents-files",
+          "screenshot": "mobile-documents-files.png",
+          "status": "passed"
+        },
+        {
+          "name": "Candidate: Feishu/Lark detail after reload",
+          "slug": "catalog-detail",
+          "screenshot": "catalog-detail.png",
+          "status": "passed"
+        },
+        {
+          "name": "Candidate: local Active Memory detail",
+          "slug": "local-detail",
+          "screenshot": "local-detail.png",
+          "status": "passed"
+        }
+      ]
+    }
+  ]
+}
