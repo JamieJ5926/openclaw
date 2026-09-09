@@ -10,6 +10,7 @@ import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { resetCommandQueueStateForTest } from "../../process/command-queue.test-support.js";
 import { createDeferredCore } from "../../shared/deferred.js";
 import { WizardSession } from "../../wizard/session.js";
+import { createWizardSessionTracker } from "../server-wizard-sessions.js";
 import { whenAdmittedWizardSessionSettled } from "./setup-admission.js";
 import { systemAgentHandlers } from "./system-agent.js";
 import type { GatewayRequestContext } from "./types.js";
@@ -38,13 +39,12 @@ const config: OpenClawConfig = {
 const validateWizardResult = Compile(WizardNextResultSchema);
 
 function makeContext() {
-  const wizardSessions = new Map<string, WizardSession>();
+  const tracker = createWizardSessionTracker();
+  const { wizardSessions } = tracker;
   return {
     wizardSessions,
     context: {
-      wizardSessions,
-      findRunningWizard: () => undefined,
-      purgeWizardSession: (id: string) => wizardSessions.delete(id),
+      ...tracker,
     } as unknown as GatewayRequestContext,
   };
 }
@@ -150,7 +150,10 @@ describe("openclaw.setup provider preparation", () => {
           respond: () => undefined,
           context,
         } as never);
-        session = expectDefined(wizardSessions.get(sessionId), "provider preparation wizard");
+        session = expectDefined(
+          wizardSessions.get(sessionId)?.session,
+          "provider preparation wizard",
+        );
         const confirmation = await callWizardNext(context, { sessionId });
         const terminal = callWizardNext(context, {
           sessionId,
@@ -253,7 +256,7 @@ describe("openclaw.setup provider preparation", () => {
         payload: { sessionId: "prepare-session-1", done: false, status: "running" },
       });
       const session = expectDefined(
-        wizardSessions.get("prepare-session-1"),
+        wizardSessions.get("prepare-session-1")?.session,
         "prepare wizard session",
       );
       const note = await callWizardNext(context, { sessionId: "prepare-session-1" });

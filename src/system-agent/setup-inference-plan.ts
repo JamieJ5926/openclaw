@@ -26,6 +26,7 @@ import {
   type ProviderAuthChoiceMetadata,
 } from "../plugins/provider-auth-choices.js";
 import { resolveProviderInstallCatalogEntry } from "../plugins/provider-install-catalog.js";
+import { supportsProviderAuthChoiceTextInference } from "../plugins/provider-login-options.js";
 import { resolvePluginProvidersCore } from "../plugins/providers.runtime.js";
 import type { ProviderAuthResult } from "../plugins/types.js";
 import type { RuntimeEnv } from "../runtime.js";
@@ -36,10 +37,7 @@ import {
   type SystemAgentConfigSnapshot,
 } from "./inference-route.js";
 import { createQuickstartNotePrompter } from "./setup-apply.js";
-import {
-  supportsSetupManualSecret,
-  supportsSetupTextInference,
-} from "./setup-inference-auth-options.js";
+import { supportsSetupManualSecret } from "./setup-inference-auth-options.js";
 import {
   type ActivateSetupInferenceDeps,
   SetupInferenceCancelledError,
@@ -148,7 +146,7 @@ export async function buildTestPlan(params: {
     if (
       !choice ||
       choice.appGuidedDiscovery !== true ||
-      !supportsSetupTextInference(choice.onboardingScopes)
+      !supportsProviderAuthChoiceTextInference(choice.onboardingScopes)
     ) {
       return { error: "That detected provider is no longer available on this Gateway." };
     }
@@ -445,10 +443,10 @@ export async function buildTestPlan(params: {
           })
         : undefined;
       const managedWizardChoice = !choice
-        ? installEntry && supportsSetupTextInference(installEntry.onboardingScopes)
+        ? installEntry && supportsProviderAuthChoiceTextInference(installEntry.onboardingScopes)
           ? installEntry
           : undefined
-        : supportsSetupTextInference(choice.onboardingScopes) &&
+        : supportsProviderAuthChoiceTextInference(choice.onboardingScopes) &&
             (choice.appGuidedSecret === true ||
               (!choice.appGuidedAuth && choice.appGuidedDiscovery !== true))
           ? { pluginId: choice.pluginId, label: choice.groupLabel ?? choice.choiceLabel }
@@ -498,7 +496,7 @@ export async function buildTestPlan(params: {
       }
       if (
         !choice ||
-        !supportsSetupTextInference(choice.onboardingScopes) ||
+        !supportsProviderAuthChoiceTextInference(choice.onboardingScopes) ||
         (!interactive && !supportsSetupManualSecret(choice)) ||
         (interactive &&
           (choice.assistantVisibility === "manual-only" ||
@@ -518,7 +516,7 @@ export async function buildTestPlan(params: {
       const resolved = provider && method ? { provider, method } : null;
       if (
         !resolved ||
-        !supportsSetupTextInference(resolved.method.wizard?.onboardingScopes) ||
+        !supportsProviderAuthChoiceTextInference(resolved.method.wizard?.onboardingScopes) ||
         (interactive &&
           choice.appGuidedDiscovery !== true &&
           resolved.method.kind !== "oauth" &&

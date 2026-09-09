@@ -59,6 +59,10 @@ Reference for **LLM/model providers** (not chat channels like WhatsApp/Telegram)
 
 Open **Settings → Models** in the Control UI to add, replace, or remove provider API keys stored in `models.providers.<id>.apiKey`. The page identifies whether each API key comes from OpenClaw config or an environment variable without displaying the credential. Environment-provided keys remain managed by the gateway process environment.
 
+Choose **Connect provider** to sign in with an available provider method for the selected agent. This saves credentials and connection settings without selecting or testing a starter model. Your default model and model restrictions stay unchanged. Choices marked **Set up** use the provider's setup flow instead.
+
+Keep the sign-in dialog open while completing its prompts. Cancel before credentials are saved to end the login. If saving has started, let it finish; cancellation does not undo a completed write. Another browser connection cannot inspect or continue the live sign-in. The page waits for the old login to release before enabling another one.
+
 Provider controls appear as soon as credentials, the model catalog, and configuration are ready. Usage and local costs load independently afterward, so a slow usage response does not block provider settings.
 
 Open **Model Setup** from the page header to inspect detected AI access. When available, it shows the authentication method (API key or account sign-in) and the actual email address reported by the provider or local runtime. API keys and tokens stay hidden.

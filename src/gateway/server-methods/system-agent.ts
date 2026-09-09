@@ -31,14 +31,12 @@ import { buildNewAgentWelcome } from "../../system-agent/new-agent-welcome.js";
 import { buildOnboardingWelcome } from "../../system-agent/onboarding-welcome.js";
 import { appendTranscriptReset, readTranscriptTail } from "../../system-agent/transcript-store.js";
 import { resolveUserPath } from "../../utils.js";
-import { WizardSession } from "../../wizard/session.js";
 import { listVisiblePendingApprovalRequests } from "./approval-shared.js";
 import {
   authenticatedProfileUnavailableError,
   isGatewayClientProfilePending,
 } from "./gateway-client-identity.js";
 import {
-  createAdmittedWizardSession,
   runExclusiveSystemAgentSetupActivation,
   respondSetupAdmissionBusy,
   SetupAdmissionBusyError,
@@ -59,12 +57,10 @@ import {
   verifyGatewaySetupInference,
 } from "./system-agent-execution.js";
 import { resolveSystemAgentSessionOwnerKey } from "./system-agent-session-owner.js";
-import {
-  rejectExistingSetupWizardSession,
-  startSetupActivationWizard,
-} from "./system-agent-setup-wizard.js";
+import { startSetupActivationWizard } from "./system-agent-setup-wizard.js";
 import type { GatewayRequestContext, GatewayRequestHandlers } from "./types.js";
 import { assertValidParams } from "./validation.js";
+import { startGatewayWizardSession } from "./wizard-session-start.js";
 
 export type { SystemAgentChatSession };
 
@@ -209,10 +205,11 @@ export const systemAgentHandlers: GatewayRequestHandlers = {
       context,
       respond,
       isLocalClient: client?.internal?.isLocalClient === true,
+      ownerConnId: client?.connId,
     });
   },
   /** Activate a detected or manual route with server-owned capability review. */
-  "openclaw.setup.activate.start": async ({ params, respond, context }) => {
+  "openclaw.setup.activate.start": async ({ params, respond, context, client }) => {
     if (
       !assertValidParams(
         params,
@@ -228,12 +225,13 @@ export const systemAgentHandlers: GatewayRequestHandlers = {
       sessionId,
       activation,
       timeoutMs: ACTIVATION_SESSION_TIMEOUT_MS,
+      ownerConnId: client?.connId,
       context,
       respond,
     });
   },
   /** Run one provider-owned prepare flow over the shared wizard transport. */
-  "openclaw.setup.prepare.start": async ({ params, respond, context }) => {
+  "openclaw.setup.prepare.start": async ({ params, respond, context, client }) => {
     if (
       !assertValidParams(
         params,
@@ -244,79 +242,68 @@ export const systemAgentHandlers: GatewayRequestHandlers = {
     ) {
       return;
     }
-    const sessionId = params.sessionId;
-    if (rejectExistingSetupWizardSession({ sessionId, context, respond })) {
-      return;
-    }
-    const session = await createAdmittedWizardSession(
-      () =>
-        new WizardSession(
-          async (prompter, signal, runnerSession) => {
-            await runSystemAgentGatewayTask(async () => {
-              const [{ prepareAuthChoiceLoadedPluginProvider }, setupShared] = await Promise.all([
-                import("../../plugins/provider-auth-choice.js"),
-                import("../../wizard/setup.shared.js"),
-              ]);
-              const snapshot = await setupShared.readSetupConfigFileSnapshot();
-              if (!snapshot.valid) {
-                throw new Error(
-                  "Config is invalid. Run `openclaw doctor` before preparing a model.",
-                );
-              }
-              // Match the classic wizard: mutate the authored shape, not runtimeConfig,
-              // so setup never writes resolved runtime defaults into openclaw.json.
-              const baseConfig = snapshot.exists ? snapshot.sourceConfig : {};
-              const workspaceDir = params.workspace?.trim()
-                ? resolveUserPath(params.workspace.trim())
-                : undefined;
-              const prepared = await prepareAuthChoiceLoadedPluginProvider({
-                authChoice: params.authChoice,
-                ...(params.agentId ? { agentId: params.agentId } : {}),
-                config: baseConfig,
-                prompter,
-                runtime: {
-                  ...defaultRuntime,
-                  exit: (code: number | undefined): never => {
-                    throw new Error(`setup step exited with code ${String(code)}`);
-                  },
-                },
-                setDefaultModel: false,
-                preserveExistingDefaultModel: true,
-                ...(workspaceDir ? { workspaceDir } : {}),
-                signal,
-                isRemote: true,
-                beforePersistentEffect: () => {
-                  signal.throwIfAborted();
-                  runnerSession.lockCancellationForPreparation();
-                },
-              });
-              if (!prepared || prepared.retrySelection) {
-                throw new Error(
-                  `Provider setup resolution failed for "${params.authChoice}". Run \`openclaw doctor --fix\`, restart the Gateway, and try again.`,
-                );
-              }
+    await startGatewayWizardSession({
+      context,
+      respond,
+      sessionId: params.sessionId,
+      ownerConnId: client?.connId,
+      timeoutMs: PROVIDER_PREPARE_SESSION_TIMEOUT_MS,
+      run: async (prompter, signal, runnerSession) => {
+        await runSystemAgentGatewayTask(async () => {
+          const [{ prepareAuthChoiceLoadedPluginProvider }, setupShared] = await Promise.all([
+            import("../../plugins/provider-auth-choice.js"),
+            import("../../wizard/setup.shared.js"),
+          ]);
+          const snapshot = await setupShared.readSetupConfigFileSnapshot();
+          if (!snapshot.valid) {
+            throw new Error("Config is invalid. Run `openclaw doctor` before preparing a model.");
+          }
+          // Match the classic wizard: mutate the authored shape, not runtimeConfig,
+          // so setup never writes resolved runtime defaults into openclaw.json.
+          const baseConfig = snapshot.exists ? snapshot.sourceConfig : {};
+          const workspaceDir = params.workspace?.trim()
+            ? resolveUserPath(params.workspace.trim())
+            : undefined;
+          const prepared = await prepareAuthChoiceLoadedPluginProvider({
+            authChoice: params.authChoice,
+            ...(params.agentId ? { agentId: params.agentId } : {}),
+            config: baseConfig,
+            prompter,
+            runtime: {
+              ...defaultRuntime,
+              exit: (code: number | undefined): never => {
+                throw new Error(`setup step exited with code ${String(code)}`);
+              },
+            },
+            setDefaultModel: false,
+            preserveExistingDefaultModel: true,
+            ...(workspaceDir ? { workspaceDir } : {}),
+            signal,
+            isRemote: true,
+            beforePersistentEffect: () => {
               signal.throwIfAborted();
-              runnerSession.lockCancellation();
-              await prepared.persistAuthProfiles();
-              await setupShared.writeWizardConfigFile(prepared.config, {
-                allowConfigSizeDrop: false,
-                baseSnapshot: snapshot,
-                ...(snapshot.hash ? { baseHash: snapshot.hash } : {}),
-              });
-              if (prepared.agentModelOverride) {
-                runnerSession.setPreparedModelRef(prepared.agentModelOverride);
-              }
-            });
-          },
-          { timeoutMs: PROVIDER_PREPARE_SESSION_TIMEOUT_MS },
-        ),
-    );
-    if (!session) {
-      respondSetupAdmissionBusy(respond);
-      return;
-    }
-    context.wizardSessions.set(sessionId, session);
-    respond(true, { sessionId, done: false, status: "running" }, undefined);
+              runnerSession.lockCancellationForPreparation();
+            },
+          });
+          if (!prepared || prepared.retrySelection) {
+            throw new Error(
+              `Provider setup resolution failed for "${params.authChoice}". Run \`openclaw doctor --fix\`, restart the Gateway, and try again.`,
+            );
+          }
+          signal.throwIfAborted();
+          runnerSession.lockCancellation();
+          await prepared.persistAuthProfiles();
+          await setupShared.writeWizardConfigFile(prepared.config, {
+            allowConfigSizeDrop: false,
+            baseSnapshot: snapshot,
+            ...(snapshot.hash ? { baseHash: snapshot.hash } : {}),
+          });
+          if (prepared.agentModelOverride) {
+            runnerSession.setPreparedModelRef(prepared.agentModelOverride);
+          }
+        });
+      },
+    });
   },
   /**
    * Structured onboarding: live-test one candidate and persist it on success.

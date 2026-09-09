@@ -66,6 +66,7 @@ export type ModelProviderCapability = {
   provider: string;
   apiKeySupported: boolean;
   quickApiKeySetup: boolean;
+  accessOptions?: Array<{ id: string; label: string; mode: "login" | "setup" }>;
 };
 
 export type ModelAuthStatusResult = {

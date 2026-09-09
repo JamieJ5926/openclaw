@@ -49,6 +49,7 @@ type ProviderOnboardAuthFlag = {
 
 type ProviderAuthChoiceCandidate = ProviderAuthChoiceMetadata & {
   origin: PluginOrigin;
+  manifestDeclared: boolean;
 };
 type ProviderOnboardAuthFlagCandidate = ProviderAuthChoiceCandidate & {
   optionKey: string;
@@ -96,6 +97,7 @@ function toProviderAuthChoiceCandidate(params: {
   return {
     pluginId,
     origin,
+    manifestDeclared: true,
     providerId: choice.provider,
     methodId: choice.method,
     choiceId: choice.choiceId,
@@ -157,6 +159,7 @@ function toSetupProviderAuthChoiceCandidate(params: {
   return {
     pluginId: params.plugin.id,
     origin: params.plugin.origin,
+    manifestDeclared: false,
     providerId: params.providerId,
     methodId: params.methodId,
     choiceId: `${params.providerId}-${params.methodId}`,
@@ -193,7 +196,7 @@ function listSetupProviderAuthChoiceCandidates(plugin: PluginManifestRecord) {
 }
 
 function stripChoiceOrigin(choice: ProviderAuthChoiceCandidate): ProviderAuthChoiceMetadata {
-  const { origin: _origin, ...metadata } = choice;
+  const { origin: _origin, manifestDeclared: _manifestDeclared, ...metadata } = choice;
   return metadata;
 }
 
@@ -240,20 +243,20 @@ function resolveManifestProviderAuthChoiceCandidates(
   });
 }
 
-function pickPreferredManifestAuthChoice(
+function resolvePreferredManifestAuthChoiceCandidates(
   candidates: readonly ProviderAuthChoiceCandidate[],
-): ProviderAuthChoiceCandidate | undefined {
-  let preferred: ProviderAuthChoiceCandidate | undefined;
+): ProviderAuthChoiceCandidate[] {
+  let preferredPriority = Number.MAX_SAFE_INTEGER;
+  const preferred: ProviderAuthChoiceCandidate[] = [];
   for (const candidate of candidates) {
-    if (!preferred) {
-      preferred = candidate;
+    const priority = resolveProviderAuthChoiceOriginPriority(candidate.origin);
+    if (priority < preferredPriority) {
+      preferredPriority = priority;
+      preferred.splice(0, preferred.length, candidate);
       continue;
     }
-    if (
-      resolveProviderAuthChoiceOriginPriority(candidate.origin) <
-      resolveProviderAuthChoiceOriginPriority(preferred.origin)
-    ) {
-      preferred = candidate;
+    if (priority === preferredPriority) {
+      preferred.push(candidate);
     }
   }
   return preferred;
@@ -261,23 +264,22 @@ function pickPreferredManifestAuthChoice(
 
 function resolvePreferredManifestAuthChoicesByChoiceId(
   candidates: readonly ProviderAuthChoiceCandidate[],
+  preserveEqualPriority = false,
 ): ProviderAuthChoiceCandidate[] {
-  const preferredByChoiceId = new Map<string, ProviderAuthChoiceCandidate>();
+  const candidatesByChoiceId = new Map<string, ProviderAuthChoiceCandidate[]>();
   for (const candidate of candidates) {
     const normalizedChoiceId = candidate.choiceId.trim();
     if (!normalizedChoiceId) {
       continue;
     }
-    const existing = preferredByChoiceId.get(normalizedChoiceId);
-    if (
-      !existing ||
-      resolveProviderAuthChoiceOriginPriority(candidate.origin) <
-        resolveProviderAuthChoiceOriginPriority(existing.origin)
-    ) {
-      preferredByChoiceId.set(normalizedChoiceId, candidate);
-    }
+    const grouped = candidatesByChoiceId.get(normalizedChoiceId) ?? [];
+    grouped.push(candidate);
+    candidatesByChoiceId.set(normalizedChoiceId, grouped);
   }
-  return [...preferredByChoiceId.values()];
+  return [...candidatesByChoiceId.values()].flatMap((group) => {
+    const preferred = resolvePreferredManifestAuthChoiceCandidates(group);
+    return preserveEqualPriority ? preferred : preferred.slice(0, 1);
+  });
 }
 
 function resolvePreferredManifestAuthChoiceMetadata(params: {
@@ -287,8 +289,8 @@ function resolvePreferredManifestAuthChoiceMetadata(params: {
   const candidates = resolveManifestProviderAuthChoiceCandidates(params.config).filter(
     params.matches,
   );
-  const preferred = pickPreferredManifestAuthChoice(candidates);
-  return preferred ? stripChoiceOrigin(preferred) : undefined;
+  const preferred = resolvePreferredManifestAuthChoiceCandidates(candidates);
+  return preferred.length === 1 ? stripChoiceOrigin(preferred[0]!) : undefined;
 }
 
 export function resolveManifestProviderAuthChoices(
@@ -297,6 +299,34 @@ export function resolveManifestProviderAuthChoices(
   return resolvePreferredManifestAuthChoicesByChoiceId(
     resolveManifestProviderAuthChoiceCandidates(params),
   ).map(stripChoiceOrigin);
+}
+
+/** Resolves only executable auth choices declared by provider manifests. */
+export function resolveManifestDeclaredProviderAuthChoices(
+  params?: ManifestProviderAuthChoiceParams,
+): ProviderAuthChoiceMetadata[] {
+  const preferred = resolvePreferredManifestAuthChoicesByChoiceId(
+    resolveManifestProviderAuthChoiceCandidates(params),
+    true,
+  );
+  // A descriptor owner cannot turn a lower-priority declaration into an executable choice.
+  const descriptorIds = new Set(
+    preferred.filter((choice) => !choice.manifestDeclared).map((choice) => choice.choiceId.trim()),
+  );
+  return preferred
+    .filter((choice) => choice.manifestDeclared && !descriptorIds.has(choice.choiceId.trim()))
+    .map(stripChoiceOrigin);
+}
+
+/** Resolves a single declared owner, excluding descriptor-only and tied choices. */
+export function resolveManifestDeclaredProviderAuthChoice(
+  choiceId: string,
+  params?: ManifestProviderAuthChoiceParams,
+): ProviderAuthChoiceMetadata | undefined {
+  const choices = resolveManifestDeclaredProviderAuthChoices(params).filter(
+    (choice) => choice.choiceId.trim() === choiceId.trim(),
+  );
+  return choices.length === 1 ? choices[0] : undefined;
 }
 
 export function resolveManifestProviderAuthChoice(

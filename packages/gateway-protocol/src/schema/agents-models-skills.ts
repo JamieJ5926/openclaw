@@ -319,6 +319,13 @@ export const ModelsAuthStatusParamsSchema = closedObject({
   agentId: Type.Optional(Type.String()),
 });
 
+/** Starts a credential-only Models sign-in on the initiating connection. */
+export const ModelsAuthLoginParamsSchema = closedObject({
+  sessionId: NonEmptyString,
+  agentId: Type.Optional(NonEmptyString),
+  authChoice: NonEmptyString,
+});
+
 /** Removes saved model-provider credentials from one configured agent. */
 export const ModelsAuthLogoutParamsSchema = closedObject({
   provider: NonEmptyString,
@@ -1468,6 +1475,7 @@ export type ModelsListParams = Static<typeof ModelsListParamsSchema>;
 export type ModelCatalogProviderOutcome = Static<typeof ModelCatalogProviderOutcomeSchema>;
 export type ModelsListResult = Static<typeof ModelsListResultSchema>;
 export type ModelsAuthStatusParams = Static<typeof ModelsAuthStatusParamsSchema>;
+export type ModelsAuthLoginParams = Static<typeof ModelsAuthLoginParamsSchema>;
 export type ModelsAuthLogoutParams = Static<typeof ModelsAuthLogoutParamsSchema>;
 export type ModelsAuthOrderSetParams = Static<typeof ModelsAuthOrderSetParamsSchema>;
 export type AuthProbeStatus = Static<typeof AuthProbeStatusSchema>;

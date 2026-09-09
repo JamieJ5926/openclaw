@@ -16,6 +16,7 @@ import {
 } from "./state.ts";
 
 export type ModelSetupWizardStartMethod =
+  | "models.authLogin"
   | "openclaw.setup.auth.start"
   | "openclaw.setup.prepare.start"
   | "openclaw.setup.activate.start";
@@ -48,6 +49,7 @@ type WizardSession = {
   sessionId: string;
   authChoice: string;
   admitted?: boolean;
+  startPromise?: Promise<WizardStartResult | ModelSetupWizardResult>;
   suspended?: boolean;
   retired?: boolean;
   retirementGeneration: number;
@@ -109,7 +111,7 @@ export class ModelSetupWizardRunner {
         return this.applyResult(session, session.authChoice, session.terminalResult);
       }
       // Never repeat start or the last answer: either may have committed before
-      // the socket closed. The existing wizard owns the next visible step.
+      // the socket closed. Server socket ownership decides whether the next step remains available.
       return await this.requestNext(session, session.authChoice);
     } catch (error) {
       this.handleError(error, session);
@@ -186,6 +188,7 @@ export class ModelSetupWizardRunner {
             error: formatUiError(error, this.options.requestFailedMessage()),
           };
         });
+      session.startPromise = request;
       const started = await this.awaitWizardStart(session, request);
       if (!started.done) {
         session.admitted = true;
@@ -221,7 +224,9 @@ export class ModelSetupWizardRunner {
     }
   }
 
-  async cancel(options: { settleActiveRequest?: boolean } = {}): Promise<void> {
+  async cancel(
+    options: { settleActiveRequest?: boolean; waitForRelease?: boolean } = {},
+  ): Promise<void> {
     const session = this.session;
     if (!options.settleActiveRequest) {
       session?.abortController.abort();
@@ -229,7 +234,14 @@ export class ModelSetupWizardRunner {
     this.session = null;
     this.setState({ phase: "idle" });
     if (session) {
-      await this.cancelSession(session);
+      if (options.waitForRelease && session.startPromise) {
+        const started = await session.startPromise;
+        if (started.done) {
+          this.reportTerminalResult(session, started);
+          return;
+        }
+      }
+      await this.cancelSession(session, options.waitForRelease);
     }
   }
 
@@ -406,11 +418,42 @@ export class ModelSetupWizardRunner {
     this.setState({ phase: "error", message });
   }
 
-  private async cancelSession(session: WizardSession): Promise<WizardStatusResult | undefined> {
+  private async cancelSession(
+    session: WizardSession,
+    waitForRelease = false,
+  ): Promise<WizardStatusResult | undefined> {
     try {
-      return await this.sendCancellation(session);
-    } catch {
-      // Detached cleanup is best effort; explicit cancellation surfaces failures.
+      let result = await this.sendCancellation(session);
+      if (waitForRelease) {
+        const deadline = Date.now() + MODEL_SETUP_AUTH_START_TIMEOUT_MS;
+        while (result?.status === "running") {
+          if (Date.now() >= deadline) {
+            throw new Error(
+              "Sign-in is still finishing. Wait, then refresh Models before starting another sign-in.",
+            );
+          }
+          await new Promise<void>((resolve) => setTimeout(resolve, 250));
+          result = await session.client.request<WizardStatusResult>(
+            "wizard.status",
+            { sessionId: session.sessionId },
+            { timeoutMs: MODEL_SETUP_AUTH_START_TIMEOUT_MS },
+          );
+        }
+        if (result) {
+          // Terminal status joins the runner and the retained setup-target admission.
+          await session.client.request<WizardStatusResult>(
+            "wizard.status",
+            { sessionId: session.sessionId },
+            { timeoutMs: MODEL_SETUP_AUTH_START_TIMEOUT_MS },
+          );
+        }
+      }
+      return result;
+    } catch (error) {
+      if (waitForRelease && !isWizardNotFoundError(error)) {
+        throw error;
+      }
+      // A terminal or disconnected owner's session may already be purged.
       return undefined;
     }
   }

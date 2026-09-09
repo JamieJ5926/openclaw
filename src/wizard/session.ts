@@ -473,9 +473,11 @@ export class WizardSession {
     if (this.status !== "running") {
       return;
     }
+    const externalUrl = this.consumeExternalUrl();
     const step: WizardStep = {
       id: randomUUID(),
       type: "progress",
+      ...(externalUrl ? { externalUrl } : {}),
       message,
       executor: "gateway",
     };

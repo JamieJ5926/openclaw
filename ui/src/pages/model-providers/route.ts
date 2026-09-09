@@ -4,8 +4,10 @@ import { routePageSpec } from "../../app-route-paths.ts";
 import type { ApplicationContext } from "../../app/context.ts";
 import { normalizeAgentId } from "../../lib/sessions/session-key.ts";
 import type { ModelProvidersData } from "./load.ts";
+import { readModelsView, type ModelsView } from "./location.ts";
 
 export type ModelProvidersRouteData = {
+  view: ModelsView;
   /** Gateway source that owned the route preload. */
   gateway: ApplicationContext["gateway"];
   /** Exact Gateway snapshot captured before the preload began. */
@@ -21,6 +23,7 @@ async function loadModelProvidersRouteData(
   context: ApplicationContext,
   options: RouteLoaderOptions,
 ): Promise<ModelProvidersRouteData> {
+  const view = readModelsView(options.location);
   const gateway = context.gateway;
   const gatewaySnapshot = gateway.snapshot;
   let agentId = context.agentSelection.state.selectedId;
@@ -39,7 +42,14 @@ async function loadModelProvidersRouteData(
     );
   };
   if (!client || !isCurrent()) {
-    return { gateway, gatewaySnapshot, data: EMPTY_MODEL_PROVIDERS_DATA, client: null, agentId };
+    return {
+      view,
+      gateway,
+      gatewaySnapshot,
+      data: EMPTY_MODEL_PROVIDERS_DATA,
+      client: null,
+      agentId,
+    };
   }
   if (!agentId) {
     const roster = await context.agents.ensureList();
@@ -47,9 +57,17 @@ async function loadModelProvidersRouteData(
     agentId = roster ? normalizeAgentId(roster.defaultId) : null;
   }
   if (!agentId || !isCurrent()) {
-    return { gateway, gatewaySnapshot, data: EMPTY_MODEL_PROVIDERS_DATA, client: null, agentId };
+    return {
+      view,
+      gateway,
+      gatewaySnapshot,
+      data: EMPTY_MODEL_PROVIDERS_DATA,
+      client: null,
+      agentId,
+    };
   }
   return {
+    view,
     gateway,
     gatewaySnapshot,
     data: await loadModelProvidersData(client, { agentId, signal: options.signal }),
@@ -60,6 +78,7 @@ async function loadModelProvidersRouteData(
 
 export const page = definePage({
   ...routePageSpec("model-providers"),
+  loaderDeps: (_context: ApplicationContext, location) => location.search,
   loader: loadModelProvidersRouteData,
   component: () =>
     import("./model-providers-page.ts").then(() => ({

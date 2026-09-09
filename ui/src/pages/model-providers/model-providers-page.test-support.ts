@@ -266,6 +266,7 @@ export function createEmptyModelProvidersRouteData(
 ): ModelProvidersRouteData {
   // A loader completed before connection; the connected page now owns recovery.
   return {
+    view: "manage",
     gateway: context.gateway,
     gatewaySnapshot: { ...context.gateway.snapshot, phase: "stopped", client: null },
     data: EMPTY_MODEL_PROVIDERS_DATA,

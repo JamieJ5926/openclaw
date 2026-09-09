@@ -1,6 +1,6 @@
+import fs from "node:fs";
 // OpenClaw gateway tests cover activation serialization and chat sessions.
 import "./system-agent.mocks.test-support.js";
-import fs from "node:fs";
 import path from "node:path";
 import { expectDefined } from "@openclaw/normalization-core";
 import { describe, expect, it, vi } from "vitest";
@@ -16,7 +16,7 @@ import { SystemAgentChatEngine } from "../../system-agent/chat-engine.js";
 import { SystemAgentInferenceUnavailableError } from "../../system-agent/inference-error.js";
 import type { ActivateSetupInferenceParams } from "../../system-agent/setup-inference.js";
 import type { WizardPrompter } from "../../wizard/prompts.js";
-import type { WizardSession } from "../../wizard/session.js";
+import { createWizardSessionTracker } from "../server-wizard-sessions.js";
 import { runExclusiveSystemAgentSetupActivation } from "./setup-admission.js";
 import type { SystemAgentChatSession } from "./system-agent.js";
 import {
@@ -43,13 +43,12 @@ const {
 } = useSystemAgentGatewayTestFixture();
 
 function makeWizardContext() {
-  const wizardSessions = new Map<string, WizardSession>();
+  const tracker = createWizardSessionTracker();
+  const { wizardSessions } = tracker;
   return {
     wizardSessions,
     context: {
-      wizardSessions,
-      findRunningWizard: () => undefined,
-      purgeWizardSession: (id: string) => wizardSessions.delete(id),
+      ...tracker,
     } as unknown as GatewayRequestContext,
   };
 }
@@ -120,7 +119,10 @@ describe("openclaw.setup", () => {
         respond,
       } as never);
       expect(calls).toMatchObject([{ ok: true, payload: { sessionId } }]);
-      const session = expectDefined(wizardSessions.get(sessionId), "admitted setup session");
+      const session = expectDefined(
+        wizardSessions.get(sessionId)?.session,
+        "admitted setup session",
+      );
       await session.next();
       expect(setupInferenceMocks.activateSetupInference).toHaveBeenLastCalledWith(
         expect.objectContaining({

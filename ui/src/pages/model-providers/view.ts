@@ -1,11 +1,16 @@
 // Control UI view renders the Models settings page content.
 import { html, nothing, type TemplateResult } from "lit";
-import type { FastMode, GatewayAgentRow, ModelsProbeResult } from "../../api/types.ts";
+import type {
+  FastMode,
+  GatewayAgentRow,
+  ModelAuthStatusResult,
+  ModelsProbeResult,
+} from "../../api/types.ts";
 import { titleForRoute } from "../../app-navigation.ts";
 import type { AgentSelectionCapability } from "../../app/agent-selection.ts";
 import { renderAgentScopeControl } from "../../components/agent-scope-control.ts";
 import { icons } from "../../components/icons.ts";
-import { renderProviderBrandIcon } from "../../components/provider-icon.ts";
+import { providerDisplayLabel, renderProviderBrandIcon } from "../../components/provider-icon.ts";
 import { renderProviderUsageDetails } from "../../components/provider-usage.ts";
 import {
   renderLearnMoreLink,
@@ -32,6 +37,7 @@ import type {
   DefaultModelSelection,
   ModelPickerEntry,
   ModelProviderCard,
+  ModelProviderAccessOption,
   ModelProviderPendingLogout,
   ProviderOption,
 } from "./data.ts";
@@ -63,6 +69,8 @@ type ModelProvidersViewProps = {
   /** Retryable error from a picker-triggered catalog discovery. */
   catalogDiscoveryError: string | null;
   configBusy: boolean;
+  providerLoginBusy: boolean;
+  onLogin: (cardId: string, option: ModelProviderAccessOption) => void;
   quickAddSupported: boolean;
   unconfiguredProviders: ProviderOption[];
   canViewProfiles: boolean;
@@ -296,6 +304,7 @@ function renderProviderActions(card: ModelProviderCard, props: ModelProvidersVie
     : blocked;
   return html`
     <div class="model-providers__card-actions">
+      ${card.accessOptions.map((option) => html`<button class="btn btn--sm" data-model-provider-login=${option.id} ?disabled=${mutationDisabled || props.providerLoginBusy} title=${blocked} @click=${() => props.onLogin(card.id, option)}>${t(option.mode === "login" ? "modelSetup.unavailable.signIn" : "modelProviders.setup.action", { provider: option.label })}</button>`)}
       ${
         isConfigured
           ? html`
@@ -653,6 +662,9 @@ export function renderModelProvidersPageShell(props: {
   agentSelection: AgentSelectionCapability;
   agents: readonly GatewayAgentRow[];
   onOpenModelSetup: () => void;
+  onConnect: () => void;
+  onBack: () => void;
+  connectView: boolean;
   selectedAgentId: string;
   body: TemplateResult;
 }): TemplateResult {
@@ -668,6 +680,15 @@ export function renderModelProvidersPageShell(props: {
           allowAll: false,
           selectedId: props.selectedAgentId,
         })}
+        <button
+          class="btn"
+          data-models-connect
+          @click=${props.connectView ? props.onBack : props.onConnect}
+        >
+          ${props.connectView ? icons.arrowLeft : nothing}<span
+            >${t(props.connectView ? "common.back" : "modelProviders.connect.action")}</span
+          >
+        </button>
         <button class="btn" @click=${props.onOpenModelSetup}>
           ${icons.settings}<span>${t("modelProviders.configureModels")}</span>
         </button>
@@ -675,4 +696,37 @@ export function renderModelProvidersPageShell(props: {
     })}
     ${renderSettingsWorkspace(props.body)}
   `;
+}
+
+/** Manifest choices for accounts that are not configured yet; no setup detection runs here. */
+export function renderModelProviderConnect(
+  props: ModelProvidersViewProps & {
+    providers: NonNullable<ModelAuthStatusResult["providerCapabilities"]>;
+  },
+) {
+  if (!props.connected)
+    return renderSettingsPage(renderSettingsEmpty(t("modelProviders.disconnected")));
+  if (props.loading) return renderSettingsPage(renderSettingsLoadingSkeleton());
+  const providers = props.providers.filter((provider) => (provider.accessOptions?.length ?? 0) > 0);
+  return renderSettingsPage(html`
+    ${props.error ? html`<div class="callout danger" role="alert">${props.error}</div>` : nothing}
+    ${renderSettingsSection(
+      { title: t("modelProviders.connect.title") },
+      html`
+        ${
+          providers.length === 0
+            ? renderSettingsEmpty(t("modelProviders.connect.empty"))
+            : providers.map((provider) =>
+                renderSettingsGroup(html`
+                  <div class="model-providers__card-actions">
+                    <strong>${providerDisplayLabel(provider.provider)}</strong>
+                    ${provider.accessOptions?.map((option) => html`<button class="btn btn--sm" data-model-provider-login=${option.id} ?disabled=${configMutationDisabled(props) || props.providerLoginBusy} title=${props.mutationBlockedReason ?? ""} @click=${() => props.onLogin(provider.provider, option)}>${t(option.mode === "login" ? "modelSetup.unavailable.signIn" : "modelProviders.setup.action", { provider: option.label })}</button>`)}
+                  </div>
+                  ${renderMutationMessage(props.messages[provider.provider])}
+                `),
+              )
+        }
+      `,
+    )}
+  `);
 }

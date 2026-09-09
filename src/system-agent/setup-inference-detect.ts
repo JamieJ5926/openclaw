@@ -12,6 +12,7 @@ import {
   resolveManifestProviderAuthChoices,
 } from "../plugins/provider-auth-choices.js";
 import { resolveProviderInstallCatalogEntries } from "../plugins/provider-install-catalog.js";
+import { supportsProviderAuthChoiceTextInference } from "../plugins/provider-login-options.js";
 import { listRecommendedToolInstalls } from "../plugins/recommended-tool-installs.js";
 import {
   listSetupInferenceAuthOptions,
@@ -19,7 +20,6 @@ import {
   listSetupInferenceInstallOptions,
   listSetupInferenceManualProviders,
   listSetupInferencePrepareOptions,
-  supportsSetupTextInference,
 } from "./setup-inference-auth-options.js";
 import {
   type DetectSetupInferenceDeps,
@@ -216,7 +216,8 @@ export async function detectSetupInference(
   );
   const discoveryChoices = authChoices.filter(
     (choice) =>
-      choice.appGuidedDiscovery === true && supportsSetupTextInference(choice.onboardingScopes),
+      choice.appGuidedDiscovery === true &&
+      supportsProviderAuthChoiceTextInference(choice.onboardingScopes),
   );
   if (discoveryChoices.length > 0) {
     const { withPluginLifecycleLease } = await import("../plugins/plugin-lifecycle-lease.js");

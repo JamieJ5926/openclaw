@@ -110,6 +110,13 @@ const enSettings = {
     },
   },
   modelProviders: {
+    connect: {
+      action: "Connect provider",
+      title: "Choose a sign-in option",
+      empty: "No sign-in options are available. Refresh Models or use Configure Models.",
+    },
+    login: { done: "Sign-in saved. Your default model is unchanged." },
+    setup: { action: "Set up {provider}" },
     title: "Configured providers",
     configureModels: "Configure Models",
     subtitle: "Model providers with auth, plan, quota, and cost data.",

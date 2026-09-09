@@ -5,10 +5,73 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "../../i18n/index.ts";
 import { choosePickerValue, updatePickers } from "../../test-helpers/select-picker.ts";
 import type { ModelProviderCard } from "./data.ts";
-import { renderModelProviders } from "./view.ts";
+import { renderModelProviderConnect, renderModelProviders } from "./view.ts";
 
 type ModelProvidersViewProps = Parameters<typeof renderModelProviders>[0];
 type SegmentedGroup = HTMLElement & { disabled: boolean; value: string };
+
+it("starts the selected declared sign-in from a rendered provider card", () => {
+  const onLogin = vi.fn();
+  const option = { id: "fixture-device", label: "Fixture device sign-in", mode: "login" as const };
+  const container = document.createElement("div");
+  render(
+    renderModelProviders(props({ cards: [card({ accessOptions: [option] })], onLogin })),
+    container,
+  );
+  const button = container.querySelector<HTMLButtonElement>(
+    '[data-model-provider-login="fixture-device"]',
+  );
+  expect(button?.disabled).toBe(false);
+  button?.click();
+  expect(onLogin).toHaveBeenCalledWith("openai", option);
+});
+
+it("offers unconfigured manifest providers in Connect without adding configured cards", () => {
+  const onLogin = vi.fn();
+  const option = { id: "fixture-device", label: "Fixture device sign-in", mode: "login" as const };
+  const container = document.createElement("div");
+  render(
+    renderModelProviderConnect({
+      ...props({ cards: [], onLogin }),
+      providers: [
+        {
+          provider: "fixture",
+          apiKeySupported: false,
+          quickApiKeySetup: false,
+          accessOptions: [option],
+        },
+      ],
+    }),
+    container,
+  );
+  container
+    .querySelector<HTMLButtonElement>('[data-model-provider-login="fixture-device"]')
+    ?.click();
+  expect(onLogin).toHaveBeenCalledWith("fixture", option);
+});
+
+it("keeps sign-in disabled while its prior wizard is releasing", () => {
+  const onLogin = vi.fn();
+  const container = document.createElement("div");
+  render(
+    renderModelProviders(
+      props({
+        providerLoginBusy: true,
+        cards: [
+          card({ accessOptions: [{ id: "fixture-device", label: "Fixture", mode: "login" }] }),
+        ],
+        onLogin,
+      }),
+    ),
+    container,
+  );
+  const button = container.querySelector<HTMLButtonElement>(
+    '[data-model-provider-login="fixture-device"]',
+  );
+  expect(button?.disabled).toBe(true);
+  button?.click();
+  expect(onLogin).not.toHaveBeenCalled();
+});
 
 function card(overrides: Partial<ModelProviderCard> = {}): ModelProviderCard {
   return {
@@ -21,6 +84,7 @@ function card(overrides: Partial<ModelProviderCard> = {}): ModelProviderCard {
     profileOrderExplicitProviders: [],
     profileOrderLocks: {},
     credentialProviderIds: ["openai"],
+    accessOptions: [],
     logoutTargets: [],
     hasConfigApiKey: false,
     modelCount: 1,
@@ -51,6 +115,8 @@ function props(overrides: Partial<ModelProvidersViewProps> = {}): ModelProviders
     catalogDiscovering: false,
     catalogDiscoveryError: null,
     configBusy: false,
+    providerLoginBusy: false,
+    onLogin: () => undefined,
     quickAddSupported: true,
     unconfiguredProviders: [{ id: "anthropic", displayName: "Anthropic" }],
     canViewProfiles: true,

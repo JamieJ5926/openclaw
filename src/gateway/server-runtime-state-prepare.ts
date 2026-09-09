@@ -356,7 +356,14 @@ export async function prepareGatewayKernelState(params: {
   );
   const wizardRunner = opts.wizardRunner ?? runDefaultSetupWizard;
   const channelWizardRunner = opts.channelWizardRunner ?? runDefaultChannelSetupWizard;
-  const { wizardSessions, findRunningWizard, purgeWizardSession } = createWizardSessionTracker();
+  const {
+    wizardSessions,
+    trackWizardSession,
+    findOwnedWizardSession,
+    handleWizardDisconnect,
+    findRunningWizard,
+    purgeWizardSession,
+  } = createWizardSessionTracker();
   const systemAgentSessions: GatewayRequestContext["systemAgentSessions"] = new Map();
 
   const deps = createDefaultDeps();
@@ -544,6 +551,9 @@ export async function prepareGatewayKernelState(params: {
     wizardRunner,
     channelWizardRunner,
     wizardSessions,
+    trackWizardSession,
+    findOwnedWizardSession,
+    handleWizardDisconnect,
     findRunningWizard,
     purgeWizardSession,
     systemAgentSessions,

@@ -50,6 +50,10 @@ export type ModelProviderProfileOrderLock = NonNullable<
   ModelAuthStatusProvider["profileOrderLocked"]
 >;
 
+export type ModelProviderAccessOption = NonNullable<
+  NonNullable<ModelAuthStatusResult["providerCapabilities"]>[number]["accessOptions"]
+>[number];
+
 export type ModelProviderCard = {
   /** Canonical provider id used for icon + label lookup. */
   id: string;
@@ -57,6 +61,7 @@ export type ModelProviderCard = {
   configKey?: string;
   configAuthMode?: string;
   apiKeySupported?: boolean;
+  accessOptions: ModelProviderAccessOption[];
   /** Provider ids that own credentials merged into this card. */
   credentialProviderIds: string[];
   /** Saved OAuth/token profiles eligible for targeted logout. */
@@ -148,6 +153,7 @@ function ensureDraft(drafts: CardDraft[], id: string, displayName: string): Card
       profileOrderStoredProviders: [],
       profileOrderLocks: {},
       credentialProviderIds: [],
+      accessOptions: [],
       logoutTargets: [],
       hasConfigApiKey: false,
       modelCount: 0,
@@ -196,6 +202,7 @@ function addLogoutTarget(
 export function buildModelProviderCards(input: ModelProviderCardsInput): ModelProviderCard[] {
   const drafts: CardDraft[] = [];
   const apiKeyCapabilities = new Map<string, boolean>();
+  const accessOptionsByProvider = new Map<string, ModelProviderAccessOption[]>();
   const profileOrdersByAuthProvider = new Map<string, string[]>();
   const explicitOrderProviders = new Set<string>();
   for (const capability of input.authStatus?.providerCapabilities ?? []) {
@@ -204,6 +211,11 @@ export function buildModelProviderCards(input: ModelProviderCardsInput): ModelPr
       continue;
     }
     apiKeyCapabilities.set(id, apiKeyCapabilities.get(id) === true || capability.apiKeySupported);
+    const options = accessOptionsByProvider.get(id) ?? [];
+    for (const option of capability.accessOptions ?? []) {
+      if (!options.some((current) => current.id === option.id)) options.push(option);
+    }
+    accessOptionsByProvider.set(id, options);
   }
 
   for (const provider of input.configProviderIds ?? []) {
@@ -401,6 +413,7 @@ export function buildModelProviderCards(input: ModelProviderCardsInput): ModelPr
       return Object.assign(
         {},
         draft.card,
+        { accessOptions: accessOptionsByProvider.get(draft.card.id) ?? [] },
         draft.catalogOutcome ? { catalogStatus: draft.catalogOutcome.status } : {},
         apiKeySupported === undefined ? {} : { apiKeySupported },
       );

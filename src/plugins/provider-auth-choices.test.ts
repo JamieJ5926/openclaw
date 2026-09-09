@@ -47,6 +47,8 @@ vi.mock("./official-external-plugin-catalog.js", () => ({
 vi.resetModules();
 
 const {
+  resolveManifestDeclaredProviderAuthChoice,
+  resolveManifestDeclaredProviderAuthChoices,
   resolveManifestDeprecatedProviderAuthChoice,
   resolveManifestProviderAuthChoice,
   resolveManifestProviderAuthChoices,
@@ -129,6 +131,49 @@ describe("provider auth choice manifest helpers", () => {
     officialCatalogMocks.listOfficialExternalProviderCatalogEntries.mockReset();
     officialCatalogMocks.listOfficialExternalProviderCatalogEntries.mockReturnValue([]);
     clearPluginMetadataLifecycleCaches();
+  });
+
+  it("refuses tied manifest login owners while keeping the unrelated choice", () => {
+    const shared = {
+      provider: "fixture",
+      method: "oauth",
+      choiceId: "shared",
+      choiceLabel: "Sign in",
+      appGuidedAuth: "oauth",
+    };
+    setManifestPlugins([
+      { id: "first", origin: "config", providerAuthChoices: [shared] },
+      { id: "second", origin: "config", providerAuthChoices: [shared] },
+      { id: "other", origin: "bundled", providerAuthChoices: [{ ...shared, choiceId: "unique" }] },
+    ]);
+    expect(resolveManifestDeclaredProviderAuthChoice("shared")).toBeUndefined();
+    expect(resolveManifestDeclaredProviderAuthChoice("unique")?.pluginId).toBe("other");
+  });
+
+  it("does not turn a winning setup descriptor into a lower-priority executable login", () => {
+    setManifestPlugins([
+      {
+        id: "descriptor",
+        origin: "config",
+        setup: { providers: [{ id: "fixture", authMethods: ["oauth"] }] },
+      },
+      {
+        id: "declared",
+        origin: "bundled",
+        providerAuthChoices: [
+          {
+            provider: "fixture",
+            method: "oauth",
+            choiceId: "fixture-oauth",
+            choiceLabel: "Sign in",
+            appGuidedAuth: "oauth",
+          },
+        ],
+      },
+    ]);
+    expect(resolveManifestDeclaredProviderAuthChoices()).toEqual([]);
+    expect(resolveManifestDeclaredProviderAuthChoice("fixture-oauth")).toBeUndefined();
+    expect(resolveManifestProviderAuthChoice("fixture-oauth")?.pluginId).toBe("descriptor");
   });
 
   it("flattens manifest auth choices", () => {

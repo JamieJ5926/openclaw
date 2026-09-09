@@ -911,6 +911,132 @@ describe("modelsAuthLoginCommand", () => {
     );
   });
 
+  it.each([undefined, "existing/model"])(
+    "keeps the existing default %s and restrictions during credential-only sign-in",
+    async (model) => {
+      const defaults = {
+        ...(model ? { model } : {}),
+        models: { "existing/model": { alias: "Existing" } },
+        modelPolicy: { allow: ["existing/*"] },
+      };
+      currentConfig = { agents: { defaults }, tools: { profile: "messaging" } };
+      const profiles = [
+        {
+          profileId: "openai:fixture",
+          credential: { type: "api_key", provider: "openai", key: "synthetic-secret" },
+        },
+      ];
+      runProviderAuth.mockResolvedValueOnce({
+        profiles,
+        defaultModel: "openai/new-default",
+        replaceDefaultModels: true,
+        configPatch: {
+          agents: {
+            defaults: { model: "openai/new-default", models: {}, modelPolicy: { allow: ["*"] } },
+          },
+          tools: { profile: "full" },
+          models: { providers: { openai: { baseUrl: "http://127.0.0.1:9/v1", models: [] } } },
+        },
+      });
+      const beforePersistentEffect = vi.fn(() => {
+        expect(mocks.persistProviderAuthProfilesAfterLogin).not.toHaveBeenCalled();
+        expect(mocks.updateConfig).not.toHaveBeenCalled();
+      });
+      const result = await runModelsAuthLoginFlowCore({
+        provider: "openai",
+        method: "oauth",
+        ownerPluginId: "openai-owner",
+        credentialOnly: true,
+        setDefault: true,
+        config: currentConfig,
+        runtime: createRuntime(),
+        prompter: mocks.createClackPrompter(),
+        beforePersistentEffect,
+      });
+      expect(beforePersistentEffect).toHaveBeenCalledOnce();
+      expect(mocks.resolvePluginProvidersCore).toHaveBeenCalledWith(
+        expect.objectContaining({
+          onlyPluginIds: ["openai-owner"],
+          includeUntrustedWorkspacePlugins: false,
+        }),
+      );
+      expect(mocks.resolvePluginSetupProviderCore).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pluginIds: ["openai-owner"],
+          provider: "openai",
+        }),
+      );
+      expect(mocks.persistProviderAuthProfilesAfterLogin).toHaveBeenCalledWith(
+        expect.objectContaining({ profiles }),
+      );
+      expect(currentConfig.agents?.defaults).toEqual(defaults);
+      expect(currentConfig.tools).toEqual({ profile: "messaging" });
+      expect(currentConfig.models?.providers?.openai?.baseUrl).toBe("http://127.0.0.1:9/v1");
+      expect(result.defaultModel).toBeUndefined();
+      expect(mocks.callGateway).toHaveBeenCalledWith(
+        expect.objectContaining({ params: { refresh: true, agentId: "main" } }),
+      );
+    },
+  );
+
+  it("refuses a removed exact method without choosing a fallback", async () => {
+    await expect(
+      runModelsAuthLoginFlowCore({
+        provider: "openai",
+        method: "removed",
+        ownerPluginId: "openai-owner",
+        credentialOnly: true,
+        config: currentConfig,
+        runtime: createRuntime(),
+        prompter: mocks.createClackPrompter(),
+      }),
+    ).rejects.toThrow("Unknown auth method");
+    expect(runProviderAuth).not.toHaveBeenCalled();
+    expect(mocks.clackSelect).not.toHaveBeenCalled();
+    expect(mocks.persistProviderAuthProfilesAfterLogin).not.toHaveBeenCalled();
+  });
+
+  it("stops before persistence when connection authority has retired", async () => {
+    await expect(
+      runModelsAuthLoginFlowCore({
+        provider: "openai",
+        method: "oauth",
+        ownerPluginId: "openai-owner",
+        credentialOnly: true,
+        config: currentConfig,
+        runtime: createRuntime(),
+        prompter: mocks.createClackPrompter(),
+        beforePersistentEffect: () => {
+          throw new Error("Connection retired");
+        },
+      }),
+    ).rejects.toThrow("Connection retired");
+    expect(runProviderAuth).toHaveBeenCalledOnce();
+    expect(mocks.persistProviderAuthProfilesAfterLogin).not.toHaveBeenCalled();
+    expect(mocks.updateConfig).not.toHaveBeenCalled();
+    expect(mocks.callGateway).not.toHaveBeenCalled();
+  });
+
+  it("refuses a credential-only result with no credential before its config patch can apply", async () => {
+    runProviderAuth.mockResolvedValueOnce({
+      profiles: [],
+      configPatch: { plugins: { allow: ["unrelated"] } },
+    });
+    await expect(
+      runModelsAuthLoginFlowCore({
+        provider: "openai",
+        method: "oauth",
+        ownerPluginId: "openai-owner",
+        credentialOnly: true,
+        config: currentConfig,
+        runtime: createRuntime(),
+        prompter: mocks.createClackPrompter(),
+      }),
+    ).rejects.toThrow("did not return a credential profile");
+    expect(mocks.persistProviderAuthProfilesAfterLogin).not.toHaveBeenCalled();
+    expect(mocks.updateConfig).not.toHaveBeenCalled();
+  });
+
   it("forwards an app-owned cancellation signal to provider auth", async () => {
     const runtime = createRuntime();
     const abortController = new AbortController();

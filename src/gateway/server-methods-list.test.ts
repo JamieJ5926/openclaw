@@ -97,6 +97,7 @@ describe("listGatewayMethods", () => {
       "skills.workshop.read",
       "session.publicShare.set",
       "claws.monitors",
+      "models.authLogin",
     ]);
   });
 

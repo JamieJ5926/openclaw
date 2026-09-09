@@ -1,6 +1,7 @@
 import { compareProviderAuthChoiceGroups } from "../plugins/provider-auth-choice-order.js";
 import type { ProviderAuthChoiceMetadata } from "../plugins/provider-auth-choices.js";
 import type { ProviderInstallCatalogEntry } from "../plugins/provider-install-catalog.js";
+import { supportsProviderAuthChoiceTextInference } from "../plugins/provider-login-options.js";
 
 export type SetupInferenceManualProvider = {
   /** Provider-auth choice id sent back to `openclaw.setup.activate`. */
@@ -39,7 +40,7 @@ export function listSetupInferenceInstallOptions(
     if (
       installed.has(entry.choiceId) ||
       options.has(entry.choiceId) ||
-      !supportsSetupTextInference(entry.onboardingScopes)
+      !supportsProviderAuthChoiceTextInference(entry.onboardingScopes)
     ) {
       continue;
     }
@@ -77,14 +78,11 @@ export type SetupInferencePrepareOption = {
   website?: string;
 };
 
-export function supportsSetupTextInference(
-  scopes?: ProviderAuthChoiceMetadata["onboardingScopes"],
-): boolean {
-  return !scopes || scopes.includes("text-inference");
-}
-
 export function supportsSetupManualSecret(choice: ProviderAuthChoiceMetadata): boolean {
-  return supportsSetupTextInference(choice.onboardingScopes) && choice.appGuidedSecret === true;
+  return (
+    supportsProviderAuthChoiceTextInference(choice.onboardingScopes) &&
+    choice.appGuidedSecret === true
+  );
 }
 
 export function listSetupInferenceManualProviders(
@@ -129,7 +127,7 @@ export function listSetupInferenceAuthOptions(
     if (
       !id ||
       choices.has(id) ||
-      !supportsSetupTextInference(choice.onboardingScopes) ||
+      !supportsProviderAuthChoiceTextInference(choice.onboardingScopes) ||
       (!choice.appGuidedAuth &&
         (choice.appGuidedSecret === true || choice.appGuidedDiscovery === true))
     ) {
@@ -175,7 +173,7 @@ export function listSetupInferenceEnableOptions(
   choices: readonly ProviderAuthChoiceMetadata[],
 ): SetupInferenceAuthOption[] {
   return choices
-    .filter((choice) => supportsSetupTextInference(choice.onboardingScopes))
+    .filter((choice) => supportsProviderAuthChoiceTextInference(choice.onboardingScopes))
     .map((choice) => {
       const option: SetupInferenceAuthOption = {
         id: choice.choiceId,
@@ -224,7 +222,7 @@ export function listSetupInferencePrepareOptions(
     if (
       !id ||
       choices.has(id) ||
-      !supportsSetupTextInference(choice.onboardingScopes) ||
+      !supportsProviderAuthChoiceTextInference(choice.onboardingScopes) ||
       choice.appGuidedDiscovery !== true
     ) {
       continue;

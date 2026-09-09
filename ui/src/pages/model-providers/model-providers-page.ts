@@ -1,7 +1,7 @@
 import { consume } from "@lit/context";
 import { initialState, Task } from "@lit/task";
 import { asNullableRecord as asConfigRecord } from "@openclaw/normalization-core/record-coerce";
-import type { PropertyValues } from "lit";
+import { html, type PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import type { ModelsProbeResult } from "../../api/types.ts";
@@ -38,6 +38,8 @@ import {
   MODEL_PROVIDERS_COST_DAYS,
   type ModelProvidersData,
 } from "./load.ts";
+import { modelsNavigationOptions } from "./location.ts";
+import { ModelProviderLoginController } from "./login-controller.ts";
 import { readModelBehaviorConfig, type ModelBehaviorConfig } from "./model-behavior.ts";
 import {
   buildDefaultsPatch,
@@ -50,7 +52,11 @@ import { showProfileActionError, showProfileLogoutSuccess } from "./profiles-vie
 import { updateRecordEntry } from "./record-state.ts";
 import type { ModelProvidersRouteData } from "./route.ts";
 import { ModelProviderSupplementalLoader } from "./supplemental-load.ts";
-import { renderModelProviders, renderModelProvidersPageShell } from "./view.ts";
+import {
+  renderModelProviderConnect,
+  renderModelProviders,
+  renderModelProvidersPageShell,
+} from "./view.ts";
 
 type DefaultsDraft = DefaultModelSelection & ModelBehaviorConfig;
 
@@ -157,6 +163,14 @@ export class ModelProvidersPage extends OpenClawLightDomElement {
     },
     onPageActivation: () => this.refreshPolicy.request("focus"),
   });
+  private readonly providerLogin = new ModelProviderLoginController(this, {
+    getClient: () => this.gateway.client,
+    getAgentId: () => this.selectedAgentId,
+    getRuntimeConfig: () => this.context.runtimeConfig,
+    canStart: () => this.canMutate(),
+    refresh: () => this.refresh({ force: true }),
+    setMessage: (key, value) => this.setMessage(key, value),
+  });
   private readonly profileActions = new ModelProviderProfileActionsController({
     getAgentEpoch: () => this.agentEpoch,
     getAgentId: () => this.selectedAgentId,
@@ -204,6 +218,7 @@ export class ModelProvidersPage extends OpenClawLightDomElement {
     );
 
   override disconnectedCallback() {
+    this.providerLogin.reset();
     // Pending orders belong to this page; a delayed save must not dispatch
     // them after navigation over a replacement page's newer order.
     this.profileActions.resetOrders();
@@ -266,6 +281,7 @@ export class ModelProvidersPage extends OpenClawLightDomElement {
   }
 
   private invalidateRequests() {
+    this.providerLogin.reset();
     this.logoutConfirmation?.abort();
     this.cancelCoreRefresh();
     this.supplemental.invalidate();
@@ -284,6 +300,7 @@ export class ModelProvidersPage extends OpenClawLightDomElement {
   }
 
   private resetAgentScopeState() {
+    this.providerLogin.reset();
     this.busy = {};
     this.messages = {};
     this.probeResults = {};
@@ -641,7 +658,7 @@ export class ModelProvidersPage extends OpenClawLightDomElement {
         .map((provider) => provider.provider) ?? []),
     ]);
     const advertised = isGatewayMethodAdvertised(gatewaySnapshot, "models.probe");
-    const body = renderModelProviders({
+    const viewProps = {
       connected: gatewaySnapshot.phase === "connected",
       loading: gatewaySnapshot.phase === "connected" && this.data === null && !rosterError,
       refreshing: this.loadClient !== null,
@@ -661,6 +678,8 @@ export class ModelProvidersPage extends OpenClawLightDomElement {
       catalogDiscovering: this.catalogDiscovery.discovering,
       catalogDiscoveryError: this.catalogDiscovery.error,
       configBusy: this.configBusy(),
+      providerLoginBusy: this.providerLogin.busy,
+      onLogin: (cardId, option) => this.providerLogin.start(cardId, option),
       quickAddSupported: data.authStatus?.providerCapabilities !== undefined,
       unconfiguredProviders: buildUnconfiguredProviderOptions(
         data.authStatus?.providerCapabilities,
@@ -726,14 +745,27 @@ export class ModelProvidersPage extends OpenClawLightDomElement {
       onModelPickerOpen: () => this.catalogDiscovery.openPicker(),
       onCatalogRetry: () => this.catalogDiscovery.retry(),
       onOpenModelSetup: () => this.context.navigate("model-setup"),
-    });
-    return renderModelProvidersPageShell({
+    } satisfies Parameters<typeof renderModelProviders>[0];
+    const connectView = this.routeData?.view === "connect";
+    const body = connectView
+      ? renderModelProviderConnect({
+          ...viewProps,
+          providers: data.authStatus?.providerCapabilities ?? [],
+        })
+      : renderModelProviders(viewProps);
+    return html`${renderModelProvidersPageShell({
       agentSelection: this.context.agentSelection,
       agents,
       onOpenModelSetup: () => this.context.navigate("model-setup"),
       selectedAgentId: this.selectedAgentId,
+      connectView,
+      onConnect: () => this.context.navigate("model-providers", modelsNavigationOptions("connect")),
+      onBack: () => {
+        this.providerLogin.reset();
+        this.context.navigate("model-providers", modelsNavigationOptions("manage"));
+      },
       body,
-    });
+    })}${this.providerLogin.render()}`;
   }
 }
 

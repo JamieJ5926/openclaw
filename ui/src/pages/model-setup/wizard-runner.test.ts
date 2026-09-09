@@ -1,10 +1,92 @@
 import { describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../../../../test/helpers/promise.js";
-import { GatewayRequestError, type GatewayBrowserClient } from "../../api/gateway.ts";
+import { GatewayRequestError, GatewayBrowserClient } from "../../api/gateway.ts";
 import type { WizardNextResult } from "../../api/types.ts";
 import { ModelSetupWizardRunner } from "./wizard-runner.ts";
 
 describe("ModelSetupWizardRunner", () => {
+  it("keeps explicit Models cancellation pending until terminal status joins admission", async () => {
+    const terminal = createDeferred<{ status: "cancelled" }>();
+    const statusRequested = createDeferred();
+    const client = new GatewayBrowserClient({ url: "ws://127.0.0.1:1" });
+    vi.spyOn(client, "request").mockImplementation(async (method) => {
+      if (method === "models.authLogin") return { done: false, status: "running" };
+      if (method === "wizard.next")
+        return {
+          done: false,
+          status: "running",
+          step: { id: "secret", type: "text", executor: "client" },
+        };
+      if (method === "wizard.cancel") return { status: "cancelled" };
+      if (method === "wizard.status") {
+        statusRequested.resolve();
+        return await terminal.promise;
+      }
+      throw new Error(`Unexpected method: ${method}`);
+    });
+    const runner = new ModelSetupWizardRunner({
+      getClient: () => client,
+      getAgentId: () => "main",
+      onChange: () => undefined,
+      requestFailedMessage: () => "failed",
+      cancelledMessage: () => "cancelled",
+      sessionExpiredMessage: () => "expired",
+    });
+    await runner.start("fixture-secret", "models.authLogin");
+    let released = false;
+    const cancellation = runner.cancel({ waitForRelease: true }).then(() => {
+      released = true;
+    });
+    await statusRequested.promise;
+    expect(released).toBe(false);
+    terminal.resolve({ status: "cancelled" });
+    await cancellation;
+    expect(released).toBe(true);
+    expect(runner.state).toEqual({ phase: "idle" });
+  });
+
+  it("keeps a lost Models start attached to its original client until cancellation releases it", async () => {
+    const start = createDeferred<{ done: false; status: "running" }>();
+    const requested = createDeferred();
+    const original = new GatewayBrowserClient({ url: "ws://127.0.0.1:1" });
+    const replacement = new GatewayBrowserClient({ url: "ws://127.0.0.1:2" });
+    const replacementRequest = vi.spyOn(replacement, "request");
+    const originalRequest = vi.spyOn(original, "request").mockImplementation(async (method) => {
+      if (method === "models.authLogin") {
+        requested.resolve();
+        return await start.promise;
+      }
+      if (method === "wizard.cancel" || method === "wizard.status") return { status: "cancelled" };
+      throw new Error(`Unexpected method: ${method}`);
+    });
+    let client = original;
+    const runner = new ModelSetupWizardRunner({
+      getClient: () => client,
+      getAgentId: () => "main",
+      onChange: () => undefined,
+      requestFailedMessage: () => "failed",
+      cancelledMessage: () => "cancelled",
+      sessionExpiredMessage: () => "expired",
+    });
+    const starting = runner.start("fixture-secret", "models.authLogin");
+    await requested.promise;
+    let released = false;
+    const cancellation = runner.cancel({ waitForRelease: true }).then(() => {
+      released = true;
+    });
+    client = replacement;
+    expect(released).toBe(false);
+    start.resolve({ done: false, status: "running" });
+    await Promise.all([starting, cancellation]);
+    expect(originalRequest).toHaveBeenCalledWith(
+      "wizard.cancel",
+      expect.any(Object),
+      expect.any(Object),
+    );
+    expect(replacementRequest).not.toHaveBeenCalled();
+    expect(released).toBe(true);
+  });
+
   it.each(["cancelled", "failed"] as const)(
     "shares an in-flight explicit cancellation with teardown when it is %s",
     async (outcome) => {

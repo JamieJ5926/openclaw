@@ -236,6 +236,7 @@ function preferSetupAuthProviders(params: {
   config: OpenClawConfig;
   workspaceDir: string;
   requestedProvider?: string;
+  ownerPluginId?: string;
 }): ProviderPlugin[] {
   const requestedProvider = params.requestedProvider
     ? normalizeManualAuthProvider(params.requestedProvider)
@@ -245,6 +246,7 @@ function preferSetupAuthProviders(params: {
       provider: requestedProvider,
       config: params.config,
       workspaceDir: params.workspaceDir,
+      ...(params.ownerPluginId ? { pluginIds: [params.ownerPluginId] } : {}),
     });
     return setupProvider ? [setupProvider] : [...params.providers];
   }
@@ -258,6 +260,7 @@ function preferSetupAuthProviders(params: {
 
 async function resolveModelsAuthContext(params?: {
   requestedProvider?: string;
+  ownerPluginId?: string;
   rawAgentId?: string | null;
   config?: OpenClawConfig;
 }): Promise<ResolvedModelsAuthContext> {
@@ -275,13 +278,18 @@ async function resolveModelsAuthContext(params?: {
     workspaceDir,
     mode: "setup",
     includeUntrustedWorkspacePlugins: false,
-    ...(providerRef ? { providerRefs: [providerRef] } : {}),
+    ...(params?.ownerPluginId
+      ? { onlyPluginIds: [params.ownerPluginId] }
+      : providerRef
+        ? { providerRefs: [providerRef] }
+        : {}),
   });
   const authProviders = preferSetupAuthProviders({
     providers,
     config,
     workspaceDir,
     requestedProvider: providerRef,
+    ownerPluginId: params?.ownerPluginId,
   });
   return {
     config,
@@ -527,6 +535,29 @@ function resolveConfiguredAuthSelectionForProvider(
     : { createIfMissing: false };
 }
 
+function credentialOnlyAuthResult(result: ProviderAuthResult): ProviderAuthResult {
+  const {
+    defaultModel: _defaultModel,
+    replaceDefaultModels: _replaceDefaultModels,
+    notes: _notes,
+    configPatch,
+    ...credentials
+  } = result;
+  return {
+    ...credentials,
+    ...(configPatch
+      ? {
+          configPatch: {
+            ...(configPatch.models?.providers
+              ? { models: { providers: configPatch.models.providers } }
+              : {}),
+            ...(configPatch.plugins ? { plugins: configPatch.plugins } : {}),
+          },
+        }
+      : {}),
+  };
+}
+
 async function runProviderAuthMethod(params: {
   config: OpenClawConfig;
   agentId: string;
@@ -542,9 +573,11 @@ async function runProviderAuthMethod(params: {
   isRemote?: boolean;
   signal?: AbortSignal;
   openUrl?: (url: string) => Promise<void>;
+  credentialOnly?: boolean;
+  beforePersistentEffect?: () => void;
 }): Promise<{ result: ProviderAuthResult; profiles: ProviderAuthResult["profiles"] }> {
   params.signal?.throwIfAborted();
-  const result = await params.method.run({
+  const rawResult = await params.method.run({
     config: params.config,
     env: params.env ?? process.env,
     agentDir: params.agentDir,
@@ -565,10 +598,21 @@ async function runProviderAuthMethod(params: {
     },
   });
   params.signal?.throwIfAborted();
+  const result = params.credentialOnly ? credentialOnlyAuthResult(rawResult) : rawResult;
+  if (params.credentialOnly) {
+    for (const note of rawResult.notes ?? []) {
+      params.runtime.log(note);
+    }
+  }
   const profiles = resolveLoginProfiles({
     result,
     requestedProfileId: params.profileId,
   });
+  if (params.credentialOnly && profiles.length === 0) {
+    throw new Error("The selected sign-in method did not return a credential profile.");
+  }
+  params.beforePersistentEffect?.();
+  params.signal?.throwIfAborted();
 
   const persistedProfiles = await persistProviderAuthResult({
     result,
@@ -578,7 +622,7 @@ async function runProviderAuthMethod(params: {
     agentDir: params.agentDir,
     runtime: params.runtime,
     prompter: params.prompter,
-    setDefault: params.setDefault,
+    setDefault: params.credentialOnly ? false : params.setDefault,
     env: params.env ?? process.env,
   });
 
@@ -901,6 +945,12 @@ export type ModelsAuthLoginFlowResult = {
 };
 
 export type ModelsAuthLoginFlowOptions = LoginOptions & {
+  /** Exact manifest owner for a preselected remote sign-in. */
+  ownerPluginId?: string;
+  /** Restrict this login to credentials and connection/plugin settings. */
+  credentialOnly?: boolean;
+  /** Synchronous live-authority guard before the existing durable writer starts. */
+  beforePersistentEffect?: () => void;
   config?: OpenClawConfig;
   runtime: RuntimeEnv;
   prompter: WizardPrompter;
@@ -965,6 +1015,7 @@ export async function runModelsAuthLoginFlowCore(
     : undefined;
   let context = await resolveModelsAuthContext({
     requestedProvider: requestedProviderId,
+    ownerPluginId: opts.ownerPluginId,
     rawAgentId: opts.agent,
     config: opts.config,
   });
@@ -974,6 +1025,7 @@ export async function runModelsAuthLoginFlowCore(
     ? resolveProviderMatch(authProviders, requestedProviderId)
     : null;
   const useProviderPicker =
+    opts.ownerPluginId === undefined &&
     requestedProviderId !== undefined &&
     requestedProvider === null &&
     isCliProvider(requestedProviderId, context.config);
@@ -1025,11 +1077,13 @@ export async function runModelsAuthLoginFlowCore(
     );
   }
 
-  const chosenMethod = await pickProviderAuthMethod({
-    provider: selectedProvider,
-    requestedMethod: opts.method,
-    prompter,
-  });
+  const chosenMethod = opts.ownerPluginId
+    ? selectedProvider.auth.find((method) => method.id === opts.method)
+    : await pickProviderAuthMethod({
+        provider: selectedProvider,
+        requestedMethod: opts.method,
+        prompter,
+      });
 
   if (!chosenMethod) {
     throw new Error(
@@ -1085,6 +1139,8 @@ export async function runModelsAuthLoginFlowCore(
     isRemote: opts.isRemote,
     signal: opts.signal,
     openUrl: opts.openUrl,
+    credentialOnly: opts.credentialOnly,
+    beforePersistentEffect: opts.beforePersistentEffect,
   });
   maybeLogOpenAICodexNativeSearchTip(opts.runtime, selectedProvider.id);
   return {

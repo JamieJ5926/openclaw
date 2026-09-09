@@ -74,6 +74,9 @@ type GatewayRequestContextRuntime = Pick<
   | "unsubscribeSessionMessageEvents"
   | "dedupe"
   | "wizardSessions"
+  | "trackWizardSession"
+  | "findOwnedWizardSession"
+  | "handleWizardDisconnect"
   | "systemAgentSessions"
   | "findRunningWizard"
   | "purgeWizardSession"
@@ -510,6 +513,9 @@ export function createGatewayRequestContext(
     registerToolEventRecipient: runtime.toolEventRecipients.add,
     dedupe: runtime.dedupe,
     wizardSessions: runtime.wizardSessions,
+    trackWizardSession: runtime.trackWizardSession,
+    findOwnedWizardSession: runtime.findOwnedWizardSession,
+    handleWizardDisconnect: runtime.handleWizardDisconnect,
     systemAgentSessions: runtime.systemAgentSessions,
     findRunningWizard: runtime.findRunningWizard,
     purgeWizardSession: runtime.purgeWizardSession,

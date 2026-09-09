@@ -16,6 +16,7 @@ import { SetupInferenceActivationIndeterminateError } from "../../system-agent/s
 import type { ActivateSetupInferenceParams } from "../../system-agent/setup-inference.js";
 import { createPluginCapabilityConsentPrompter } from "../../wizard/plugin-capability-consent.js";
 import { WizardSession } from "../../wizard/session.js";
+import { createWizardSessionTracker } from "../server-wizard-sessions.js";
 import { whenAdmittedWizardSessionSettled } from "./setup-admission.js";
 import { systemAgentHandlers } from "./system-agent.js";
 import type { GatewayRequestContext } from "./types.js";
@@ -48,13 +49,12 @@ const config: OpenClawConfig = {
 const validateWizardResult = Compile(WizardNextResultSchema);
 
 function makeContext() {
-  const wizardSessions = new Map<string, WizardSession>();
+  const tracker = createWizardSessionTracker();
+  const { wizardSessions } = tracker;
   return {
     wizardSessions,
     context: {
-      wizardSessions,
-      findRunningWizard: () => undefined,
-      purgeWizardSession: (id: string) => wizardSessions.delete(id),
+      ...tracker,
     } as unknown as GatewayRequestContext,
   };
 }
@@ -126,7 +126,7 @@ describe("openclaw.setup provider resolution", () => {
   ] as const)("does not replace a retained wizard session through %s", async (method, params) => {
     const { wizardSessions, context } = makeContext();
     const retained = new WizardSession(async () => {});
-    wizardSessions.set(params.sessionId, retained);
+    context.trackWizardSession(retained, undefined, params.sessionId);
     await retained.whenSettled();
     const { calls, respond } = makeRespond();
 
@@ -139,7 +139,7 @@ describe("openclaw.setup provider resolution", () => {
         error: expect.objectContaining({ message: "wizard session already exists" }),
       },
     ]);
-    expect(wizardSessions.get(params.sessionId)).toBe(retained);
+    expect(wizardSessions.get(params.sessionId)?.session).toBe(retained);
     expect(setupInferenceMocks.activateSetupInference).not.toHaveBeenCalled();
     expect(providerAuthChoiceMocks.prepareAuthChoiceLoadedPluginProvider).not.toHaveBeenCalled();
   });
@@ -183,7 +183,10 @@ describe("openclaw.setup provider resolution", () => {
         ok: true,
         payload: { sessionId, done: false, status: "running" },
       });
-      const session = expectDefined(wizardSessions.get(sessionId), "activation wizard session");
+      const session = expectDefined(
+        wizardSessions.get(sessionId)?.session,
+        "activation wizard session",
+      );
       const note = await callWizardNext(context, { sessionId });
       expect(note.step).toMatchObject({ type: "note", title: "Plugin capabilities" });
       expect(JSON.stringify(note)).not.toContain(review.reviewToken);
@@ -371,7 +374,7 @@ describe("openclaw.setup provider resolution", () => {
         respond: () => undefined,
         context,
       } as never);
-      session = expectDefined(wizardSessions.get(sessionId), "provider auth wizard");
+      session = expectDefined(wizardSessions.get(sessionId)?.session, "provider auth wizard");
       const confirmation = await callWizardNext(context, { sessionId });
       await session.answer(expectDefined(confirmation.step, "install confirmation").id, true);
       await installStarted.promise;
@@ -460,7 +463,7 @@ describe("openclaw.setup provider resolution", () => {
       respond: () => undefined,
       context,
     } as never);
-    const session = expectDefined(wizardSessions.get(sessionId), "verification wizard");
+    const session = expectDefined(wizardSessions.get(sessionId)?.session, "verification wizard");
     try {
       const progress = await callWizardNext(context, { sessionId });
       expect(progress.step?.type).toBe("progress");
@@ -507,7 +510,7 @@ describe("openclaw.setup provider resolution", () => {
     } as never);
 
     const session = expectDefined(
-      wizardSessions.get("prepare-resolution-error"),
+      wizardSessions.get("prepare-resolution-error")?.session,
       "prepare wizard session",
     );
     await expect(session.next()).resolves.toMatchObject({
@@ -546,7 +549,10 @@ describe("openclaw.setup provider resolution", () => {
         payload: { sessionId: "auth-session-1", done: false, status: "running" },
       });
       expect(calls[0]?.payload).not.toHaveProperty("modelActivation");
-      const session = expectDefined(wizardSessions.get("auth-session-1"), "auth wizard session");
+      const session = expectDefined(
+        wizardSessions.get("auth-session-1")?.session,
+        "auth wizard session",
+      );
       const first = await callWizardNext(context, { sessionId: "auth-session-1" });
       expect(setupInferenceMocks.activateSetupInference).toHaveBeenCalledWith(
         expect.objectContaining({ kind: "provider-auth", authChoice: "github-copilot" }),
@@ -630,7 +636,10 @@ describe("openclaw.setup provider resolution", () => {
         ok: true,
         payload: { sessionId, done: false, status: "running" },
       });
-      const session = expectDefined(wizardSessions.get(sessionId), "activation wizard session");
+      const session = expectDefined(
+        wizardSessions.get(sessionId)?.session,
+        "activation wizard session",
+      );
       try {
         const reviewStep = await callWizardNext(context, { sessionId });
         expect(reviewStep.step).toMatchObject({ type: "note", title: "Plugin capabilities" });
@@ -712,7 +721,7 @@ describe("openclaw.setup provider resolution", () => {
         respond: () => undefined,
         context,
       } as never);
-      const session = expectDefined(wizardSessions.get(sessionId), "activation wizard");
+      const session = expectDefined(wizardSessions.get(sessionId)?.session, "activation wizard");
       try {
         await activationStarted.promise;
         session.close(new Error(shutdownMessage));
@@ -765,7 +774,10 @@ describe("openclaw.setup provider resolution", () => {
       respond: () => undefined,
       context,
     } as never);
-    const session = expectDefined(wizardSessions.get(sessionId), "activation wizard session");
+    const session = expectDefined(
+      wizardSessions.get(sessionId)?.session,
+      "activation wizard session",
+    );
     await whenAdmittedWizardSessionSettled(session);
 
     const done = await callWizardNext(context, { sessionId });
@@ -824,7 +836,7 @@ describe("openclaw.setup provider resolution", () => {
         respond: () => undefined,
         context,
       } as never);
-      const session = expectDefined(wizardSessions.get(sessionId), "auth wizard session");
+      const session = expectDefined(wizardSessions.get(sessionId)?.session, "auth wizard session");
       const first = await callWizardNext(context, { sessionId });
       if (outcome === "cancelled") {
         const { calls, respond } = makeRespond();

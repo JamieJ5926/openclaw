@@ -1,11 +1,15 @@
 import { resolveProviderIdForAuth } from "../../agents/provider-auth-aliases.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { PluginMetadataSnapshot } from "../../plugins/plugin-metadata-snapshot.types.js";
-import { resolveManifestProviderAuthChoices } from "../../plugins/provider-auth-choices.js";
 import {
-  supportsSetupManualSecret,
-  supportsSetupTextInference,
-} from "../../system-agent/setup-inference-auth-options.js";
+  resolveManifestDeclaredProviderAuthChoices,
+  resolveManifestProviderAuthChoices,
+} from "../../plugins/provider-auth-choices.js";
+import {
+  listProviderAccessOptions,
+  supportsProviderAuthChoiceTextInference,
+} from "../../plugins/provider-login-options.js";
+import { supportsSetupManualSecret } from "../../system-agent/setup-inference-auth-options.js";
 import type { ModelProviderCapability } from "./models-auth-status.types.js";
 
 export function resolveModelProviderCapabilities(params: {
@@ -27,20 +31,34 @@ export function resolveModelProviderCapabilities(params: {
   const modelProviders = new Set(
     [...providers.keys(), ...modelCatalogProviders.keys()].map(resolveProvider),
   );
+  const accessOptionsById = new Map(
+    listProviderAccessOptions(
+      resolveManifestDeclaredProviderAuthChoices({ ...lookup, includeWorkspacePlugins: false }),
+    ).map((option) => [option.id, option]),
+  );
   const capabilities = new Map<string, ModelProviderCapability>();
   for (const choice of resolveManifestProviderAuthChoices(lookup)) {
     const provider = resolveProvider(choice.providerId);
     // Setup descriptors also include tools and media-only services, not just model accounts.
-    if (!modelProviders.has(provider) || !supportsSetupTextInference(choice.onboardingScopes)) {
+    if (
+      !modelProviders.has(provider) ||
+      !supportsProviderAuthChoiceTextInference(choice.onboardingScopes)
+    ) {
       continue;
     }
     const current = capabilities.get(provider);
     const apiKeySupported = choice.methodId === "api-key";
     const quickApiKeySetup = apiKeySupported && supportsSetupManualSecret(choice);
+    const option = accessOptionsById.get(choice.choiceId);
+    const accessOptions = [
+      ...(current?.accessOptions ?? []),
+      ...(option ? [{ id: option.id, label: option.label, mode: option.mode }] : []),
+    ];
     capabilities.set(provider, {
       provider,
       apiKeySupported: current?.apiKeySupported === true || apiKeySupported,
       quickApiKeySetup: current?.quickApiKeySetup === true || quickApiKeySetup,
+      ...(accessOptions.length > 0 ? { accessOptions } : {}),
     });
   }
   return {

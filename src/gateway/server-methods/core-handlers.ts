@@ -59,6 +59,8 @@ const CORE_GATEWAY_HANDLER_MODULES = {
   terminal: () => import("./terminal.js").then((module) => module.terminalHandlers),
   transcripts: () => import("./transcripts.js").then((module) => module.transcriptsHandlers),
   "ui-command": () => import("./ui-command.js").then((module) => module.uiCommandHandlers),
+  "models-auth-login": () =>
+    import("./models-auth-login.js").then((module) => module.modelsAuthLoginHandlers),
   "models-auth-status": () =>
     import("./models-auth-status.js").then((module) => module.modelsAuthStatusHandlers),
   "models-auth-order": () =>
