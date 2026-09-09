@@ -411,7 +411,6 @@ describe("openrouter provider hooks", () => {
           expect(fetchFn).not.toHaveBeenCalled();
           expect(snapshot).toMatchObject({
             windows: [],
-            unavailableReason: "configured-request-auth",
             error: expect.stringContaining("configured request authentication"),
           });
           continue;

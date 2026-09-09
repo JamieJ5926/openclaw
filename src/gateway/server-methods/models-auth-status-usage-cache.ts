@@ -29,13 +29,7 @@ export type ProviderUsageStatus = Pick<
   | "accountEmail"
   | "error"
   | "usageScope"
-  | "unavailableReason"
 > & { providerId: UsageProviderId; refreshedAt: number };
-
-type UsageCacheRead = {
-  usageByProvider: Map<string, ProviderUsageStatus>;
-  refreshPending: boolean;
-};
 
 type ProviderUsageCacheEntry = {
   agentDir: string;
@@ -101,7 +95,6 @@ function mapProviderUsage(usage: Awaited<ReturnType<typeof loadProviderUsageSumm
       ...(snap.costHistory ? { costHistory: snap.costHistory } : {}),
       ...(snap.accountEmail ? { accountEmail: snap.accountEmail } : {}),
       ...(snap.error ? { error: snap.error } : {}),
-      ...(snap.unavailableReason ? { unavailableReason: snap.unavailableReason } : {}),
     });
   }
   return usageByProvider;
@@ -144,7 +137,6 @@ function scheduleProviderUsageRefresh(params: {
   workspaceDir?: string;
   authStore?: AuthProfileStore;
   authProfile?: { provider: UsageProviderId; profileId: string };
-  providerOnly?: boolean;
   configRef: OpenClawConfig;
   credentialKey: string;
   providerIds: UsageProviderId[];
@@ -165,7 +157,6 @@ function scheduleProviderUsageRefresh(params: {
   const load = () =>
     loadProviderUsageSummary({
       providers: params.providerIds,
-      ...(params.providerOnly ? { providerOnly: true } : {}),
       ...(params.authProfile ? { authProfile: params.authProfile } : {}),
       ...(params.authProfile
         ? {
@@ -202,9 +193,6 @@ function scheduleProviderUsageRefresh(params: {
         return usage;
       })
       .catch((err: unknown) => {
-        // Usage is auxiliary and stale data remains valid. A failed refresh
-        // publishes nothing, so a capable client keeps seeing the incomplete
-        // marker and reports it once its retry budget is spent.
         log.debug(
           `usage refresh failed: providers=${params.providerIds.join(",")} error=${formatForLog(err)}`,
         );
@@ -234,7 +222,6 @@ type ProviderUsageCacheParams = {
   workspaceDir?: string;
   authStore?: AuthProfileStore;
   authProfile?: { provider: UsageProviderId; profileId: string };
-  providerOnly?: boolean;
   cacheOwnerKey?: string;
   configRef: OpenClawConfig;
   credentialKey: string;
@@ -266,11 +253,13 @@ function resolveProviderUsageCacheRead(params: ProviderUsageCacheParams) {
   return { cacheOwnerKey, credentialKey, matching, needsRefresh, providerIds, providerKey };
 }
 
-function readUsageCacheStaleWhileRevalidate(params: ProviderUsageCacheParams): UsageCacheRead {
+export function readProviderUsageStaleWhileRevalidate(
+  params: ProviderUsageCacheParams,
+): Map<string, ProviderUsageStatus> {
   const cacheOwnerKey = params.cacheOwnerKey ?? params.agentId;
   if (params.providerIds.length === 0) {
     usageCacheByAgentId.delete(cacheOwnerKey);
-    return { usageByProvider: new Map(), refreshPending: false };
+    return new Map();
   }
   const { credentialKey, matching, needsRefresh, providerIds, providerKey } =
     resolveProviderUsageCacheRead(params);
@@ -283,7 +272,6 @@ function readUsageCacheStaleWhileRevalidate(params: ProviderUsageCacheParams): U
       workspaceDir: params.workspaceDir,
       authStore: params.authStore,
       authProfile: params.authProfile,
-      providerOnly: params.providerOnly,
       configRef: params.configRef,
       credentialKey,
       providerIds,
@@ -291,24 +279,10 @@ function readUsageCacheStaleWhileRevalidate(params: ProviderUsageCacheParams): U
       lastGood: matching?.summary,
     }).catch(() => {});
   }
-  return {
-    usageByProvider: matching?.usageByProvider ?? new Map(),
-    refreshPending: needsRefresh || usageRefreshByAgentId.has(cacheOwnerKey),
-  };
+  return matching?.usageByProvider ?? new Map();
 }
 
-export function readProviderUsageStaleWhileRevalidate(
-  params: ProviderUsageCacheParams,
-): UsageCacheRead {
-  // A provider-only miss must not hide account usage from the general usage page.
-  return readUsageCacheStaleWhileRevalidate({
-    ...params,
-    providerOnly: true,
-    cacheOwnerKey: `${params.agentId}\0provider`,
-  });
-}
-
-export function readProfileUsageStaleWhileRevalidate(params: {
+export async function loadProfileUsage(params: {
   agentId: string;
   agentDir: string;
   workspaceDir: string;
@@ -316,55 +290,52 @@ export function readProfileUsageStaleWhileRevalidate(params: {
   configRef: OpenClawConfig;
   profileCredentialKeys: ReadonlyMap<string, string>;
   forceRefresh?: boolean;
-  targets: Array<{ profileId: string; providerId: UsageProviderId }>;
+  profileId: string;
+  providerId: UsageProviderId;
   now: number;
-}): {
-  usageByProfile: Map<string, ProviderUsageStatus>;
-  targetProfileIds: Set<string>;
-  pendingProfileIds: Set<string>;
-  refreshPending: boolean;
-} {
-  const usageByProfile = new Map<string, ProviderUsageStatus>();
-  const pendingProfileIds = new Set<string>();
+}): Promise<UsageSummary> {
   const ownerPrefix = `${params.agentId}\0profile\0`;
-  const activeOwners = new Set(params.targets.map((target) => `${ownerPrefix}${target.profileId}`));
-  const knownOwners = new Set([...usageCacheByAgentId.keys(), ...usageRefreshByAgentId.keys()]);
-  for (const ownerKey of knownOwners) {
-    if (ownerKey.startsWith(ownerPrefix) && !activeOwners.has(ownerKey)) {
-      usageCacheByAgentId.delete(ownerKey);
-      usageRefreshByAgentId.delete(ownerKey);
+  // A read of any account revokes work for removed or replaced credentials,
+  // including accounts whose rows are no longer displayed.
+  for (const entries of [usageCacheByAgentId, usageRefreshByAgentId]) {
+    for (const [ownerKey, entry] of entries) {
+      if (
+        ownerKey.startsWith(ownerPrefix) &&
+        (entry.agentDir !== params.agentDir ||
+          entry.configRef !== params.configRef ||
+          entry.credentialKey !==
+            params.profileCredentialKeys.get(ownerKey.slice(ownerPrefix.length)))
+      ) {
+        entries.delete(ownerKey);
+      }
     }
   }
-  for (const target of params.targets) {
-    const read = readUsageCacheStaleWhileRevalidate({
-      agentId: params.agentId,
-      agentDir: params.agentDir,
-      workspaceDir: params.workspaceDir,
-      authStore: params.authStore,
-      authProfile: { provider: target.providerId, profileId: target.profileId },
-      cacheOwnerKey: `${ownerPrefix}${target.profileId}`,
-      configRef: params.configRef,
-      // Missing profiles still reach the loader's auth handling, but cannot
-      // match the non-empty fingerprint of a previously present credential.
-      credentialKey: params.profileCredentialKeys.get(target.profileId) ?? "",
-      forceRefresh: params.forceRefresh,
-      providerIds: [target.providerId],
-      now: params.now,
-    });
-    const usage = read.usageByProvider.get(target.providerId);
-    if (usage) {
-      usageByProfile.set(target.profileId, usage);
-    }
-    if (read.refreshPending) {
-      pendingProfileIds.add(target.profileId);
-    }
-  }
-  return {
-    usageByProfile,
-    targetProfileIds: new Set(params.targets.map((target) => target.profileId)),
-    pendingProfileIds,
-    refreshPending: pendingProfileIds.size > 0,
+  const cacheParams = {
+    ...params,
+    authProfile: { provider: params.providerId, profileId: params.profileId },
+    cacheOwnerKey: `${ownerPrefix}${params.profileId}`,
+    credentialKey: params.profileCredentialKeys.get(params.profileId) ?? "",
+    providerIds: [params.providerId],
   };
+  const read = resolveProviderUsageCacheRead(cacheParams);
+  if (read.matching && !read.needsRefresh) {
+    return read.matching.summary;
+  }
+  const generation = cacheGeneration;
+  const summary = await scheduleProviderUsageRefresh({
+    ...cacheParams,
+    credentialKey: read.credentialKey,
+    providerKey: read.providerKey,
+    lastGood: read.matching?.summary,
+  });
+  // Publication and delivery both require the same live owner after provider I/O.
+  if (
+    generation !== cacheGeneration ||
+    usageCacheByAgentId.get(cacheParams.cacheOwnerKey)?.summary !== summary
+  ) {
+    throw new Error("Account credentials changed while loading usage. Refresh the account.");
+  }
+  return summary;
 }
 
 /** Shares the models.authStatus cache contract with the unscoped usage.status RPC. */

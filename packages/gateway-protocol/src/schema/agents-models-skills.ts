@@ -300,6 +300,12 @@ export const ModelsListParamsSchema = Type.Object(
 );
 
 /** Reads model-provider credential health for one configured agent. */
+export const ModelsAuthUsageParamsSchema = closedObject({
+  agentId: Type.Optional(NonEmptyString),
+  profileId: NonEmptyString,
+  refresh: Type.Optional(Type.Boolean()),
+});
+
 export const ModelsAuthStatusParamsSchema = closedObject({
   refresh: Type.Optional(Type.Boolean()),
   agentId: Type.Optional(Type.String()),

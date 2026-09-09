@@ -571,6 +571,7 @@ enum class GatewayMethod(
   TalkMode("talk.mode"),
   CommandsList("commands.list"),
   ModelsList("models.list"),
+  ModelsAuthUsage("models.authUsage"),
   ModelsAuthStatus("models.authStatus"),
   ModelsAuthLogout("models.authLogout"),
   ToolsCatalog("tools.catalog"),

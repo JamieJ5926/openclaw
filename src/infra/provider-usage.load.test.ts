@@ -117,7 +117,7 @@ describe("provider-usage.load", () => {
   });
 
   it.each(["async", "sync"])(
-    "keeps login-issued API keys out of provider-only %s candidate resolution",
+    "pins login-issued API keys through %s candidate resolution",
     async (helper) => {
       const authStore: AuthProfileStore = {
         version: 1,
@@ -172,25 +172,8 @@ describe("provider-usage.load", () => {
         ...options,
         authProfile: { provider: "openrouter", profileId: "openrouter:login" },
       });
-      const provider = await loadProviderUsageSummary({
-        ...options,
-        providers: ["openrouter"],
-        providerOnly: true,
-      });
       expect(account.providers[0]?.windows).toEqual([
         { label: "synthetic-login-key", usedPercent: 10 },
-      ]);
-      expect(provider.providers[0]?.windows).toEqual([
-        { label: "synthetic-other-key", usedPercent: 10 },
-      ]);
-      options.config.models.providers.openrouter.apiKey = "openrouter:billing";
-      const boundBilling = await loadProviderUsageSummary({
-        ...options,
-        providers: ["openrouter"],
-        providerOnly: true,
-      });
-      expect(boundBilling.providers[0]?.windows).toEqual([
-        { label: "synthetic-billing-key", usedPercent: 10 },
       ]);
       expect(authStore.profiles["openrouter:login"]).toBeDefined();
     },
@@ -278,35 +261,9 @@ describe("provider-usage.load", () => {
         ...options,
         env,
         providers: ["anthropic"],
-        providerOnly: true,
       });
       expect(summary.providers[0]?.windows).toEqual([{ label: expected, usedPercent: 42 }]);
     }
-  });
-
-  it("does not fetch an account fallback for provider-only billing", async () => {
-    resolveProviderUsageAuthWithPluginMock.mockResolvedValueOnce({
-      token: "account-token",
-      authProfileId: "anthropic:account",
-    });
-    const summary = await loadProviderUsageSummary({
-      providers: ["anthropic"],
-      providerOnly: true,
-      config: {},
-      env: {},
-      authStore: {
-        version: 1,
-        profiles: {
-          "anthropic:account": {
-            type: "token",
-            provider: "anthropic",
-            token: "account-token",
-          },
-        },
-      },
-    });
-    expect(summary.providers).toEqual([]);
-    expect(resolveProviderUsageSnapshotWithPluginMock).not.toHaveBeenCalled();
   });
 
   it("reports exact-account auth failures without contacting the provider", async () => {
@@ -333,11 +290,8 @@ describe("provider-usage.load", () => {
   });
 
   it("does not enter the provider hook after profile refresh authority is revoked", async () => {
-    let resolveAuth: ((value: { token: string; authProfileId: string }) => void) | undefined;
-    const authPending = new Promise<{ token: string; authProfileId: string }>((resolve) => {
-      resolveAuth = resolve;
-    });
-    resolveProviderUsageAuthWithPluginMock.mockImplementationOnce(async () => await authPending);
+    const auth = createDeferredCore<{ token: string; authProfileId: string }>();
+    resolveProviderUsageAuthWithPluginMock.mockReturnValueOnce(auth.promise);
     let current = true;
 
     const summaryPending = loadProviderUsageSummary({
@@ -351,21 +305,18 @@ describe("provider-usage.load", () => {
     await vi.waitFor(() => expect(resolveProviderUsageAuthWithPluginMock).toHaveBeenCalledOnce());
 
     current = false;
-    resolveAuth?.({ token: "profile-token", authProfileId: "openai:work" });
+    auth.resolve({ token: "profile-token", authProfileId: "openai:work" });
 
     await expect(summaryPending).resolves.toEqual({ updatedAt: usageNow, providers: [] });
     expect(resolveProviderUsageSnapshotWithPluginMock).not.toHaveBeenCalled();
   });
 
   it("does not let a provider hook send after profile refresh authority is revoked", async () => {
-    let releaseHook: (() => void) | undefined;
-    const hookBlocked = new Promise<void>((resolve) => {
-      releaseHook = resolve;
-    });
+    const hook = createDeferredCore();
     resolveProviderUsageAuthWithPluginMock.mockResolvedValueOnce({ token: "profile-token" });
     const fetchMock = createProviderUsageFetch(async () => makeResponse(200, "{}"));
     resolveProviderUsageSnapshotWithPluginMock.mockImplementationOnce(async ({ context }) => {
-      await hookBlocked;
+      await hook.promise;
       await context.fetchFn("https://usage.example.invalid");
       return {
         provider: "openai",
@@ -388,7 +339,7 @@ describe("provider-usage.load", () => {
     );
 
     current = false;
-    releaseHook?.();
+    hook.resolve();
 
     await summaryPending;
     expect(fetchMock).not.toHaveBeenCalled();

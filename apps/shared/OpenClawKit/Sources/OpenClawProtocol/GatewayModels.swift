@@ -16651,6 +16651,28 @@ public struct ModelsAuthOrderSetParams: Codable, Sendable {
     }
 }
 
+public struct ModelsAuthUsageParams: Codable, Sendable {
+    public let agentid: String?
+    public let profileid: String
+    public let refresh: Bool?
+
+    public init(
+        agentid: String? = nil,
+        profileid: String,
+        refresh: Bool? = nil)
+    {
+        self.agentid = agentid
+        self.profileid = profileid
+        self.refresh = refresh
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case agentid = "agentId"
+        case profileid = "profileId"
+        case refresh
+    }
+}
+
 public struct ModelsAuthStatusParams: Codable, Sendable {
     public let refresh: Bool?
     public let agentid: String?

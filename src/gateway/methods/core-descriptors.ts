@@ -125,6 +125,7 @@ const CORE_GATEWAY_METHOD_SPECS = [
   ["talk.mode", "talk-mode", "operator.talk", "<=2026.7"],
   ["commands.list", "commands", "operator.read", "<=2026.7"],
   ["models.list", "models", "operator.read", "<=2026.7", { startup: true }],
+  ["models.authUsage", "models-auth-status", "operator.admin", "2026.9"],
   ["models.authStatus", "models-auth-status", "operator.read", "<=2026.7"],
   ["models.authLogout", "models-auth-status", "operator.admin", "<=2026.7", CONTROL_PLANE_WRITE],
   ["tools.catalog", "tools-catalog", "operator.read", "<=2026.7"],

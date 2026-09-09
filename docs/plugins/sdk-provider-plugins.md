@@ -803,6 +803,15 @@ catalog, API-key auth, and dynamic model resolution.
         rechecked at final I/O. Hooks with a custom transport must call
         `ctx.isAuthProfileCurrent?.()` immediately before starting that I/O.
 
+        The admin-only Gateway method `models.authUsage` accepts `profileId`,
+        optional `agentId`, and optional `refresh: true`. It returns a
+        `UsageSummary` for that account, or an empty `providers` array when the
+        plugin has not opted in. Cached results expire after one minute; refresh
+        waits for a new result. `models.authStatus` and `usage.status` retain
+        normal provider usage collection. If configured request authentication
+        overrides the selected account, return an explanatory error without
+        sending the account request.
+
         Declare the provider id in `contracts.usageProviders`. When that manifest
         contract and **both** hooks are present, OpenClaw automatically includes
         the provider in usage collection without loading unrelated provider
@@ -815,10 +824,6 @@ catalog, API-key auth, and dynamic model resolution.
           infer scope from email, credential format, profile id, or billing shape.
           Account scope alone does not establish ownership by a saved profile.
         - `plan`: provider-reported subscription or key label
-        - `unavailableReason`: `"configured-request-auth"` when a selected-account
-          read cannot preserve account authentication through configured request
-          overrides. Return an explanatory error without sending that request.
-          Gateway status can then show independent usage without account attribution.
         - `windows`: resettable quota windows as used percentages
         - `billing`: typed `balance`, `spend`, or `budget` entries; `unit` can be
           an ISO currency or a provider unit such as `credits`

@@ -185,7 +185,6 @@ export async function fetchOpenRouterUsage(params: {
       windows: [],
       error:
         "Account usage is unavailable with configured request authentication. See the provider summary.",
-      unavailableReason: "configured-request-auth",
     };
   }
   const request = {
