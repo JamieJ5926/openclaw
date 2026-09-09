@@ -90,46 +90,7 @@ struct ChatProTab: View {
     }
 
     var body: some View {
-        self.content
-            .task(id: self.activationIdentity) {
-                guard !Task.isCancelled else { return }
-                let activationID = UUID()
-                self.activation = (activationID, self.activationIdentity)
-                if self.nativeBinding == nil {
-                    await self.appModel.restoreChatSessionRoutingIdentityIfNeeded()
-                }
-                // Cancellation cannot roll back a suspended restore or retire a newer activation.
-                guard self.isCurrentActivation(activationID) else { return }
-                self.syncChatViewModel()
-                await self.handleNewChatRequest(self.appModel.newChatRequestID, activationID: activationID)
-            }
-            .onChange(of: self.appModel.chatSessionKey) { _, _ in
-                self.syncChatViewModel()
-            }
-            .onChange(of: self.appModel.chatViewModelOwnerID) { _, _ in
-                self.syncChatViewModel()
-            }
-            .onChange(of: self.appModel.chatAgentId) { _, _ in
-                self.syncChatViewModel()
-            }
-            .onChange(of: self.appModel.gatewayDefaultAgentId) { _, _ in
-                self.syncChatViewModel()
-            }
-            .onChange(of: self.appModel.chatSessionRoutingContract) { _, _ in
-                self.syncChatViewModel()
-            }
-            .onChange(of: self.appModel.voiceNoteRecorder.ownsPendingChatAttachment) { _, _ in
-                self.viewModel?.attachmentOwnerActivityChanged()
-                self.syncChatViewModel()
-            }
-            .onChange(of: self.viewModel?.isAttachmentOwnerPinned) { (_: Bool?, pinned: Bool?) in
-                guard pinned == false else { return }
-                self.syncChatViewModel()
-            }
-            .onChange(of: self.hasProtectedComposer) { _, protected in
-                guard !protected else { return }
-                self.syncChatViewModel()
-            }
+        self.composerObservedContent
             .onChange(of: self.appModel.isAppleReviewDemoModeEnabled) { _, _ in
                 self.syncChatViewModel()
                 self.viewModel?.refresh()
@@ -1001,6 +962,53 @@ extension ChatProTab {
         case success
         case warning
         case error
+    }
+
+    private var sessionObservedContent: some View {
+        self.content
+            .task(id: self.activationIdentity) {
+                guard !Task.isCancelled else { return }
+                let activationID = UUID()
+                self.activation = (activationID, self.activationIdentity)
+                if self.nativeBinding == nil {
+                    await self.appModel.restoreChatSessionRoutingIdentityIfNeeded()
+                }
+                // Cancellation cannot roll back a suspended restore or retire a newer activation.
+                guard self.isCurrentActivation(activationID) else { return }
+                self.syncChatViewModel()
+                await self.handleNewChatRequest(self.appModel.newChatRequestID, activationID: activationID)
+            }
+            .onChange(of: self.appModel.chatSessionKey) { _, _ in
+                self.syncChatViewModel()
+            }
+            .onChange(of: self.appModel.chatViewModelOwnerID) { _, _ in
+                self.syncChatViewModel()
+            }
+            .onChange(of: self.appModel.chatAgentId) { _, _ in
+                self.syncChatViewModel()
+            }
+            .onChange(of: self.appModel.gatewayDefaultAgentId) { _, _ in
+                self.syncChatViewModel()
+            }
+            .onChange(of: self.appModel.chatSessionRoutingContract) { _, _ in
+                self.syncChatViewModel()
+            }
+    }
+
+    private var composerObservedContent: some View {
+        self.sessionObservedContent
+            .onChange(of: self.appModel.voiceNoteRecorder.ownsPendingChatAttachment) { _, _ in
+                self.viewModel?.attachmentOwnerActivityChanged()
+                self.syncChatViewModel()
+            }
+            .onChange(of: self.viewModel?.isAttachmentOwnerPinned) { (_: Bool?, pinned: Bool?) in
+                guard pinned == false else { return }
+                self.syncChatViewModel()
+            }
+            .onChange(of: self.hasProtectedComposer) { _, protected in
+                guard !protected else { return }
+                self.syncChatViewModel()
+            }
     }
 
     nonisolated static func presentationGatewayState(
