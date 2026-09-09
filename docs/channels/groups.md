@@ -59,6 +59,11 @@ Existing `ignoreOtherMentions` options on Discord and Slack additionally filter
 mentions of people and roles. Bare commands with no recipient, such as `/edit`,
 remain subject to the room's normal activation rules.
 
+For people and roles, Discord still accepts configured wake words and replies
+to OpenClaw; Slack still accepts configured wake words. Setting
+`ignoreOtherMentions: false` disables that extra filtering. It does not disable
+routing away from another identified bot.
+
 Telegram resolves mentioned usernames to identify bots; a username ending in
 `bot` alone is not sufficient. A leading qualified command such as
 `/status@other_bot` belongs to its named bot even if its arguments mention

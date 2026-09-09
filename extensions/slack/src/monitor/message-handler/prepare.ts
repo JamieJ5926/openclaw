@@ -782,7 +782,7 @@ export async function prepareSlackMessage(params: {
   // Native Slack IDs do not encode bot identity. Reuse the user lookup cache;
   // failed lookups stay unknown and cannot turn human mentions into bot addresses.
   let mentionsOtherBot = false;
-  if (isRoomish && ctx.botUserId && !explicitlyMentioned && !channelConfig?.ignoreOtherMentions) {
+  if (isRoomish && ctx.botUserId && !explicitlyMentioned) {
     for (const id of mentionedUserIds) {
       if ((await ctx.resolveUserName(id, opts.eventScope)).isBot === true) {
         mentionsOtherBot = true;
@@ -795,7 +795,7 @@ export async function prepareSlackMessage(params: {
       ? undefined
       : explicitlyMentioned
         ? "self"
-        : (channelConfig?.ignoreOtherMentions && hasAnyMention) || mentionsOtherBot
+        : mentionsOtherBot
           ? "other"
           : undefined;
   // Channels with `requireMention: false` and a non-`off` reply mode produce
@@ -976,8 +976,12 @@ export async function prepareSlackMessage(params: {
         (error: unknown) => ({ ok: false, error }),
       )
     : Promise.resolve({ ok: true, name: undefined });
+  const shouldFilterOtherMentions = Boolean(
+    isRoom && ctx.botUserId && channelConfig?.ignoreOtherMentions && hasAnyMention,
+  );
   let implicitMentionKinds: ReturnType<typeof implicitMentionKindWhen> = [];
-  if (!isDirectMessage && message.thread_ts && !wasMentioned) {
+  // Human mentions retain wake-word activation, but thread participation alone cannot admit them.
+  if (!shouldFilterOtherMentions && !isDirectMessage && message.thread_ts && !wasMentioned) {
     const replyToBotKinds = implicitMentionKindWhen(
       "reply_to_bot",
       Boolean(ctx.botUserId && message.parent_user_id === ctx.botUserId),
@@ -1105,6 +1109,7 @@ export async function prepareSlackMessage(params: {
   const shouldRequireMention = isRoom
     ? (channelConfig?.requireMention ?? ctx.defaultRequireMention)
     : false;
+  const activationRequiresMention = shouldRequireMention || shouldFilterOtherMentions;
   const implicitMentions = resolveChannelImplicitMentions({
     cfg,
     channel: "slack",
@@ -1144,7 +1149,7 @@ export async function prepareSlackMessage(params: {
         explicitAddress,
       },
       activation: {
-        requireMention: shouldRequireMention,
+        requireMention: activationRequiresMention,
         allowTextCommands,
         implicitMentions,
       },
@@ -1307,7 +1312,7 @@ export async function prepareSlackMessage(params: {
     },
     policy: {
       isGroup: isRoom,
-      requireMention: shouldRequireMention,
+      requireMention: activationRequiresMention,
       allowTextCommands,
       hasControlCommand: hasControlCommandInMessage,
       commandAuthorized,

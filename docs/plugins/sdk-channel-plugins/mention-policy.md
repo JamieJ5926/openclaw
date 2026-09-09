@@ -107,3 +107,25 @@ bundled channel plugins that already depend on runtime injection:
 If you only need `implicitMentionKindWhen` and `resolveInboundMentionDecision`,
 import from `openclaw/plugin-sdk/channel-mention-gating` to avoid loading
 unrelated inbound runtime helpers.
+
+## Explicit bot recipients
+
+Set the optional `facts.explicitAddress` from verified native recipient metadata:
+
+- `"self"`: the message explicitly addresses this bot.
+- `"other"`: the message addresses another identified bot without addressing this bot.
+- Omit the field when the recipient is unknown or the platform cannot identify bots.
+
+`"other"` skips dispatch even when `requireMention` is false. Wake words, implicit
+replies, and command bypass cannot override it. Use `"self"` for mixed native
+mentions unless the platform gives a qualified command its own recipient.
+Without this field, existing activation rules remain in effect.
+
+Apply the decision before media downloads, native command execution, or
+cancellation of pending work. Carry the prepared recipient through buffers;
+do not let another message's self mention admit a foreign-addressed request.
+Keep people and role filters in activation policy, with their existing wake-word
+and implicit-reply exceptions. Do not classify those mentions as `"other"`.
+
+When skipped, `decision.skipReason` distinguishes `"addressed-to-other"` from
+`"mention-required"`. The field is absent for admitted messages.

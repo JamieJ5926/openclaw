@@ -2418,52 +2418,40 @@ describe("preflightDiscordMessage", () => {
     expect(expectPreflightResult(result).wasMentioned).toBe(true);
   });
 
-  it("keeps replies to humans when ignoreOtherMentions=true", async () => {
-    const channelId = "channel-human-reply";
-    const guildId = "guild-human-reply";
-    const message = createDiscordMessage({
-      id: "m-human-reply",
-      channelId,
-      content: "following up",
-      author: { id: "user-1", bot: false, username: "Alice" },
-      referencedMessage: createDiscordMessage({
-        id: "m-human-target",
+  it.each([
+    { target: "human", bot: false, ping: false },
+    { target: "human", bot: false, ping: true },
+    { target: "webhook", bot: true, ping: false },
+    { target: "webhook", bot: true, ping: true },
+  ])(
+    "preserves legacy filtering for $target replies with ping=$ping",
+    async ({ target, bot, ping }) => {
+      const channelId = `channel-${target}-reply-${ping}`;
+      const guildId = `guild-${target}-reply-${ping}`;
+      const targetId = `${target}-recipient`;
+      const message = createDiscordMessage({
+        id: `m-${target}-reply-${ping}`,
         channelId,
-        content: "earlier question",
-        author: { id: "user-2", bot: false, username: "Bob" },
-      }),
-    });
-
-    expect(
-      expectPreflightResult(await runIgnoreOtherMentionsPreflight({ channelId, guildId, message }))
-        .message.id,
-    ).toBe("m-human-reply");
-  });
-
-  it("keeps replies to webhook bots when ignoreOtherMentions=true", async () => {
-    const channelId = "channel-webhook-bot-reply";
-    const guildId = "guild-webhook-bot-reply";
-    const message = createDiscordMessage({
-      id: "m-webhook-bot-reply",
-      channelId,
-      content: "following up",
-      type: MessageType.Reply,
-      mentionedUsers: [{ id: "webhook-bot", bot: true }],
-      author: { id: "user-1", bot: false, username: "Alice" },
-      referencedMessage: createDiscordMessage({
-        id: "m-webhook-bot-target",
-        channelId,
-        content: "relayed human message",
-        webhookId: "webhook-1",
-        author: { id: "webhook-bot", bot: true, username: "Webhook" },
-      }),
-    });
-
-    expect(
-      expectPreflightResult(await runIgnoreOtherMentionsPreflight({ channelId, guildId, message }))
-        .message.id,
-    ).toBe("m-webhook-bot-reply");
-  });
+        content: "following up",
+        type: MessageType.Reply,
+        mentionedUsers: ping ? [{ id: targetId, bot }] : [],
+        author: { id: "user-1", bot: false, username: "Alice" },
+        referencedMessage: createDiscordMessage({
+          id: `m-${target}-original`,
+          channelId,
+          content: "earlier question",
+          ...(target === "webhook" ? { webhookId: "webhook-1" } : {}),
+          author: { id: targetId, bot, username: "Bob" },
+        }),
+      });
+      const result = await runIgnoreOtherMentionsPreflight({ channelId, guildId, message });
+      if (ping) {
+        expect(result).toBeNull();
+      } else {
+        expect(expectPreflightResult(result).message.id).toBe(message.id);
+      }
+    },
+  );
 
   it("drops replies to another bot even when ignoreOtherMentions=false", async () => {
     const channelId = "channel-other-bot-reply-open";
@@ -2492,7 +2480,18 @@ describe("preflightDiscordMessage", () => {
     expect(result).toBeNull();
   });
 
-  it.each([
+  it.each<{
+    name: string;
+    otherIsBot: boolean;
+    requireMention: boolean;
+    reply: boolean;
+    self: boolean;
+    accepted: boolean;
+    everyone?: boolean;
+    role?: boolean;
+    wakeWord?: boolean;
+    ignoreOtherMentions?: boolean;
+  }>([
     {
       name: "native other bot",
       otherIsBot: true,
@@ -2550,21 +2549,55 @@ describe("preflightDiscordMessage", () => {
       self: false,
       accepted: true,
     },
+    ...[false, true].flatMap((role) => [
+      {
+        name: `${role ? "role" : "human"} mention with a wake word and filtering enabled`,
+        otherIsBot: false,
+        role,
+        requireMention: false,
+        ignoreOtherMentions: true,
+        reply: false,
+        self: false,
+        accepted: true,
+      },
+      {
+        name: `${role ? "role" : "human"} mention in a reply to this bot with filtering enabled`,
+        otherIsBot: false,
+        role,
+        requireMention: false,
+        ignoreOtherMentions: true,
+        reply: true,
+        wakeWord: false,
+        self: false,
+        accepted: true,
+      },
+    ]),
+    {
+      name: "bot mention over a wake word with filtering enabled",
+      otherIsBot: true,
+      requireMention: false,
+      ignoreOtherMentions: true,
+      reply: false,
+      self: false,
+      accepted: false,
+    },
   ])("resolves $name before implicit activation", async (testCase) => {
     const channelId = "channel-native-address";
     const guildId = "guild-native-address";
     const botId = "openclaw-bot";
+    const otherMention = testCase.role ? "<@&other-role>" : "<@other-recipient>";
     const message = createDiscordMessage({
       id: "m-native-address",
       channelId,
-      content: `${testCase.everyone ? "@everyone " : ""}${testCase.self ? `<@${botId}> ` : ""}<@other-recipient> helper`,
+      content: `${testCase.everyone ? "@everyone " : ""}${testCase.self ? `<@${botId}> ` : ""}${otherMention} ${testCase.wakeWord === false ? "has the details" : "helper"}`,
       author: { id: "user-1", bot: false },
       type: testCase.reply ? MessageType.Reply : MessageType.Default,
       mentionedEveryone: testCase.everyone,
       mentionedUsers: [
-        { id: "other-recipient", bot: testCase.otherIsBot },
+        ...(testCase.role ? [] : [{ id: "other-recipient", bot: testCase.otherIsBot }]),
         ...(testCase.self || testCase.reply ? [{ id: botId, bot: true }] : []),
       ],
+      ...(testCase.role ? { mentionedRoles: ["other-role"] } : {}),
       ...(testCase.reply && {
         referencedMessage: createDiscordMessage({
           id: "m-current-bot",
@@ -2580,7 +2613,12 @@ describe("preflightDiscordMessage", () => {
       message,
       discordConfig: {},
       cfg: { ...DEFAULT_PREFLIGHT_CFG, messages: { groupChat: { mentionPatterns: ["helper"] } } },
-      guildEntries: { [guildId]: { requireMention: testCase.requireMention } },
+      guildEntries: {
+        [guildId]: {
+          requireMention: testCase.requireMention,
+          ignoreOtherMentions: testCase.ignoreOtherMentions,
+        },
+      },
     });
     if (testCase.accepted) {
       expect(expectPreflightResult(result).message.id).toBe(message.id);

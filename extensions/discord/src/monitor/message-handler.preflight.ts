@@ -503,7 +503,7 @@ export async function preflightDiscordMessage(
         botId && activeUserMentions.some((user) => user.bot === true && user.id !== botId),
       ),
       hasOtherUserOrRoleMention:
-        activeUserMentions.some((user) => user.id !== botId) ||
+        (source.mentionedUsers?.some((user) => user.id !== botId) ?? false) ||
         (source.mentionedRoles?.length ?? 0) > 0,
     };
   });
@@ -749,7 +749,7 @@ export async function preflightDiscordMessage(
     referencedAuthor.id !== botId &&
     !referencedWebhookId;
   const mentionsOtherBot = mentionSources.some((source) => source.mentionsOtherBot);
-  const ignoresOtherRecipient =
+  const requireMentionForOtherMentions =
     isGuildMessage &&
     ignoreOtherMentions &&
     mentionSources.some((source) => source.hasOtherUserOrRoleMention);
@@ -758,7 +758,7 @@ export async function preflightDiscordMessage(
   const explicitlyAddressesSelf = mentionSources.some((source) => source.activeNativeMention);
   const mentionDecision = resolveInboundMentionDecision({
     facts: {
-      canDetectMention,
+      canDetectMention: canDetectMention || requireMentionForOtherMentions,
       wasMentioned,
       hasAnyMention,
       implicitMentionKinds,
@@ -766,13 +766,14 @@ export async function preflightDiscordMessage(
         ? undefined
         : explicitlyAddressesSelf
           ? "self"
-          : mentionsOtherBot || replyTargetsOtherBot || ignoresOtherRecipient
+          : mentionsOtherBot || replyTargetsOtherBot
             ? "other"
             : undefined,
     },
     policy: {
       isGroup: isGuildMessage,
-      requireMention: shouldRequireMention,
+      // People and roles retain normal wake-word and implicit-reply activation.
+      requireMention: shouldRequireMention || requireMentionForOtherMentions,
       allowTextCommands,
       hasControlCommand: hasControlCommandInMessage,
       commandAuthorized,
