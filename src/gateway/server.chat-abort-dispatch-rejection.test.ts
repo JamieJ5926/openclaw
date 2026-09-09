@@ -161,7 +161,9 @@ describe("gateway WebSocket chat abort ownership", () => {
       const openSocket = async () => {
         const index = connectionReleases.length;
         const socket = await gateway.openWs();
-        const closed = new Promise<void>((resolve) => socket.once("close", () => resolve()));
+        const closed = new Promise<void>((resolve) => {
+          socket.once("close", () => resolve());
+        });
         sockets.push({ socket, closed });
         // Opens are serialized; exactly one server registration identifies this socket.
         expect(connectionReleases).toHaveLength(index + 1);
