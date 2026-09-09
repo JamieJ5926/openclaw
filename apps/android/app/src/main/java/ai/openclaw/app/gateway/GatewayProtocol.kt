@@ -571,7 +571,6 @@ enum class GatewayMethod(
   TalkMode("talk.mode"),
   CommandsList("commands.list"),
   ModelsList("models.list"),
-  ModelsAuthUsage("models.authUsage"),
   ModelsAuthStatus("models.authStatus"),
   ModelsAuthLogout("models.authLogout"),
   ToolsCatalog("tools.catalog"),
@@ -928,6 +927,7 @@ enum class GatewayMethod(
   SkillsWorkshopRead("skills.workshop.read"),
   SessionPublicShareSet("session.publicShare.set"),
   ClawsMonitors("claws.monitors"),
+  ModelsAuthUsage("models.authUsage"),
 }
 
 enum class GatewayEvent(
