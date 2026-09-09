@@ -219,7 +219,9 @@ async function fetchFreshSlackFileUrl(params: {
   isRefreshedFileAllowed?: (file: SlackFile) => boolean;
   observation?: SlackIngressApiObservationOptions;
 }): Promise<string | null> {
-  if (!params.file.id || !params.client) {
+  const client = params.client;
+  const fileId = params.file.id;
+  if (!fileId || !client) {
     return null;
   }
   try {
@@ -229,24 +231,22 @@ async function fetchFreshSlackFileUrl(params: {
         ingressClientProfile: params.observation?.ingressClientProfile ?? "pooled_listener",
       },
       { method: "files.info" },
-      () => params.client!.files.info({ file: params.file.id }),
+      () => client.files.info({ file: fileId }),
     );
     const freshFile = info.file as SlackFile | undefined;
     if (freshFile && params.isRefreshedFileAllowed?.(freshFile) === false) {
-      logVerbose(`slack: refreshed file metadata rejected for file id=${params.file.id}`);
+      logVerbose(`slack: refreshed file metadata rejected for file id=${fileId}`);
       return null;
     }
     const freshUrl = freshFile?.url_private_download ?? freshFile?.url_private;
     if (freshUrl) {
-      logVerbose(`slack: refreshed file URL via files.info for file id=${params.file.id}`);
+      logVerbose(`slack: refreshed file URL via files.info for file id=${fileId}`);
       return freshUrl;
     }
-    logVerbose(`slack: files.info returned no private URL for file id=${params.file.id}`);
+    logVerbose(`slack: files.info returned no private URL for file id=${fileId}`);
     return null;
   } catch (error) {
-    logVerbose(
-      `slack: files.info failed for file id=${params.file.id}: ${formatErrorMessage(error)}`,
-    );
+    logVerbose(`slack: files.info failed for file id=${fileId}: ${formatErrorMessage(error)}`);
     return null;
   }
 }

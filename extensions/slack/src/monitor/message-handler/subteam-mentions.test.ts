@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { isSlackSubteamMentionForBot } from "./subteam-mentions.js";
 
 function createIngressObserver() {
-  const finish = vi.fn();
+  const finish = vi.fn((_outcome?: unknown) => {});
   return {
     stage: vi.fn(),
     progress: vi.fn(),

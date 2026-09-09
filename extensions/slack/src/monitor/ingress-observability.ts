@@ -103,7 +103,7 @@ export function observeSlackIngressStage(
 export async function observeSlackIngressApiCall<T>(
   options: SlackIngressApiObservationOptions | undefined,
   params: {
-    method: SlackIngressApiMethod | string;
+    method: string;
     profile?: SlackIngressApiClientProfile;
   },
   run: () => Promise<T>,
@@ -215,7 +215,7 @@ export function buildSlackIngressCorrelation(params: {
   teamId?: string;
   eventScope?: SlackEventScope;
 }): SlackIngressCorrelation {
-  const teamId = params.eventScope?.teamId ?? params.teamId ?? params.message.team;
+  const teamId = params.eventScope?.teamId ?? params.teamId;
   const threadTs = params.message.thread_ts ?? params.message.ts;
   return {
     providerEventType: params.eventType,

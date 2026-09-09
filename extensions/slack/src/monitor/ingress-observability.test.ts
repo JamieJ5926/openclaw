@@ -8,7 +8,7 @@ import {
 } from "./ingress-observability.js";
 
 function createIngressObserver() {
-  const finish = vi.fn();
+  const finish = vi.fn((_outcome?: unknown) => {});
   return {
     stage: vi.fn(),
     progress: vi.fn(),
@@ -66,16 +66,17 @@ describe("Slack ingress observability adapter", () => {
   });
 
   it("correlates only bounded Slack identifiers", () => {
+    const message: Parameters<typeof buildSlackIngressCorrelation>[0]["message"] = {
+      type: "message",
+      channel: "C111",
+      user: "U111",
+      ts: "1709000000.000580",
+      text: "do not record this body",
+    };
     const correlation = buildSlackIngressCorrelation({
       eventType: "message",
-      message: {
-        type: "message",
-        team: "T111",
-        channel: "C111",
-        user: "U111",
-        ts: "1709000000.000580",
-        text: "do not record this body",
-      } as never,
+      message,
+      teamId: "T111",
     });
 
     expect(correlation).toEqual({

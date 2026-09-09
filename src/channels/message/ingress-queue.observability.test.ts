@@ -6,8 +6,20 @@ import {
   closeOpenClawStateDatabaseForTest,
   openOpenClawStateDatabase,
 } from "../../state/openclaw-state-db.js";
-import { CHANNEL_INGRESS_OBSERVABILITY_METADATA_KEY } from "./ingress-observability-contract.js";
-import { createChannelIngressQueue, getChannelIngressDiagnosticSnapshot } from "./ingress-queue.js";
+import { getDiagnosticIngressSnapshot } from "./ingress-diagnostic-registry.js";
+import {
+  CHANNEL_INGRESS_OBSERVABILITY_METADATA_KEY,
+  type ChannelIngressActiveOperationsSnapshot,
+} from "./ingress-observability-contract.js";
+import { createChannelIngressQueue } from "./ingress-queue.js";
+
+type DiagnosticActiveOperations =
+  | ChannelIngressActiveOperationsSnapshot
+  | ChannelIngressActiveOperationsSnapshot["operations"];
+
+type DiagnosticSourceQueue = {
+  registerDiagnosticSource?: (getActiveOperations: () => DiagnosticActiveOperations) => () => void;
+};
 
 function createTestIngressQueue<TPayload, TMetadata = unknown, TCompletedMetadata = unknown>(
   stateDir: string,
@@ -36,6 +48,22 @@ async function withTempState<T>(fn: (stateDir: string) => Promise<T>): Promise<T
 
 function openIngressStateDatabase(stateDir: string) {
   return openOpenClawStateDatabase({ env: { OPENCLAW_STATE_DIR: stateDir } });
+}
+
+async function readDiagnosticIngressSnapshotThroughQueue(
+  queue: DiagnosticSourceQueue,
+  sampledAt: number,
+  activeOperations: DiagnosticActiveOperations = [],
+) {
+  const unregister = queue.registerDiagnosticSource?.(() => activeOperations);
+  if (!unregister) {
+    throw new Error("Expected queue diagnostic source registration");
+  }
+  try {
+    return await getDiagnosticIngressSnapshot(sampledAt);
+  } finally {
+    unregister();
+  }
 }
 
 describe("channel ingress queue observability", () => {
@@ -123,20 +151,16 @@ describe("channel ingress queue observability", () => {
         }),
       ).resolves.toBe(true);
 
-      const snapshot = await getChannelIngressDiagnosticSnapshot(200, {
-        stateDir,
-        expected: true,
-        activeOperations: [
-          {
-            id: "live-api",
-            kind: "api",
-            startedAt: 150,
-            method: "conversations.history",
-            profile: "read",
-            eventId: "event-1",
-          },
-        ],
-      });
+      const snapshot = await readDiagnosticIngressSnapshotThroughQueue(queue, 200, [
+        {
+          id: "live-api",
+          kind: "api",
+          startedAt: 150,
+          method: "conversations.history",
+          profile: "read",
+          eventId: "event-1",
+        },
+      ]);
 
       expect(snapshot).toMatchObject({
         type: "ingress.snapshot",
@@ -202,20 +226,16 @@ describe("channel ingress queue observability", () => {
         },
       });
 
-      const failedObserverSnapshot = await getChannelIngressDiagnosticSnapshot(200, {
-        stateDir,
-        expected: true,
-        activeOperations: {
-          operations: [],
-          unknownProgressEvents: [
-            {
-              eventId: "event-1",
-              queueName: '["test","account"]',
-              channelId: "test",
-              accountId: "account",
-            },
-          ],
-        },
+      const failedObserverSnapshot = await readDiagnosticIngressSnapshotThroughQueue(queue, 200, {
+        operations: [],
+        unknownProgressEvents: [
+          {
+            eventId: "event-1",
+            queueName: '["test","account"]',
+            channelId: "test",
+            accountId: "account",
+          },
+        ],
       });
       expect(failedObserverSnapshot.stages.user_channel_lookup.total).toBe(0);
       expect(failedObserverSnapshot.unknown).toMatchObject({
@@ -224,6 +244,56 @@ describe("channel ingress queue observability", () => {
         claimed: 1,
         unknownProgress: 2,
       });
+    });
+  });
+
+  it("reports unknown without recreating storage when the registered queue database disappears", async () => {
+    await withTempState(async (stateDir) => {
+      const queue = createTestIngressQueue<{ text: string }>(stateDir);
+      await queue.enqueue("event-1", { text: "stored" }, { receivedAt: 10 });
+      const databasePath = openIngressStateDatabase(stateDir).path;
+      await expect(fs.access(databasePath)).resolves.toBeUndefined();
+
+      const unregister = queue.registerDiagnosticSource?.(() => []);
+      if (!unregister) {
+        throw new Error("Expected queue diagnostic source registration");
+      }
+      try {
+        closeOpenClawStateDatabaseForTest();
+        await fs.rm(databasePath, { force: true });
+        await expect(fs.access(databasePath)).rejects.toMatchObject({ code: "ENOENT" });
+
+        const snapshot = await getDiagnosticIngressSnapshot(200);
+
+        expect(snapshot).toMatchObject({
+          type: "ingress.snapshot",
+          schemaVersion: 1,
+          sampledAt: 200,
+          status: "unknown",
+          failedCount: 0,
+          unknown: {
+            total: 0,
+            pending: 0,
+            claimed: 0,
+            unknownProgress: 0,
+          },
+        });
+        expect(
+          Object.values(snapshot.stages).every(
+            (stage) =>
+              stage.total === 0 &&
+              stage.pending === 0 &&
+              stage.claimed === 0 &&
+              stage.unknownProgress === 0,
+          ),
+        ).toBe(true);
+        expect(Object.values(snapshot.operations).every((operation) => operation.total === 0)).toBe(
+          true,
+        );
+        await expect(fs.access(databasePath)).rejects.toMatchObject({ code: "ENOENT" });
+      } finally {
+        unregister();
+      }
     });
   });
 
@@ -260,10 +330,7 @@ describe("channel ingress queue observability", () => {
         { id: "array", metadata: ["provider", "tuple"] },
       ]);
 
-      const snapshot = await getChannelIngressDiagnosticSnapshot(100, {
-        stateDir,
-        expected: true,
-      });
+      const snapshot = await readDiagnosticIngressSnapshotThroughQueue(primitiveQueue, 100);
       expect(snapshot.unknown).toMatchObject({
         total: 2,
         pending: 2,
@@ -356,7 +423,7 @@ describe("channel ingress queue observability", () => {
         { id: "object-collision", metadata: objectCollision },
         { id: "schema-shaped", metadata: schemaShapedCollision },
       ]);
-      const snapshot = await getChannelIngressDiagnosticSnapshot(100, { stateDir, expected: true });
+      const snapshot = await readDiagnosticIngressSnapshotThroughQueue(queue, 100);
       expect(snapshot.unknown).toMatchObject({ total: 2, pending: 2, unknownProgress: 2 });
     });
   });

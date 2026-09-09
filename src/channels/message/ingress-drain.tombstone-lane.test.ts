@@ -128,9 +128,9 @@ describe("channel ingress drain restart-recovery tombstone", () => {
             [CHANNEL_INGRESS_OBSERVABILITY_METADATA_KEY]: {
               owner: "openclaw.channel-ingress",
               schemaVersion: CHANNEL_INGRESS_OBSERVABILITY_SCHEMA_VERSION,
-              stage: "queued",
+              stage: "routing",
               blocker: "none",
-              stageStartedAt: 1,
+              stageStartedAt: 10_000,
               lastProgressAt: 1,
               updatedAt: 10_000,
               terminal: { disposition: "failed", recordedAt: 10_000 },

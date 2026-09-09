@@ -1462,12 +1462,12 @@ describe("diagnostics-otel service", () => {
   });
 
   test("removes ingress observable callbacks when the service stops", async () => {
-    const { service } = await startServiceFixture(["metrics"]);
+    const { ctx, service } = await startServiceFixture(["metrics"]);
     const gauges = [...telemetryState.observableGauges.values()];
     expect(gauges.length).toBeGreaterThan(0);
     expect(gauges.every((gauge) => gauge.callbacks.size === 1)).toBe(true);
 
-    await service.stop();
+    await service.stop?.(ctx);
 
     expect(gauges.every((gauge) => gauge.callbacks.size === 0)).toBe(true);
     expect(gauges.every((gauge) => gauge.removeCallback.mock.calls.length > 0)).toBe(true);

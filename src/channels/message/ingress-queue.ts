@@ -352,7 +352,7 @@ export function getChannelIngressKysely(db: DatabaseSync) {
   return getNodeSqliteKysely<ChannelIngressDatabase>(db);
 }
 
-export async function getChannelIngressDiagnosticSnapshot(
+async function getChannelIngressDiagnosticSnapshot(
   now: number,
   options: {
     stateDir?: string;
@@ -360,7 +360,6 @@ export async function getChannelIngressDiagnosticSnapshot(
     accountId?: string;
     queueName?: string;
     access?: "read-write" | "read-only";
-    expected?: boolean;
     activeOperations?:
       | ChannelIngressActiveOperationsSnapshot["operations"]
       | ChannelIngressActiveOperationsSnapshot;
@@ -375,7 +374,7 @@ export async function getChannelIngressDiagnosticSnapshot(
       rows: [],
       sampledAt: now,
       activeOperations: options.activeOperations,
-      status: options.expected ? "known" : "unknown",
+      status: "unknown",
     });
   }
   try {
@@ -1733,7 +1732,6 @@ export function createChannelIngressQueue<
         stateDir: options.stateDir,
         queueName,
         access: "read-only",
-        expected: true,
         activeOperations: snapshotOptions?.activeOperations,
       }),
     registerDiagnosticSource: (getActiveOperations) =>
@@ -1744,7 +1742,6 @@ export function createChannelIngressQueue<
           getChannelIngressDiagnosticSnapshot(sampledAt, {
             stateDir: options.stateDir,
             access: "read-only",
-            expected: true,
             activeOperations,
           }),
       }),

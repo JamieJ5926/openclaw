@@ -16,7 +16,7 @@ import {
   openOpenClawStateDatabase,
 } from "../../state/openclaw-state-db.js";
 import { CHANNEL_INGRESS_OBSERVABILITY_METADATA_KEY } from "./ingress-observability-contract.js";
-import { createChannelIngressQueue, getChannelIngressDiagnosticSnapshot } from "./ingress-queue.js";
+import { createChannelIngressQueue } from "./ingress-queue.js";
 
 type ChannelIngressTestDatabase = Pick<OpenClawStateKyselyDatabase, "channel_ingress_events">;
 

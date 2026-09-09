@@ -130,9 +130,8 @@ export function createSlackMessageHandler(params: {
     message: SlackMessageEvent,
     opts: Parameters<SlackMessageHandler>[1],
   ): SlackIngressPreparationObserver | undefined =>
-    opts.ingressObserver ??
     createSlackIngressScopedObserver(
-      opts.turnAdoptionLifecycle?.observer,
+      opts.ingressObserver ?? opts.turnAdoptionLifecycle?.observer,
       buildSlackIngressCorrelation({
         eventType: opts.source,
         message,
@@ -463,8 +462,8 @@ export function createSlackMessageHandler(params: {
     ) {
       return undefined;
     }
-    const ingressObserver = buildEventIngressObserver(message, opts);
-    const observation: SlackIngressObservationOptions | undefined = ingressObserver
+    let ingressObserver = buildEventIngressObserver(message, opts);
+    let observation: SlackIngressObservationOptions | undefined = ingressObserver
       ? { ingressObserver }
       : undefined;
     observeSlackIngressStage(observation, { stage: "queued", progress: "waiting" });
@@ -489,6 +488,8 @@ export function createSlackMessageHandler(params: {
       ...(observation ? { observation } : {}),
       ...(opts.turnAdoptionLifecycle ? { turnAdoptionLifecycle: opts.turnAdoptionLifecycle } : {}),
     });
+    ingressObserver = buildEventIngressObserver(resolvedMessage, opts);
+    observation = ingressObserver ? { ingressObserver } : undefined;
     observeSlackIngressStage(observation, { stage: "routing", progress: "meaningful" });
     const teamId = opts.eventScope?.teamId;
     const debounceKey = buildSlackDebounceKey(resolvedMessage, ctx.accountId, teamId);

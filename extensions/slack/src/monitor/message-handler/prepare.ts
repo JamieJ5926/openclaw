@@ -591,12 +591,13 @@ async function authorizeSlackInboundMessage(params: {
       channelType: resolvedChannelType,
     })
   ) {
+    const mentionedUserId = message.user;
     if (
       conversation.isRoom &&
       ctx.groupPolicy === "allowlist" &&
       params.explicitBotMention &&
       !isBotMessage &&
-      message.user
+      mentionedUserId
     ) {
       let subject = "This OpenClaw bot";
       if (ctx.botUserId) {
@@ -626,7 +627,7 @@ async function authorizeSlackInboundMessage(params: {
             client.chat.postEphemeral({
               token: ctx.botToken,
               channel: message.channel,
-              user: message.user,
+              user: mentionedUserId,
               text: `${subject} can’t reply here because this channel isn’t in its OpenClaw channel allowlist. Ask the OpenClaw owner to allow this channel. <${SLACK_CHANNEL_ACCESS_DOCS_URL}|Learn how to configure Slack channel access.>`,
             }),
         );

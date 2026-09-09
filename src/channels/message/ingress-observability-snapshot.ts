@@ -59,13 +59,12 @@ function emptyStage(stage: ChannelIngressPreparationStage): ChannelIngressStageS
 }
 
 function emptyBlockers(): Record<ChannelIngressBlocker, ChannelIngressBlockerSnapshot> {
-  // SAFETY: CHANNEL_INGRESS_BLOCKERS enumerates every ChannelIngressBlocker key.
   return Object.fromEntries(
     CHANNEL_INGRESS_BLOCKERS.map((blocker) => [
       blocker,
       { blocker, total: 0, pending: 0, claimed: 0 },
     ]),
-  ) as Record<ChannelIngressBlocker, ChannelIngressBlockerSnapshot>;
+  ) as Record<ChannelIngressBlocker, ChannelIngressBlockerSnapshot>; // SAFETY: CHANNEL_INGRESS_BLOCKERS enumerates every ChannelIngressBlocker key.
 }
 
 function emptyOperation(kind: ChannelIngressOperationKind): ChannelIngressOperationAggregate {
@@ -95,14 +94,12 @@ export function buildChannelIngressObservabilitySnapshot(params: {
   failedCount?: number;
   status?: "known" | "unknown";
 }): ChannelIngressObservabilitySnapshot {
-  // SAFETY: CHANNEL_INGRESS_PREPARATION_STAGES enumerates every preparation stage key.
   const stages = Object.fromEntries(
     CHANNEL_INGRESS_PREPARATION_STAGES.map((stage) => [stage, emptyStage(stage)]),
-  ) as Record<ChannelIngressPreparationStage, ChannelIngressStageSnapshot>;
-  // SAFETY: CHANNEL_INGRESS_OPERATION_KINDS enumerates every operation kind key.
+  ) as Record<ChannelIngressPreparationStage, ChannelIngressStageSnapshot>; // SAFETY: CHANNEL_INGRESS_PREPARATION_STAGES enumerates every preparation stage key.
   const operations = Object.fromEntries(
     CHANNEL_INGRESS_OPERATION_KINDS.map((kind) => [kind, emptyOperation(kind)]),
-  ) as Record<ChannelIngressOperationKind, ChannelIngressOperationAggregate>;
+  ) as Record<ChannelIngressOperationKind, ChannelIngressOperationAggregate>; // SAFETY: CHANNEL_INGRESS_OPERATION_KINDS enumerates every operation kind key.
   const unknown: ChannelIngressUnknownProgressSnapshot = {
     stage: "unknown",
     total: 0,

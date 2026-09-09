@@ -315,34 +315,41 @@ it("emits ingress snapshots from the registered channel ingress monitor", async 
     await vi.advanceTimersByTimeAsync(15_000);
     await waitForDiagnosticEventsDrained();
 
-    const ingressSnapshot = events.findLast((event) => event.type === "ingress.snapshot");
-    expect(ingressSnapshot).toMatchObject({
-      type: "ingress.snapshot",
-      schemaVersion: 1,
-      sampledAt: sampledAt + 15_000,
-      status: "known",
-      isolationAvailable: false,
-      stages: {
-        thread_history: {
-          total: 1,
-          blockers: { slack_api: { total: 1 } },
-        },
-      },
-      operations: {
-        api: {
-          total: 1,
-          known: true,
-          oldest: {
-            eventId: "event-1",
-            queueName: '["slack","workspace"]',
-            channelId: "slack",
-            accountId: "workspace",
-            method: "conversations.replies",
-            profile: "slack-web",
+    await vi.waitFor(
+      async () => {
+        await waitForDiagnosticEventsDrained();
+        const ingressSnapshot = events.findLast((event) => event.type === "ingress.snapshot");
+        expect(ingressSnapshot).toMatchObject({
+          type: "ingress.snapshot",
+          schemaVersion: 1,
+          sampledAt: sampledAt + 15_000,
+          status: "known",
+          isolationAvailable: false,
+          stages: {
+            thread_history: {
+              total: 1,
+              blockers: { slack_api: { total: 1 } },
+            },
           },
-        },
+          operations: {
+            api: {
+              total: 1,
+              known: true,
+              oldest: {
+                eventId: "event-1",
+                queueName: '["slack","workspace"]',
+                channelId: "slack",
+                accountId: "workspace",
+                method: "conversations.replies",
+                profile: "slack-web",
+              },
+            },
+          },
+        });
       },
-    });
+      { interval: 10, timeout: 1_000 },
+    );
+    expect(events.filter((event) => event.type === "ingress.snapshot")).toHaveLength(1);
   } finally {
     releaseDelivery();
     await monitor.stop();

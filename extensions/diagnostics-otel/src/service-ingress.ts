@@ -178,7 +178,7 @@ export function createIngressSnapshotRecorder(runtime: DiagnosticsRecorderRuntim
         }
         for (const kind of CHANNEL_INGRESS_OPERATION_KINDS) {
           const operation = snapshot.operations?.[kind];
-          if (operation?.known !== true) {
+          if (!operation?.known) {
             continue;
           }
           observable.observe(nonNegativeFiniteCount(operation?.total), {
@@ -195,7 +195,7 @@ export function createIngressSnapshotRecorder(runtime: DiagnosticsRecorderRuntim
       }
       for (const kind of CHANNEL_INGRESS_OPERATION_KINDS) {
         const operation = snapshot.operations?.[kind];
-        if (operation?.known !== true) {
+        if (!operation?.known) {
           continue;
         }
         const ageMs = ageAtCollection(snapshot, operation?.oldestAgeMs, now);
@@ -228,10 +228,10 @@ export function createIngressSnapshotRecorder(runtime: DiagnosticsRecorderRuntim
   ];
 
   return {
-    recordIngressSnapshot(
+    recordIngressSnapshot: (
       evt: Extract<DiagnosticEventPayload, { type: "ingress.snapshot" }>,
       metadata: DiagnosticEventMetadata,
-    ) {
+    ) => {
       if (!shouldRecordDiagnosticEvent(metadata)) {
         return;
       }
@@ -246,7 +246,7 @@ export function createIngressSnapshotRecorder(runtime: DiagnosticsRecorderRuntim
       state.latest = snapshot;
       state.receivedAt = now;
     },
-    stopIngressSnapshotRecorder() {
+    stopIngressSnapshotRecorder: () => {
       for (const cleanup of cleanupCallbacks) {
         cleanup();
       }

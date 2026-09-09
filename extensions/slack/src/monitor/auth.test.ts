@@ -53,7 +53,7 @@ vi.mock("openclaw/plugin-sdk/channel-ingress-runtime", async () => {
 });
 
 function createIngressObserver() {
-  const finish = vi.fn();
+  const finish = vi.fn((_outcome?: unknown) => {});
   return {
     stage: vi.fn(),
     progress: vi.fn(),

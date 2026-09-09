@@ -97,7 +97,8 @@ const DEFAULT_LIVENESS_EVENT_LOOP_DELAY_WARN_MS = 1_000;
 const DEFAULT_LIVENESS_EVENT_LOOP_UTILIZATION_WARN = 0.95;
 const DEFAULT_LIVENESS_CPU_CORE_RATIO_WARN = 0.9;
 const DEFAULT_LIVENESS_WARN_COOLDOWN_MS = 120_000;
-const DIAGNOSTIC_HEARTBEAT_INTERVAL_MS = 15_000;
+const DIAGNOSTIC_HEARTBEAT_INTERVAL_MS = 30_000;
+const DIAGNOSTIC_INGRESS_SNAPSHOT_INTERVAL_MS = 15_000;
 const loadStuckSessionRecoveryRuntime = createLazyRuntimeModule(
   () => import("./diagnostic-stuck-session-recovery.runtime.js"),
 );
@@ -1188,6 +1189,14 @@ export function startDiagnosticHeartbeat(
     opts?.startupGraceMs != null && opts.startupGraceMs > 0 ? Date.now() + opts.startupGraceMs : 0;
   lastDiagnosticHeartbeatTickAt = Date.now();
   heartbeatInterval = setInterval(() => {
+    const now = Date.now();
+    emitDiagnosticIngressSnapshot(now);
+    const heartbeatElapsedMs =
+      lastDiagnosticHeartbeatTickAt === undefined ? 0 : now - lastDiagnosticHeartbeatTickAt;
+    if (heartbeatElapsedMs < DIAGNOSTIC_HEARTBEAT_INTERVAL_MS) {
+      return;
+    }
+    lastDiagnosticHeartbeatTickAt = now;
     // Reuse this tick for exporter demand changes; GC collection never adds a timer.
     reconcileDiagnosticGcObserver();
     let heartbeatConfig = config;
@@ -1202,10 +1211,6 @@ export function startDiagnosticHeartbeat(
     const stuckSessionAbortMs =
       opts?.testTimings?.stuckSessionAbortMs ?? resolveStuckSessionAbortMs(stuckSessionWarnMs);
     const compactionSafetyTimeoutMs = resolveCompactionTimeoutMs(heartbeatConfig);
-    const now = Date.now();
-    const heartbeatElapsedMs =
-      lastDiagnosticHeartbeatTickAt === undefined ? 0 : now - lastDiagnosticHeartbeatTickAt;
-    lastDiagnosticHeartbeatTickAt = now;
     const heartbeatOverdueMs = Math.max(0, heartbeatElapsedMs - DIAGNOSTIC_HEARTBEAT_INTERVAL_MS);
     const inStartupGrace = livenessGraceUntil > 0 && now < livenessGraceUntil;
     // Observe ordinary timer jitter at the scheduled tick so it cannot consume
@@ -1237,8 +1242,6 @@ export function startDiagnosticHeartbeat(
         emitSample: shouldRecordMemorySample,
       });
     }
-    emitDiagnosticIngressSnapshot(now);
-
     if (!shouldRecordMemorySample) {
       return;
     }
@@ -1337,7 +1340,7 @@ export function startDiagnosticHeartbeat(
         });
       }
     }
-  }, DIAGNOSTIC_HEARTBEAT_INTERVAL_MS);
+  }, DIAGNOSTIC_INGRESS_SNAPSHOT_INTERVAL_MS);
   heartbeatInterval.unref?.();
 }
 
