@@ -290,8 +290,10 @@ struct NativeActionRouterTests {
                 return
             }
             #expect(manager.activeSessionKey == nil)
-            #expect(try fixture.frames(method: "chat.history").isEmpty)
-            #expect(try fixture.frames(method: "chat.send").isEmpty)
+            let historyFrames = try fixture.frames(method: "chat.history")
+            #expect(historyFrames.isEmpty)
+            let sendFrames = try fixture.frames(method: "chat.send")
+            #expect(sendFrames.isEmpty)
         }
     }
 
@@ -343,8 +345,10 @@ struct NativeActionRouterTests {
         try await self.withFixture { fixture, _, router in
             fixture.capabilities.withValue { $0.removeAll { $0 == GatewayServerCapability.profileBinding.rawValue } }
             await #expect(throws: OpenClawNativeActionError.self) { _ = try await router.sessions(matching: nil) }
-            #expect(try fixture.frames(method: "users.self").isEmpty)
-            #expect(try fixture.frames(method: "sessions.list").isEmpty)
+            let selfFrames = try fixture.frames(method: "users.self")
+            #expect(selfFrames.isEmpty)
+            let sessionFrames = try fixture.frames(method: "sessions.list")
+            #expect(sessionFrames.isEmpty)
         }
     }
 

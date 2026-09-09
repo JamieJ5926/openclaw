@@ -27,13 +27,19 @@ struct NativeActionIntentsTests {
         defaultOpen.draft = draft
         _ = try await defaultOpen.perform()
         _ = try await OpenSessionIntent(target: target, draft: draft).perform()
-        try #require(host.requests == [.session(session), .session(session)])
+        var omittedOperation = OpenSessionIntent()
+        omittedOperation.target = target
+        omittedOperation.operation = nil
+        omittedOperation.draft = draft
+        try #require(omittedOperation.operation == nil)
+        _ = try await omittedOperation.perform()
+        try #require(host.requests == [.session(session), .session(session), .session(session)])
 
         _ = try await OpenSessionIntent(target: target, operation: .compose, draft: draft).perform()
         var compose = OpenComposeIntent(target: target)
         compose.draft = draft
         _ = try await compose.perform()
-        try #require(host.requests.count == 4)
+        try #require(host.requests.count == 5)
         for request in host.requests.suffix(2) {
             guard case let .compose(selected, receivedDraft) = request else {
                 throw OpenClawNativeActionError("Expected a compose request.")

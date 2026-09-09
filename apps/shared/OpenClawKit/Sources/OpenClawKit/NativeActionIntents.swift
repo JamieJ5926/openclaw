@@ -156,7 +156,7 @@ public struct OpenSessionIntent: OpenIntent {
     public static let title: LocalizedStringResource = "Open Session"
     public static let authenticationPolicy: IntentAuthenticationPolicy = .requiresLocalDeviceAuthentication
     @Parameter(title: "Session") public var target: OpenClawSessionEntity
-    @Parameter(title: "Operation", default: .open) public var operation: OpenClawNativeSessionOperation
+    @Parameter(title: "Operation", default: .open) public var operation: OpenClawNativeSessionOperation?
     @Parameter(title: "Draft") public var draft: String?
     public static var parameterSummary: some ParameterSummary {
         Summary("\(\.$operation) \(\.$target)") { \.$draft }
@@ -178,7 +178,7 @@ public struct OpenSessionIntent: OpenIntent {
 
     @MainActor
     public func perform() async throws -> some IntentResult {
-        let request: OpenClawNativeOpenRequest = switch self.operation {
+        let request: OpenClawNativeOpenRequest = switch self.operation ?? .open {
         case .open: .session(self.target.session)
         case .compose: .compose(self.target.session, draft: self.draft)
         #if os(iOS)

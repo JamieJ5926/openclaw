@@ -53,7 +53,7 @@ struct MacGatewayChatTransportMappingTests {
                 let frame = try JSONDecoder().decode(EventFrame.self, from: JSONSerialization.data(withJSONObject: [
                     "type": "event", "event": "tick", "seq": 1, "recipientProfileId": "other-profile",
                 ]))
-                await fixture.gateway._test_handlePush(.event(frame))
+                await fixture.gateway._test_handlePush(.event(frame), socketGeneration: lease.socketGeneration)
             } else {
                 fixture.profileID.setValue("other-profile")
                 await #expect(throws: GatewayResponseError.self) {
