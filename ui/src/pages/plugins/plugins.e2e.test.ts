@@ -577,7 +577,7 @@ describeControlUiE2e("Control UI Plugins mocked Gateway E2E", () => {
       expect(hoverMoreAppearance.filter).toBe("brightness(1.35)");
       await showAll.click();
       expect(await cards.count()).toBe(16);
-      await page.getByRole("button", { name: "Back", exact: true }).click();
+      await page.getByRole("button", { name: "Hide", exact: true }).click();
       expect(await cards.count()).toBe(12);
 
       expect(await gateway.getRequests("plugins.setEnabled")).toEqual([]);

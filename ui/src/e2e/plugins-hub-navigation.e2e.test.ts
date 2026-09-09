@@ -164,7 +164,7 @@ suite.define(() => {
       expect(`${location.pathname}${location.search}${location.hash}`).toBe(
         "/plugins?query=calendar#featured",
       );
-      await page.getByRole("heading", { name: "Your plugins", exact: true }).waitFor();
+      await page.getByRole("heading", { name: "Installed plugins", exact: true }).waitFor();
     } finally {
       await context.close();
     }
@@ -198,7 +198,7 @@ suite.define(() => {
             "*, *::before, *::after { animation-duration: 0s !important; transition-duration: 0s !important; }",
         });
         await waitForControlUiRoute(page, { pathname: "/plugins", routeId: "plugins" });
-        await page.getByRole("heading", { name: "Your plugins" }).waitFor();
+        await page.getByRole("heading", { name: "Installed plugins" }).waitFor();
         const pluginsHeader = await headerGeometry(page);
         expect(pluginsHeader.title).toBe("Plugins");
         await expectHeaderCopy(page, "plugins");

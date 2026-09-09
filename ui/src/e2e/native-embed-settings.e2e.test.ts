@@ -31,6 +31,7 @@ const routes = [
   "agents",
   "labs",
   "model-providers",
+  "plugin-settings",
   "mcp",
   "memory",
   "automation",
