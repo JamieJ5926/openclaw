@@ -36,7 +36,8 @@ struct NativeActionIntentsTests {
         try #require(host.requests == [.session(session), .session(session), .session(session)])
 
         _ = try await OpenSessionIntent(target: target, operation: .compose, draft: draft).perform()
-        var compose = OpenComposeIntent(target: target)
+        var compose = OpenComposeIntent()
+        compose.target = target
         compose.draft = draft
         _ = try await compose.perform()
         try #require(host.requests.count == 5)

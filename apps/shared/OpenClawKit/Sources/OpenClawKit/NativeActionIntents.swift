@@ -206,9 +206,6 @@ public struct OpenComposeIntent: AppIntent {
     }
 
     public init() {}
-    public init(target: OpenClawSessionEntity) {
-        self.target = target
-    }
 
     @MainActor
     public func perform() async throws -> some IntentResult {
@@ -216,21 +213,21 @@ public struct OpenComposeIntent: AppIntent {
     }
 }
 
-public struct OpenRunIntent: OpenIntent {
-    public static let title: LocalizedStringResource = "Open Run"
-    public static let authenticationPolicy: IntentAuthenticationPolicy = .requiresLocalDeviceAuthentication
-    @Parameter(title: "Run") public var target: OpenClawRunEntity
-    public static var parameterSummary: some ParameterSummary {
+struct OpenRunIntent: OpenIntent {
+    static let title: LocalizedStringResource = "Open Run"
+    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresLocalDeviceAuthentication
+    @Parameter(title: "Run") var target: OpenClawRunEntity
+    static var parameterSummary: some ParameterSummary {
         Summary("Open \(\.$target)")
     }
 
-    public init() {}
-    public init(target: OpenClawRunEntity) {
+    init() {}
+    init(target: OpenClawRunEntity) {
         self.target = target
     }
 
     @MainActor
-    public func perform() async throws -> some IntentResult {
+    func perform() async throws -> some IntentResult {
         try await OpenClawNativeActionServices.open(.inspect(self.target.run))
         return .result()
     }

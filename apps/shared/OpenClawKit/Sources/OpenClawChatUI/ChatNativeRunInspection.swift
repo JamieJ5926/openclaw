@@ -142,11 +142,6 @@ public struct OpenClawChatNativeActionGateway: Sendable {
         return history
     }
 
-    public func inspect(_ run: OpenClawNativeRunRef) async throws -> OpenClawNativeRunInspection {
-        try await OpenClawChatNativeRunInspection.reduce(
-            self.history(session: run.session, runID: run.runID), run: run)
-    }
-
     public func runs(matching query: String?) async throws -> [OpenClawNativeRunRef] {
         let (owner, entries) = try await self.sessionEntries(matching: nil)
         var runs: [OpenClawNativeRunRef] = []

@@ -358,9 +358,14 @@ struct ChatNativeActionGatewayTests {
                 sessionKey: "agent:reviewer:main"),
             runID: "client-run")
         if retired {
-            await #expect(throws: CancellationError.self) { try await gateway.inspect(run) }
+            await #expect(throws: CancellationError.self) {
+                let history = try await gateway.history(session: run.session, runID: run.runID)
+                _ = try OpenClawChatNativeRunInspection.reduce(history, run: run)
+            }
         } else {
-            #expect(try await gateway.inspect(run).outcome == .done)
+            let history = try await gateway.history(session: run.session, runID: run.runID)
+            let inspection = try OpenClawChatNativeRunInspection.reduce(history, run: run)
+            #expect(inspection.outcome == .done)
         }
         #expect(await requests.snapshot() == ["users.self", "chat.history"])
         #expect(await requests.profileSnapshot() == ["profile-a", "profile-a"])
