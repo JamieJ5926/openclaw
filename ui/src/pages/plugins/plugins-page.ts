@@ -560,6 +560,7 @@ class PluginsPage extends OpenClawLightDomElement {
           : nothing
       }
       ${renderSettingsWorkspace(html`
+        <openclaw-plugin-manager></openclaw-plugin-manager>
         ${
           discovery
             ? html`<wa-tab-panel

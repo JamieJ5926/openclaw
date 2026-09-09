@@ -5,6 +5,7 @@ import { beforeEach, expect, it } from "vitest";
 import type { SessionsCatalogHostEvent } from "../../../packages/gateway-protocol/src/index.ts";
 import { createControlUiE2eArtifactDir } from "../test-helpers/control-ui-e2e-artifacts.ts";
 import {
+  assertSessionSectionCountAlignment,
   controlUiBundledGatewayUrl,
   controlUiBundledSettingsStorageKey,
   controlUiSessionPath,
@@ -123,13 +124,13 @@ suite.define(() => {
             {
               contextTokens: null,
               displayName: "Understanding Startup Phases and Delays",
-              hasActiveRun: true,
+              hasActiveRun: false,
               key: "agent:main:startup-phases",
               kind: "direct",
               label: "Understanding Startup Phases and Delays",
               model: "gpt-5.5",
               modelProvider: "openai",
-              status: "running",
+              status: "done",
               totalTokens: 0,
               updatedAt: Date.now(),
               worktree: {
@@ -145,8 +146,8 @@ suite.define(() => {
           catalogs: [
             {
               id: "codex",
-              label: "Codex",
-              capabilities: { continueSession: true, archive: true, createSession: true },
+              label: "Codex Native Sessions with a Deliberately Long Provider Label",
+              capabilities: { continueSession: true, archive: true, startTerminal: true },
               hosts: [
                 {
                   hostId: "gateway:local",
@@ -226,10 +227,8 @@ suite.define(() => {
         liveRows.boundingBox(),
         catalog.boundingBox(),
       ]);
-      expect(liveRowsBox).not.toBeNull();
-      expect(catalogBox).not.toBeNull();
-      // Read the rhythm from the token instead of restating it: the guard is
-      // that catalogs are a separate group, not that the gap is any one number.
+      expect([liveRowsBox, catalogBox]).not.toContain(null);
+      // Guard that catalogs are a separate group without restating the gap token.
       const groupGap = await page.evaluate(() => {
         const sidebar = document.querySelector(".sidebar");
         return sidebar
@@ -244,6 +243,7 @@ suite.define(() => {
           path: path.join(uiProofArtifactDir, "06-coding-catalog-spacing.png"),
         });
       }
+      await assertSessionSectionCountAlignment(page, ["work", "catalog:codex", "catalog:claude"]);
     } finally {
       await page.close();
     }

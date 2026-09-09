@@ -666,10 +666,8 @@ class MainViewModel private constructor(
   val chatOutboxPresentationRestored: StateFlow<Boolean> = runtimeState(initial = false) { it.chatOutboxPresentationRestored }
   internal val chatMessageSpeech: StateFlow<MessageSpeechState?> =
     runtimeState(initial = null) { it.messageSpeechState }
-  val execApprovals: StateFlow<List<GatewayExecApprovalSummary>> = runtimeState(initial = emptyList()) { it.execApprovals }
-  val execApprovalsRefreshing: StateFlow<Boolean> = runtimeState(initial = false) { it.execApprovalsRefreshing }
-  val execApprovalsErrorText: StateFlow<String?> = runtimeState(initial = null) { it.execApprovalsErrorText }
-  val execApprovalsNotice: StateFlow<GatewayExecApprovalNotice?> = runtimeState(initial = null) { it.execApprovalsNotice }
+  internal val execApprovalInbox: StateFlow<GatewayExecApprovalInboxState> =
+    runtimeState(initial = GatewayExecApprovalInboxState()) { it.execApprovalInbox }
 
   /**
    * Attaches Activity-owned permission and lifecycle seams after runtime initialization.
@@ -1372,8 +1370,8 @@ class MainViewModel private constructor(
     ensureRuntime().refreshModelCatalog()
   }
 
-  fun refreshProviderModels() {
-    ensureRuntime().refreshProviderModels()
+  fun refreshProviderModels(refresh: Boolean = false) {
+    ensureRuntime().refreshProviderModels(refresh)
   }
 
   fun refreshTalkSetupReadiness() {
@@ -1641,6 +1639,34 @@ class MainViewModel private constructor(
   suspend fun refreshChatSessionBranches(): Boolean = ensureRuntime().refreshChatSessionBranches()
 
   suspend fun switchChatSessionBranch(leafEntryId: String): Boolean = ensureRuntime().switchChatSessionBranch(leafEntryId)
+
+  internal fun isCurrentChatBranchTarget(
+    owner: ChatComposerOwner,
+    selectionGeneration: Long,
+  ): Boolean {
+    val runtime = runtimeRef.value ?: return false
+    return runtime.chatSelectionGeneration.value == selectionGeneration && currentChatComposerOwner() == owner
+  }
+
+  internal fun canSwitchChatSessionBranch(
+    owner: ChatComposerOwner,
+    selectionGeneration: Long,
+  ): Boolean {
+    val runtime = runtimeRef.value ?: return false
+    return isCurrentChatBranchTarget(owner, selectionGeneration) && runtime.canSwitchChatSessionBranch(owner.sessionKey)
+  }
+
+  internal fun canSwitchChatSessionBranch(
+    owner: ChatComposerOwner,
+    selectionGeneration: Long,
+    leafEntryId: String,
+  ): Boolean {
+    val runtime = runtimeRef.value ?: return false
+    return canSwitchChatSessionBranch(owner, selectionGeneration) &&
+      operatorScopesAllowAdmin(runtime.operatorScopes.value) &&
+      !runtime.chatSessionBranchesLoading.value &&
+      runtime.chatSessionBranches.value.any { it.leafEntryId == leafEntryId && !it.active }
+  }
 
   suspend fun listWorkspaceFiles(
     path: String?,
