@@ -18,6 +18,7 @@ import {
   type ApplicationContextProvider,
 } from "../../test-helpers/application-context.ts";
 import { gatewayHelloForMethods } from "../../test-helpers/gateway-methods.ts";
+import type { PluginInstallWizardState } from "./install-wizard-model.ts";
 import type { PluginRowMessage } from "./plugin-row-message.ts";
 import type { PluginsConsentController } from "./plugins-consent-controller.ts";
 import type { PluginsRouteData } from "./route-data.ts";
@@ -49,12 +50,20 @@ type TestPluginsPage = HTMLElement & {
   messages: Record<string, PluginRowMessage>;
   applyMutationResult: (result: PluginMutationResult) => void;
   consentController: Pick<PluginsConsentController, "install">;
+  installWizard: PluginInstallWizardState | null;
+  openInstallWizard: (
+    result: import("../../lib/plugins/index.ts").PluginDiscoveryDetailResult,
+  ) => void;
+  closeInstallWizard: () => void;
+  patchInstallWizardConfig: (path: Array<string | number>, value: unknown) => void;
+  saveInstallWizardConfiguration: () => Promise<void>;
   refreshCatalog: () => Promise<void>;
   updateEnabled: (pluginId: string, enabled: boolean, key?: string) => Promise<void>;
   uninstall: (pluginId: string, rowKey: string) => Promise<void>;
 };
 
 export type RuntimeConfigTestState = {
+  connected?: boolean;
   configFormDirty: boolean;
   lastError: string | null;
   configSnapshot?: { sourceConfig: Record<string, unknown>; hash: string } | null;
@@ -224,14 +233,21 @@ export function createRuntimeConfigHarness(
   const patch = vi.fn<
     (options: { raw: Record<string, unknown>; note: string }) => Promise<boolean>
   >(async () => true);
+  const patchForm = vi.fn<(path: Array<string | number>, value: unknown) => void>();
+  const removeFormValue = vi.fn<(path: Array<string | number>) => void>();
+  const save = vi.fn(async () => true);
   const runtimeConfig = {
     state: runtimeConfigState,
+    canSet: true,
     refresh: refreshConfig,
     ensureLoaded: vi.fn(async () => undefined),
     ensureSchemaLoaded: vi.fn(async () => undefined),
     refreshSchema: vi.fn(async () => undefined),
     retry: vi.fn(async () => true),
     patch,
+    patchForm,
+    removeFormValue,
+    save,
     patchFromSnapshot: vi.fn(async (build) => {
       const config = runtimeConfigState.configSnapshot?.sourceConfig ?? {};
       const built = build(config);

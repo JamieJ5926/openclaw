@@ -348,7 +348,7 @@ export class PluginsPage extends OpenClawLightDomElement {
     // Inspection results belong to one connection epoch, including same-client reconnects.
     this.detail = null;
     this.catalogDetail = null;
-    if (this.installWizardBusy && this.installWizard) {
+    if (this.installWizard) {
       if (!this.installOwnerIsCurrent()) {
         const key = this.installWizardKey();
         if (key) {
@@ -361,7 +361,7 @@ export class PluginsPage extends OpenClawLightDomElement {
           stage: "error",
           error: t("pluginsPage.installWizard.destinationChanged"),
         };
-      } else {
+      } else if (this.installWizardBusy) {
         this.installWizard = { ...this.installWizard, stage: "reconnecting", error: undefined };
         this.armInstallReconnectTimeout(this.installAttempt, this.installWizard.catalogId);
       }
@@ -587,7 +587,9 @@ export class PluginsPage extends OpenClawLightDomElement {
     if (!this.installIsCurrent(attempt, wizard.catalogId)) {
       return;
     }
-    const saved = await this.context.runtimeConfig.save();
+    const saved = await this.context.runtimeConfig.save({
+      canDispatch: () => this.installIsCurrent(attempt, wizard.catalogId),
+    });
     if (!saved) {
       this.failInstallWizard(
         attempt,
@@ -605,6 +607,20 @@ export class PluginsPage extends OpenClawLightDomElement {
       return;
     }
     this.enableInstalledWizardPlugin(wizard.pluginId);
+  }
+
+  private patchInstallWizardConfig(path: Array<string | number>, value: unknown): void {
+    const wizard = this.installWizard;
+    if (wizard && this.installIsCurrent(this.installAttempt, wizard.catalogId)) {
+      this.context.runtimeConfig.patchForm(path, value);
+    }
+  }
+
+  private removeInstallWizardConfig(path: Array<string | number>): void {
+    const wizard = this.installWizard;
+    if (wizard && this.installIsCurrent(this.installAttempt, wizard.catalogId)) {
+      this.context.runtimeConfig.removeFormValue(path);
+    }
   }
 
   private enableInstalledWizardPlugin(pluginId: string) {
@@ -986,6 +1002,8 @@ export class PluginsPage extends OpenClawLightDomElement {
         beginInstallWizard: () => this.beginInstallWizard(),
         continueInstallPolicyWarning: () => this.continueInstallPolicyWarning(),
         retryInstallWizard: () => this.retryInstallWizard(),
+        patchInstallWizardConfig: (path, value) => this.patchInstallWizardConfig(path, value),
+        removeInstallWizardConfig: (path) => this.removeInstallWizardConfig(path),
         saveInstallWizardConfiguration: () => void this.saveInstallWizardConfiguration(),
         manageInstalledWizardPlugin: () => this.manageInstalledWizardPlugin(),
         cancelConsent: () => this.cancelConsent(),

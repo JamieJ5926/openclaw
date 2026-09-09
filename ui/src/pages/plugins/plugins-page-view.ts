@@ -49,6 +49,8 @@ type PluginsPageViewActions = {
   beginInstallWizard: () => void;
   continueInstallPolicyWarning: () => void;
   retryInstallWizard: () => void;
+  patchInstallWizardConfig: (path: Array<string | number>, value: unknown) => void;
+  removeInstallWizardConfig: (path: Array<string | number>) => void;
   saveInstallWizardConfiguration: () => void;
   manageInstalledWizardPlugin: () => void;
   cancelConsent: () => void;
@@ -291,8 +293,8 @@ export function renderPluginsPage(model: PluginsPageViewModel) {
             onInstall: actions.beginInstallWizard,
             onContinuePolicyWarning: actions.continueInstallPolicyWarning,
             onRetry: actions.retryInstallWizard,
-            onConfigPatch: (path, value) => context.runtimeConfig.patchForm(path, value),
-            onConfigRemove: (path) => context.runtimeConfig.removeFormValue(path),
+            onConfigPatch: actions.patchInstallWizardConfig,
+            onConfigRemove: actions.removeInstallWizardConfig,
             onSaveConfiguration: actions.saveInstallWizardConfiguration,
             onManage: actions.manageInstalledWizardPlugin,
           })

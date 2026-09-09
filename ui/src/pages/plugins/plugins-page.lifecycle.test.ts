@@ -5,6 +5,7 @@ import { GatewayRequestError } from "../../api/gateway.ts";
 import { showConfirmDialog } from "../../components/confirm-dialog.ts";
 import { i18n } from "../../i18n/index.ts";
 import type {
+  PluginDiscoveryDetailResult,
   PluginInstallRequest,
   PluginListResult,
   PluginMutationResult,
@@ -54,6 +55,31 @@ describe("PluginsPage lifecycle confirmation", () => {
       return { ok: true, value: await task(client), refresh: { ok: true } };
     };
     return { harness, queued: queued.promise, release };
+  }
+
+  function createWizardDetail(): PluginDiscoveryDetailResult {
+    return {
+      plugin: {
+        id: "ch_Y29tbXVuaXR5LXRoaW5n",
+        catalog: { name: "Community Thing", family: "code-plugin", official: false },
+        local: {
+          present: false,
+          installed: false,
+          enabled: false,
+          state: "not-installed",
+          action: "install",
+        },
+      },
+      detail: {
+        origin: "clawhub",
+        packageName: "community-thing",
+        topics: [],
+        configuration: [],
+        mcpServers: [],
+        skills: [],
+        versions: [],
+      },
+    };
   }
 
   it("does not install on a replacement Gateway after confirmation started", async () => {
@@ -260,6 +286,70 @@ describe("PluginsPage lifecycle confirmation", () => {
     expect(gatewayRequest).not.toHaveBeenCalledWith("plugins.uninstall", {
       pluginId: "community-thing",
     });
+  });
+
+  it("retires configuration-stage edits when the owning Gateway changes", async () => {
+    const { client } = createClient(async () => createResult());
+    const initialGateway = createGateway(client);
+    const replacementGateway = createGateway(client);
+    const config = createRuntimeConfigHarness(
+      vi.fn(async () => undefined),
+      { connected: true, configFormDirty: false, lastError: null },
+      () => client,
+    );
+    const { page, provider } = await mountPage(
+      createContext(initialGateway.gateway, undefined, undefined, config),
+      createPluginsRouteData(initialGateway.gateway),
+    );
+    page.openInstallWizard(createWizardDetail());
+    page.installWizard = {
+      ...page.installWizard!,
+      pluginId: "community-thing",
+      stage: "configuring",
+    };
+
+    provider.setContext(createContext(replacementGateway.gateway, undefined, undefined, config));
+    await page.updateComplete;
+    page.patchInstallWizardConfig(["plugins", "entries", "community-thing"], true);
+
+    expect(page.installWizard?.stage).toBe("error");
+    expect(config.runtimeConfig.patchForm).not.toHaveBeenCalled();
+  });
+
+  it("does not dispatch a queued configuration save after the wizard closes", async () => {
+    const { client } = createClient(async () => createResult());
+    const gateway = createGateway(client);
+    const config = createRuntimeConfigHarness(
+      vi.fn(async () => undefined),
+      { connected: true, configFormDirty: true, lastError: null },
+      () => client,
+    );
+    const queued = deferred<void>();
+    const release = deferred<void>();
+    config.runtimeConfig.save.mockImplementation(async (options) => {
+      queued.resolve();
+      await release.promise;
+      return options?.canDispatch?.() ?? true;
+    });
+    const { page } = await mountPage(
+      createContext(gateway.gateway, undefined, undefined, config),
+      createPluginsRouteData(gateway.gateway),
+    );
+    page.openInstallWizard(createWizardDetail());
+    page.installWizard = {
+      ...page.installWizard!,
+      pluginId: "community-thing",
+      stage: "configuring",
+    };
+
+    const save = page.saveInstallWizardConfiguration();
+    await queued.promise;
+    page.closeInstallWizard();
+    release.resolve();
+    await save;
+
+    expect(config.runtimeConfig.save).toHaveBeenCalledOnce();
+    expect(page.installWizard).toBeNull();
   });
 
   it("reconfirms an install-policy retry after a same-client reconnect", async () => {
