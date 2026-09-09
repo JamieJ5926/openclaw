@@ -42,7 +42,7 @@ mention/reply/command/DM -> user request
 always-on group chatter -> user request, or room event when configured
 ```
 
-## Visible replies
+## Messages addressed to other bots
 
 Messages explicitly addressed to another identified bot do not start an OpenClaw
 turn, even when `requireMention: false`. A native mention of OpenClaw in the same
@@ -58,6 +58,14 @@ without recipient bot identity keep their existing activation behavior.
 Existing `ignoreOtherMentions` options on Discord and Slack additionally filter
 mentions of people and roles. Bare commands with no recipient, such as `/edit`,
 remain subject to the room's normal activation rules.
+
+Telegram resolves mentioned usernames to identify bots; a username ending in
+`bot` alone is not sufficient. A leading qualified command such as
+`/status@other_bot` belongs to its named bot even if its arguments mention
+OpenClaw. Replying to another bot also identifies that bot as the recipient;
+mention OpenClaw explicitly in the reply to ask it to participate.
+
+## Visible replies
 
 For normal group/channel requests, OpenClaw defaults to `messages.groupChat.visibleReplies: "automatic"`: the final assistant text posts to the room as the visible reply.
 

@@ -173,16 +173,6 @@ The Mini App is a Tailscale-only v1 path and does not support Telegram Web ifram
 
 In groups and forum topics, an explicit mention of the configured bot handle addresses the selected OpenClaw agent. An example handle is `@my_bot`. This holds even when the agent persona name differs from the Telegram username. Group silence policy still applies to unrelated traffic, but the bot handle itself is never "someone else."
 
-An explicit mention of another bot skips the OpenClaw turn unless the same
-message also mentions this bot. Telegram resolves mentioned usernames to identify
-bots; a username ending in `bot` alone is not sufficient. This rule also applies
-when mentions are optional or the message replies to OpenClaw.
-
-A leading qualified command, such as `/status@other_bot`, belongs to its named
-bot even if its arguments mention OpenClaw. A bare `/status` or `/edit` has no
-command recipient, but replying to another bot still identifies that bot as the
-recipient. Mention OpenClaw explicitly in that reply to ask it to participate.
-
 <Tabs>
   <Tab title="DM policy">
     `channels.telegram.dmPolicy` controls direct message access:
