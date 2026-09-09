@@ -69,24 +69,12 @@ export function createStartupRecovery() {
         return {action: 'welcome'};
       }
       if (surface.kind === 'system-ui-dialog' && state === 'initial') {
-        state = 'needs-diagnostics';
-        return {action: 'diagnose'};
+        state = 'waiting-for-clear';
+        return {action: 'wait', title: surface.title, button: surface.button, xy: surface.xy};
       }
-      if (state === 'needs-diagnostics') throw Error('Diagnostics must finish before recovery can continue');
       if (surface.kind === 'system-ui-dialog' && state === 'cleared-awaiting-welcome') throw Error('Startup dialog reappeared after recovery');
       if (surface.kind === 'pending' && state === 'waiting-for-clear') state = 'cleared-awaiting-welcome';
       return {action: 'pending'};
-    },
-    afterDiagnostics(xml) {
-      if (state !== 'needs-diagnostics') throw Error('No second or unprepared startup recovery is allowed');
-      const surface = startupSurface(xml);
-      if (surface.kind === 'welcome') {
-        state = 'complete';
-        return {action: 'welcome'};
-      }
-      if (surface.kind !== 'system-ui-dialog') throw Error('Selected startup dialog changed before Wait');
-      state = 'waiting-for-clear';
-      return {action: 'wait', title: surface.title, button: surface.button, xy: surface.xy};
     },
   };
 }
