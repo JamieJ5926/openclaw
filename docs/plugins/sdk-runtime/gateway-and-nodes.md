@@ -43,7 +43,9 @@ Reach the Gateway and paired nodes from plugin code, and the events a long-lived
     ```
 
     Supply the current lifecycle signal to every operation. Call `authorize(...)` immediately before
-    privileged work and `allowStanding(...)` immediately after awaited approval work. Operations
+    privileged work and `allowStanding(...)` immediately after awaited approval work. For agent
+    dispatch, repeat authorization inside `gateway.request`'s `assertAdmissionCurrent` callback:
+    asynchronous preparation can outlive the initial grant check. Operations
     fail closed when the plugin registry or supplied lifecycle is no longer live. `revoke(...)`
     advances issuer generations; `applyRevocation(...)` accepts only a newer generation for the
     exact holder subject and target binding. Retained runtime references cannot authorize after
@@ -72,6 +74,13 @@ Reach the Gateway and paired nodes from plugin code, and the events a long-lived
     `GatewayClientRequestError`, preserving structured `details`, retry metadata, and the Gateway
     error code for recovery flows. Use `isAvailable()` before choosing this path from tools that can
     also run in standalone agent processes.
+
+    For authority that can change during agent preparation, pass a synchronous
+    `assertAdmissionCurrent: () => void` callback. It must recheck the exact live grant, target, and
+    lifecycle and throw when they no longer authorize the input. The Gateway repeats this narrowing
+    check before durable session mutations and input acceptance, including after asynchronous work.
+    It grants no additional permissions. Once agent input is accepted, the host run owns it;
+    later source revocation does not retract that accepted input.
 
   </Accordion>
   <Accordion title="api.runtime.nodes">

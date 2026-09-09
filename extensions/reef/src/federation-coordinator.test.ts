@@ -141,7 +141,7 @@ function fixture(fixtureOptions?: {
     async (
       method: string,
       _params?: Record<string, unknown>,
-      _options?: { timeoutMs?: number; signal?: AbortSignal },
+      _options?: { timeoutMs?: number; signal?: AbortSignal; assertAdmissionCurrent?: () => void },
     ) =>
       method === "plugin.approval.request"
         ? { id: "plugin:approval-1", decision: "allow-once" }
@@ -150,7 +150,7 @@ function fixture(fixtureOptions?: {
   const gatewayRequest = async <T>(
     method: string,
     params?: Record<string, unknown>,
-    options?: { timeoutMs?: number; signal?: AbortSignal },
+    options?: { timeoutMs?: number; signal?: AbortSignal; assertAdmissionCurrent?: () => void },
   ): Promise<T> => {
     const response = await request(method, params, options);
     // SAFETY: this fixture returns the exact response shape for each method the coordinator calls.
@@ -229,7 +229,7 @@ describe("Reef federation coordinator", () => {
           sourceTool: "reef_federated_prompt",
         }),
       }),
-      { signal: authority.signal },
+      { signal: authority.signal, assertAdmissionCurrent: expect.any(Function) },
     );
   });
 
@@ -395,6 +395,30 @@ describe("Reef federation coordinator", () => {
     expect(stopped.request.mock.calls.some(([method]) => method === "agent")).toBe(false);
   });
 
+  it.each(["grant", "peer"] as const)(
+    "denies %s revocation during agent admission",
+    async (owner) => {
+      const current = fixture({ allowAlways: true });
+      const admitted = vi.fn();
+      current.request.mockImplementationOnce(async (_method, _params, options) => {
+        if (owner === "grant") {
+          current.updateMount({ revoked: true, grantGeneration: 1 });
+        } else {
+          current.updatePeerIdentity({ keyEpoch: 2 });
+        }
+        options?.assertAdmissionCurrent?.();
+        admitted();
+        return { runId: "run-1" };
+      });
+      const outcome = await handle(current.coordinator);
+      expect(outcome).toMatchObject({ type: "session.prompt.denied", reason: "grant-revoked" });
+      expect(admitted).not.toHaveBeenCalled();
+      expect(current.proposals.get("proposal-1")).toMatchObject({ status: "denied", outcome });
+      await expect(handle(current.coordinator)).resolves.toEqual(outcome);
+      expect(current.request).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it("does not persist allow-always after its Reef lifecycle closes", async () => {
     const stopped = fixture();
     stopped.request.mockImplementationOnce(async () => {
@@ -463,7 +487,7 @@ describe("Reef federation coordinator", () => {
     expect(replacement.request).toHaveBeenCalledWith(
       "agent",
       expect.objectContaining({ idempotencyKey: "reef:proposal-1" }),
-      { signal: replacement.authority.signal },
+      { signal: replacement.authority.signal, assertAdmissionCurrent: expect.any(Function) },
     );
   });
 

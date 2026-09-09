@@ -343,10 +343,12 @@ export function createPluginRuntimeResolver(state: PluginRegistryState) {
           return {
             isAvailable: () => runWithPluginScope(() => gateway.isAvailable()),
             request: async (method, params, options) => {
+              // Retain the caller's admission fence before asynchronous ownership preparation.
+              const requestOptions = options ? { ...options } : undefined;
               const { assertGatewaySessionRequestOwned } = await loadSessionOwnership();
               return await runWithPluginScope(async () => {
                 assertGatewaySessionRequestOwned(method, params);
-                return await gateway.request(method, params, options);
+                return await gateway.request(method, params, requestOptions);
               });
             },
           } satisfies PluginRuntime["gateway"];

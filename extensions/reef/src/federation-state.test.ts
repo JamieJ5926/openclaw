@@ -1,7 +1,9 @@
 import type { OpenKeyedStoreOptions } from "openclaw/plugin-sdk/plugin-state-runtime";
 import { resetPluginStateStoreForTests } from "openclaw/plugin-sdk/plugin-state-test-runtime";
 import { useAutoCleanupTempDirTracker } from "openclaw/plugin-sdk/test-env";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createReefFederatedPromptDigest } from "../protocol/federation.js";
+import { ReefFederationCoordinator } from "./federation-coordinator.js";
 import {
   ReefFederationState,
   type ReefFederationMount,
@@ -116,19 +118,34 @@ describe("Reef federation state", () => {
     ).toBe(false);
   });
 
-  it("invalidates persisted grants when the local Reef identity rotates", () => {
+  it("durably denies retained proposals when the local Reef identity rotates", async () => {
     const first = new ReefFederationState(
       createRuntime(stateDir),
       new AbortController().signal,
       "local-key-1",
     );
     expect(first.createMount(mount)).toBe(true);
+    const proposal = pendingProposal();
+    proposal.digest = createReefFederatedPromptDigest({
+      from: proposal.request.from,
+      to: proposal.request.to,
+      mountId: proposal.mountId,
+      proposalId: proposal.proposalId,
+      sessionId: mount.sessionId,
+      grantGeneration: mount.grantGeneration,
+      text: proposal.request.frame.text,
+    });
+    proposal.request.frame.textSha256 = proposal.digest;
+    expect(first.claimProposal(proposal).result).toBe("new");
+    first.resolveProposal(proposal.proposalId, proposal.digest, {
+      status: "pending",
+      approvalId: "plugin:rotation-proof",
+      approvalDecision: "allow-once",
+    });
 
-    const rotated = new ReefFederationState(
-      createRuntime(stateDir),
-      new AbortController().signal,
-      "local-key-2",
-    );
+    const runtime = createRuntime(stateDir);
+    const signal = new AbortController().signal;
+    const rotated = new ReefFederationState(runtime, signal, "local-key-2");
     expect(
       rotated.authorizeMount({
         mountId: mount.mountId,
@@ -138,6 +155,32 @@ describe("Reef federation state", () => {
         generation: mount.grantGeneration,
       }),
     ).toBeUndefined();
+    // The display projection does not expose local key binding; core authorization must win.
+    expect(rotated.getMount(mount.mountId)).toMatchObject(mount);
+    const request = vi.spyOn(runtime.gateway, "request");
+    const coordinator = new ReefFederationCoordinator(
+      runtime,
+      rotated,
+      () => mount.peerIdentity,
+      signal,
+    );
+    const outcome = await coordinator.handlePrompt(proposal.request);
+    expect(outcome).toMatchObject({ type: "session.prompt.denied", reason: "grant-revoked" });
+    const reopened = new ReefFederationState(createRuntime(stateDir), signal, "local-key-2");
+    expect(reopened.listUnsentProposals()).toEqual([
+      expect.objectContaining({ status: "denied", outcome }),
+    ]);
+    await expect(
+      new ReefFederationCoordinator(
+        runtime,
+        reopened,
+        () => mount.peerIdentity,
+        signal,
+      ).handlePrompt(proposal.request),
+    ).resolves.toEqual(outcome);
+    expect(request).not.toHaveBeenCalled();
+    expect(reopened.markOutcomeSent(proposal.proposalId, proposal.digest)).toBe(true);
+    expect(reopened.listUnsentProposals()).toEqual([]);
   });
 
   it("fails every grant operation closed after the Reef lifecycle ends", () => {

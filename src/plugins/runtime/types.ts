@@ -127,6 +127,8 @@ type RuntimeNodeDuplexChannel = {
 export type RuntimeGatewayRequestOptions = {
   timeoutMs?: number;
   signal?: AbortSignal;
+  /** Synchronous narrowing check at session mutation commits; agent acceptance ends its ownership. */
+  assertAdmissionCurrent?: () => void;
   /** Requested Gateway scopes. Honored only for bundled or trusted official plugins. */
   scopes?: OperatorScope[];
 };

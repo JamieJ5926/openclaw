@@ -68,15 +68,17 @@ export class ReefFederationCoordinator {
 
   /** Validate, approve, and dispatch one remote prompt through canonical agent admission. */
   async handlePrompt(
-    params: {
+    input: {
       from: string;
       to: string;
       peer: string;
       peerIdentity: ReefPeerIdentity;
       frame: Extract<ReefFederationFrame, { type: "session.prompt.propose" }>;
     },
-    claim = this.claimPrompt(params),
+    claim = this.claimPrompt(input),
   ): Promise<Exclude<ReefFederationFrame, { type: "session.prompt.propose" }>> {
+    // Retained admission checks must bind the same proposal across asynchronous preparation.
+    const params = structuredClone(input);
     const { frame } = params;
     // Claim before any asynchronous work or authority rejection so every terminal result can be
     // recovered after the source envelope is acknowledged.
@@ -109,9 +111,9 @@ export class ReefFederationCoordinator {
       sessionId: frame.sessionId,
       generation: frame.grantGeneration,
     });
-    const invalid = mount ? undefined : this.validateMount({ ...params, mount: storedMount });
-    if (invalid) {
-      return this.recordDenial(frame, digest, invalid);
+    if (!mount) {
+      const reason = this.validateMount({ ...params, mount: storedMount }) ?? "grant-revoked";
+      return this.recordDenial(frame, digest, reason);
     }
     const expectedDigest = createReefFederatedPromptDigest({
       from: params.from,
@@ -131,9 +133,21 @@ export class ReefFederationCoordinator {
       );
     }
 
+    const currentAuthority = () => {
+      const peerIdentity = this.currentPeerIdentity(params.peer);
+      return peerIdentity
+        ? {
+            mountId: frame.mountId,
+            peer: params.peer,
+            peerIdentity,
+            sessionId: frame.sessionId,
+            generation: frame.grantGeneration,
+          }
+        : undefined;
+    };
     let approvalId = claim.proposal.approvalId;
-    if (!mount!.allowAlways && claim.proposal.approvalDecision !== "allow-once") {
-      const approval = await this.requestApproval(params.peer, mount!, frame);
+    if (!mount.allowAlways && claim.proposal.approvalDecision !== "allow-once") {
+      const approval = await this.requestApproval(params.peer, mount, frame);
       approvalId = approval.id;
       if (approval.decision === "deny") {
         return this.recordDenial(frame, digest, "host-denied", approvalId);
@@ -158,31 +172,12 @@ export class ReefFederationCoordinator {
         }
       }
       if (approval.decision === "allow-always") {
-        const grantPeerIdentity = this.currentPeerIdentity(params.peer);
-        if (!grantPeerIdentity) {
+        const authority = currentAuthority();
+        // Standing authority is revalidated inside the synchronous core write.
+        if (!authority || !this.state.authorizeMount(authority)) {
           return this.recordDenial(frame, digest, "grant-revoked", approvalId);
         }
-        const grantAuthority = this.state.authorizeMount({
-          mountId: frame.mountId,
-          peer: params.peer,
-          peerIdentity: grantPeerIdentity,
-          sessionId: frame.sessionId,
-          generation: frame.grantGeneration,
-        });
-        // Core revalidates the exact grant and lifecycle after awaited approval work and again in
-        // the synchronous standing-grant write, preventing a closed Reef lifecycle from persisting.
-        if (!grantAuthority) {
-          return this.recordDenial(frame, digest, "grant-revoked", approvalId);
-        }
-        if (
-          !this.state.allowAlways({
-            mountId: frame.mountId,
-            peer: params.peer,
-            peerIdentity: grantPeerIdentity,
-            sessionId: frame.sessionId,
-            generation: frame.grantGeneration,
-          })
-        ) {
+        if (!this.state.allowAlways(authority)) {
           return this.recordFailure(
             frame,
             digest,
@@ -194,19 +189,20 @@ export class ReefFederationCoordinator {
       }
     }
 
-    const currentPeerIdentity = this.currentPeerIdentity(params.peer);
-    const currentMount = currentPeerIdentity
-      ? this.state.authorizeMount({
-          mountId: frame.mountId,
-          peer: params.peer,
-          peerIdentity: currentPeerIdentity,
-          sessionId: frame.sessionId,
-          generation: frame.grantGeneration,
-        })
-      : undefined;
+    const authority = currentAuthority();
+    const currentMount = authority ? this.state.authorizeMount(authority) : undefined;
     if (!currentMount) {
       return this.recordDenial(frame, digest, "grant-revoked", approvalId);
     }
+    let admissionRevoked = false;
+    const assertAdmissionCurrent = () => {
+      const liveAuthority = currentAuthority();
+      if (!liveAuthority || !this.state.authorizeMount(liveAuthority)) {
+        // Record the rejection where it happens; a later transport failure may follow acceptance.
+        admissionRevoked = true;
+        throw new Error("Reef session grant revoked before input admission");
+      }
+    };
 
     try {
       const idempotencyKey = `reef:${frame.proposalId}`;
@@ -216,8 +212,8 @@ export class ReefFederationCoordinator {
         "agent",
         {
           message: frame.text,
-          sessionKey: currentMount!.sessionKey,
-          expectedExistingSessionId: currentMount!.sessionId,
+          sessionKey: currentMount.sessionKey,
+          expectedExistingSessionId: currentMount.sessionId,
           idempotencyKey,
           deliver: false,
           inputProvenance: {
@@ -229,7 +225,7 @@ export class ReefFederationCoordinator {
         },
         // Agent admission is in-process and returns on acceptance. Avoid a separate deadline that
         // could report failure after execution started; lifecycle closure aborts and retries by key.
-        { signal: this.authoritySignal },
+        { signal: this.authoritySignal, assertAdmissionCurrent },
       );
       const accepted = {
         type: "session.prompt.accepted" as const,
@@ -249,6 +245,9 @@ export class ReefFederationCoordinator {
       // Lifecycle cancellation can race accepted agent admission. Leave the durable proposal pending
       // so recovery reconciles the same idempotency key instead of publishing a false failure.
       this.authoritySignal.throwIfAborted();
+      if (admissionRevoked) {
+        return this.recordDenial(frame, digest, "grant-revoked", approvalId);
+      }
       return this.recordFailure(
         frame,
         digest,

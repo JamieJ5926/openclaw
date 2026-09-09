@@ -102,6 +102,7 @@ export async function dispatchTrustedPluginGatewayMethod<T>(
     ...(syntheticScopes ? { syntheticScopes } : {}),
     ...(options?.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
     ...(options?.signal ? { signal: options.signal } : {}),
+    sessionMutationCommitGuard: options?.assertAdmissionCurrent,
   });
 }
 
