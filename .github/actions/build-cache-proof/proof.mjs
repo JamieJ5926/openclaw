@@ -16,6 +16,67 @@ const read = (file) => fs.readFileSync(file, "utf8");
 const json = (file) => JSON.parse(read(file));
 const load = (file) => import(pathToFileURL(path.resolve(file)).href);
 const command = async (bin, args, options) => (await runJoined(bin, args, options)).stdout.trim();
+// Completed run 34377784896: the warned save was subsequently restored by B.
+export const oldA = {
+  key: "openclaw/openclaw-build-all-v1-proof-34377784896-1-Linux-X64-node-24.x-topology-87d844138f511c4a3f0062708c164a4e901e86a17961469cb91e58d3987836d8-34377784896-1",
+  scope: "proof-34377784896-1",
+  source: "5fdf2105db2bfb2ff9569cbf953b1632b8bd6c7c",
+  topology: "topology-87d844138f511c4a3f0062708c164a4e901e86a17961469cb91e58d3987836d8-",
+  outputs: "acb44399b59969b8623b89ed02f86cb5f9cad42b9a23b4544e94f32e0de83a92",
+  receipts: "233ad532b9edbffc78037073e68c7b66fe4ec34d59f62a635d5ae7ae2150c47b",
+};
+const receiptSummary = (receipts) =>
+  receipts.map(({ group, roots, inputs, signature }) => ({
+    group,
+    signature,
+    rootsHash: digest(roots),
+    inputsHash: digest(inputs),
+    inputCount: inputs.length,
+  }));
+
+export function verifyOldAIdentity(identity) {
+  assert.equal(identity.source, oldA.source);
+  assert.equal(identity.node, "v24.19.0", "Recorded A Node identity changed");
+  assert.deepEqual(
+    ["@openclaw/fs-safe", "typescript", "tsdown"].map(
+      (name) => identity.dependencies[name].version,
+    ),
+    ["0.8.5", "6.0.3", "0.22.14"],
+    "Recorded A compiler dependencies changed",
+  );
+}
+
+export function verifyOldA(result, complete = false) {
+  assert.equal(result.matched, oldA.key, "Exact recorded A cache match required");
+  if (!complete) return;
+  assert.equal(result.key, oldA.key);
+  assert.deepEqual(
+    result.outputs,
+    { count: 693, sha256: oldA.outputs },
+    "Recorded A DTS inventory changed",
+  );
+  assert.equal(result.receipts, oldA.receipts, "Recorded A membership/signatures changed");
+}
+
+export function phaseKeys(phase, cache, bindings) {
+  assert.equal(bindings["inputs.build-all-cache-scope"], oldA.scope);
+  if (phase === "a")
+    assert.equal(
+      bindings["steps.build-all-topology.outputs.prefix"],
+      oldA.topology,
+      "Recorded A prebuild topology changed",
+    );
+  const prefixes = render(cache["restore-keys"], bindings).trim().split("\n");
+  return {
+    key:
+      phase === "a"
+        ? oldA.key
+        : render(cache.key, bindings) +
+          (["broad", "preferred"].includes(phase) ? `-query-${phase}` : ""),
+    restore:
+      phase === "a" ? "" : phase === "broad" ? prefixes.slice(1).join("\n") : prefixes.join("\n"),
+  };
+}
 
 export async function synchronize(source, target, dryRun = false, state = {}) {
   assertIdle(source);
@@ -112,7 +173,7 @@ export async function dependencies(root) {
   );
 }
 
-export async function runJoined(bin, args, options = {}) {
+export async function runJoined(bin, args, { cacheHitsOnly = false, ...options } = {}) {
   const { runManagedCommand } = await load("scripts/lib/managed-child-process.mts");
   const controller = new AbortController();
   let log = "",
@@ -141,6 +202,11 @@ export async function runJoined(bin, args, options = {}) {
             else {
               log += chunk;
               if (stream === child.stdout) stdout += chunk;
+              if (
+                cacheHitsOnly &&
+                /\[(?:tsdown-unified|tsdown-plugin-sdk)\] openclaw-dts-\S+: cache miss\b/u.test(log)
+              )
+                controller.abort(new Error("Resumed A observed a compiler cache miss"));
             }
           });
       },
@@ -252,7 +318,7 @@ async function main() {
   const phase = env.PROOF_PHASE;
   const operation = process.argv[2];
   const source = env.PROOF_SOURCE_SHA;
-  assert.equal(source, "5fdf2105db2bfb2ff9569cbf953b1632b8bd6c7c");
+  assert.equal(source, oldA.source);
   assert.equal(await command("git", ["rev-parse", "HEAD"]), source);
   assert.equal(
     await command("git", ["-C", ".ci-harness", "rev-parse", "HEAD"]),
@@ -291,6 +357,7 @@ async function main() {
     installedLock: hash(read("node_modules/.pnpm/lock.yaml")),
     modules: hash(read("node_modules/.modules.yaml")),
   };
+  verifyOldAIdentity(identity);
   const save = (state) => fs.writeFileSync(stateFile, `${JSON.stringify(state)}\n`);
   assertIdle(root);
   if (operation === "init") {
@@ -357,19 +424,16 @@ async function main() {
     else assert.equal(prefix, state.topology, "Reset did not restore prebuild namespace");
     const bindings = {
       "github.repository": env.GITHUB_REPOSITORY,
-      "inputs.build-all-cache-scope": `proof-${env.GITHUB_RUN_ID}-${env.GITHUB_RUN_ATTEMPT}`,
+      "inputs.build-all-cache-scope": oldA.scope,
       "runner.os": env.RUNNER_OS,
       "runner.arch": env.RUNNER_ARCH,
+      // Keep the recorded generation bucket while setup pins its exact runtime.
       "inputs.node-version": action.inputs["node-version"].default,
       "steps.build-all-topology.outputs.prefix": prefix,
       "github.run_id": env.GITHUB_RUN_ID,
       "github.run_attempt": env.GITHUB_RUN_ATTEMPT,
     };
-    state.key =
-      render(cache.key, bindings) +
-      (["broad", "preferred"].includes(phase) ? `-query-${phase}` : "");
-    const prefixes = render(cache["restore-keys"], bindings).trim().split("\n");
-    state.restore = phase === "broad" ? prefixes.slice(1).join("\n") : prefixes.join("\n");
+    Object.assign(state, phaseKeys(phase, cache, bindings));
     state.active = phase;
     state.keyMs = Date.now() - state.started;
     save(state);
@@ -382,16 +446,18 @@ async function main() {
   assert.equal(operation, "build");
   assert.equal(state.active, phase);
   const matched = env.PROOF_MATCHED_KEY ?? "";
+  if (phase === "a") verifyOldA({ matched });
   assert.equal(
     matched,
-    phase === "a" ? "" : state.results[phase === "broad" ? 1 : 0].key,
+    phase === "a" ? oldA.key : state.results[phase === "broad" ? 1 : 0].key,
     "Wrong backend generation selected",
   );
-  assert.notEqual(matched, state.key, "Primary was not a guaranteed miss");
+  if (phase !== "a") assert.notEqual(matched, state.key, "Primary was not a guaranteed miss");
   assert(remaining() > 300_000, "Insufficient remaining proof budget");
   console.log(JSON.stringify({ phase, key: state.key, matched }));
   const { log, durationMs: buildMs } = await runJoined("pnpm", ["build"], {
     cwd: root,
+    cacheHitsOnly: phase === "a",
     timeoutMs: Math.min(600_000, remaining() - 30_000),
     env: {
       ...env,
@@ -407,7 +473,11 @@ async function main() {
   const { TSDOWN_UNIFIED_DTS_CONFIG_GROUPS: groups } = await load(
     "scripts/lib/tsdown-config-groups.mts",
   );
-  const observations = verifyGroups(log, groups, phase === "preferred" ? "hit" : "miss");
+  const observations = verifyGroups(
+    log,
+    groups,
+    phase === "a" || phase === "preferred" ? "hit" : "miss",
+  );
   if (phase === "b" || phase === "broad")
     assert(observations.every(({ reason }) => reason === "signature-mismatch"));
   const stamps = [...files(cache.path)]
@@ -457,17 +527,19 @@ async function main() {
     JSON.stringify({
       ...result,
       outputs: { count: outputs.length, sha256: digest(outputs) },
-      receipts: receipts.map(({ group, roots, inputs, signature }) => ({
-        group,
-        signature,
-        rootsHash: digest(roots),
-        inputsHash: digest(inputs),
-        inputCount: inputs.length,
-      })),
+      receipts: receiptSummary(receipts),
     }),
   );
   const snapshot = path.join(stateRoot, "a-dts.json");
   if (phase === "a") {
+    verifyOldA(
+      {
+        ...result,
+        outputs: { count: outputs.length, sha256: digest(outputs) },
+        receipts: digest(receiptSummary(receipts)),
+      },
+      true,
+    );
     const bytes = JSON.stringify(Object.fromEntries(outputs.map(([name]) => [name, read(name)])));
     assert(Buffer.byteLength(bytes) <= 64 * 1024 * 1024, "A declaration snapshot exceeds 64 MiB");
     fs.writeFileSync(snapshot, bytes, { flag: "wx" });

@@ -10,11 +10,15 @@ import {
   cgroupLimits,
   dependencies,
   inventory,
+  oldA,
+  phaseKeys,
   render,
   runJoined,
   synchronize,
   verifyComparison,
   verifyGroups,
+  verifyOldA,
+  verifyOldAIdentity,
 } from "./proof.mjs";
 
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-cache-proof-guards-"));
@@ -34,6 +38,44 @@ const workflow = parse(fs.readFileSync(".github/workflows/vitest-cache-warm.yml"
 const phaseAction = parse(fs.readFileSync(".github/actions/build-cache-proof/action.yml", "utf8"));
 const evaluate = (value, context) =>
   runInNewContext(value.replace(/inputs\.([a-z-]+)/gu, 'inputs["$1"]'), context);
+
+test("resumed A requires its exact cache, runtime, inventory, and membership receipt", () => {
+  const identity = {
+    source: oldA.source,
+    node: "v24.19.0",
+    dependencies: Object.fromEntries(
+      [
+        ["@openclaw/fs-safe", "0.8.5"],
+        ["typescript", "6.0.3"],
+        ["tsdown", "0.22.14"],
+      ].map(([name, version]) => [name, { version }]),
+    ),
+  };
+  verifyOldAIdentity(identity);
+  for (const field of ["source", "node"])
+    assert.throws(() => verifyOldAIdentity({ ...identity, [field]: "changed" }));
+  const changed = structuredClone(identity);
+  changed.dependencies.typescript.version = "6.0.4";
+  assert.throws(() => verifyOldAIdentity(changed), /dependencies changed/);
+  const result = {
+    key: oldA.key,
+    matched: oldA.key,
+    outputs: { count: 693, sha256: oldA.outputs },
+    receipts: oldA.receipts,
+  };
+  verifyOldA(result, true);
+  for (const matched of [undefined, "", `${oldA.key}-other`])
+    assert.throws(() => verifyOldA({ matched }), /Exact recorded A cache match/);
+  for (const outputs of [
+    { count: 692, sha256: oldA.outputs },
+    { count: 693, sha256: "changed" },
+  ])
+    assert.throws(() => verifyOldA({ ...result, outputs }, true), /inventory changed/);
+  assert.throws(
+    () => verifyOldA({ ...result, receipts: "changed" }, true),
+    /membership\/signatures changed/,
+  );
+});
 
 test("B may change declaration bytes, but every phase preserves membership and every A preserves bytes", () => {
   const root = directory("comparison");
@@ -198,35 +240,43 @@ test("installed versions are checked against the dependency document, not the pn
   await assert.rejects(dependencies(root), /Wrong installed version: tsx/);
 });
 
-test("four ordered phases use isolated canonical prefixes and publish only A and B", () => {
+test("four bounded phases restore exact old A, use the old task scope, and publish only new B", () => {
   const bindings = {
     "github.repository": "openclaw/openclaw",
-    "inputs.build-all-cache-scope": "proof-123-1",
+    "inputs.build-all-cache-scope": oldA.scope,
     "runner.os": "Linux",
     "runner.arch": "X64",
     "inputs.node-version": "24.x",
     "github.run_id": "123",
     "github.run_attempt": "1",
   };
-  const keys = ["a", "b"].map((name) =>
-    render(cache.key, {
+  const selectPhase = (phase) =>
+    phaseKeys(phase, cache, {
       ...bindings,
-      "steps.build-all-topology.outputs.prefix": `topology-${name}-`,
-    }),
+      "steps.build-all-topology.outputs.prefix": phase === "b" ? "topology-b-" : oldA.topology,
+    });
+  const keys = [selectPhase("a").key, selectPhase("b").key];
+  assert.equal(keys[0], oldA.key);
+  assert.equal(selectPhase("a").restore, "");
+  assert(keys[1].startsWith(`openclaw/openclaw-build-all-v1-${oldA.scope}-`));
+  assert(keys[1].endsWith("-123-1"));
+  assert.throws(
+    () =>
+      phaseKeys("a", cache, { ...bindings, "steps.build-all-topology.outputs.prefix": "changed" }),
+    /topology changed/,
   );
-  const prefixes = render(cache["restore-keys"], {
-    ...bindings,
-    "steps.build-all-topology.outputs.prefix": "topology-a-",
-  })
-    .trim()
-    .split("\n");
+  const prefixes = selectPhase("preferred").restore.split("\n");
   const newest = [...keys].reverse();
-  const select = (values) =>
-    values.flatMap((prefix) => newest.filter((key) => key.startsWith(prefix)))[0];
+  const select = (values, available = newest) =>
+    values.flatMap((prefix) => available.filter((key) => key.startsWith(prefix)))[0];
   assert.equal(select(prefixes.slice(1)), keys[1]);
   assert.equal(select(prefixes), keys[0]);
-  for (const phase of ["broad", "preferred"])
-    assert(!newest.some((key) => key.startsWith(`${keys[0]}-query-${phase}`)));
+  for (const phase of ["broad", "preferred"]) {
+    assert(!newest.some((key) => key.startsWith(selectPhase(phase).key)));
+    assert(selectPhase(phase).key.endsWith(`-123-1-query-${phase}`));
+  }
+  assert.equal(selectPhase("broad").restore, prefixes[1]);
+  assert.equal(select(selectPhase("b").restore.split("\n"), [oldA.key]), oldA.key);
   assert.throws(() => render("${{ unsupported }}", bindings), /Unexpected canonical/);
   const phases = workflow.jobs["topology-proof"].steps.filter(
     (step) => step.uses === "./.ci-harness/.github/actions/build-cache-proof",
@@ -234,6 +284,10 @@ test("four ordered phases use isolated canonical prefixes and publish only A and
   assert.deepEqual(
     phases.map((step) => step.with.phase),
     ["a", "b", "broad", "preferred"],
+  );
+  assert.deepEqual(
+    phases.map((step) => step["timeout-minutes"]),
+    [6, 8, 8, 6],
   );
   const saves = phaseAction.runs.steps.filter((step) =>
     step.uses?.startsWith("actions/cache/save@"),
@@ -243,11 +297,16 @@ test("four ordered phases use isolated canonical prefixes and publish only A and
     phases
       .filter((step) => evaluate(saves[0].if, { inputs: step.with }))
       .map((step) => step.with.phase),
-    ["a", "b"],
+    ["b"],
   );
   assert.equal(
     phaseAction.runs.steps.find((step) => step.id === "restore").uses,
     "actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
+  );
+  assert.equal(phaseAction.runs.steps.find((step) => step.id === "restore").if, undefined);
+  assert.equal(
+    phaseAction.runs.steps.find((step) => step.id === "restore").with["fail-on-cache-miss"],
+    true,
   );
 });
 
@@ -283,11 +342,27 @@ test("proof mode admits one 8-class Linux job, no normal warmer, and no automati
   assert.equal(checkouts[1].with.path, ".ci-harness");
   const setup = proof.steps.find((step) => step.uses === "./.github/actions/setup-node-env");
   assert.deepEqual(setup.with, {
+    "node-version": "24.19.0",
     "cache-mode": "restore",
     "dependency-cache": "true",
     "install-bun": "false",
   });
 });
+
+test(
+  "an observed resumed-A miss aborts and joins the compiler process group",
+  { timeout: 20_000 },
+  async () => {
+    const file = path.join(scratch, "miss-pids.json");
+    const program = `const fs=require("node:fs"),{spawn}=require("node:child_process");const child=spawn(process.execPath,["-e","setInterval(()=>{},1000)"],{stdio:"ignore"});fs.writeFileSync(${JSON.stringify(file)},JSON.stringify([process.pid,child.pid]));process.stderr.write("[tsdown-unified] openclaw-dts-base: cache mi");setTimeout(()=>process.stderr.write("ss (signature-mismatch)\\n"),20);setInterval(()=>{},1000);`;
+    await assert.rejects(
+      runJoined(process.execPath, ["-e", program], { cacheHitsOnly: true, timeoutMs: 5000 }),
+      /aborted/,
+    );
+    for (const pid of JSON.parse(fs.readFileSync(file, "utf8")))
+      assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+  },
+);
 
 test("missing, duplicate, and mixed group observations cannot pass", () => {
   const line = (name, status = "hit") =>

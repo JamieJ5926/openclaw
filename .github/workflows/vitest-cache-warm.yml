@@ -245,20 +245,25 @@ jobs:
       - name: Install exact source dependencies
         uses: ./.github/actions/setup-node-env
         with:
+          node-version: "24.19.0"
           cache-mode: restore
           dependency-cache: "true"
           install-bun: "false"
       - name: Capture independent post-install baseline
         run: node .ci-harness/.github/actions/build-cache-proof/proof.mjs init
-      - name: Seed A
+      - name: Resume exact A
+        timeout-minutes: 6
         uses: ./.ci-harness/.github/actions/build-cache-proof
-        with: { phase: a, cache-mode: read-write }
+        with: { phase: a, cache-mode: off }
       - name: Seed newer B
+        timeout-minutes: 8
         uses: ./.ci-harness/.github/actions/build-cache-proof
         with: { phase: b, cache-mode: read-write }
       - name: Broad A consumer
+        timeout-minutes: 8
         uses: ./.ci-harness/.github/actions/build-cache-proof
         with: { phase: broad, cache-mode: off }
       - name: Preferred A consumer
+        timeout-minutes: 6
         uses: ./.ci-harness/.github/actions/build-cache-proof
         with: { phase: preferred, cache-mode: off }
