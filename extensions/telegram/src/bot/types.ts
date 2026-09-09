@@ -25,10 +25,7 @@ export type TelegramContext = {
   update?: Update;
   me?: UserFromGetMe;
   getFile: TelegramGetFile;
-  recipient?: {
-    explicitAddress: InboundMentionFacts["explicitAddress"];
-    shouldSkip: boolean;
-  };
+  explicitAddress?: InboundMentionFacts["explicitAddress"];
 };
 
 /** Telegram sticker metadata for context enrichment and caching. */

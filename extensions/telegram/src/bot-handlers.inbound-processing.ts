@@ -225,7 +225,7 @@ export function createTelegramInboundProcessing({
       return { kind: "buffered", buffer: "media-group" };
     }
 
-    if (ctx.recipient?.shouldSkip) {
+    if (ctx.explicitAddress === "other") {
       // Ingress has already recorded the message for room/reply context.
       // Settle before downloads or error warnings can speak for another bot.
       logger.info({ chatId, reason: "addressed-to-other" }, "skipping Telegram message");

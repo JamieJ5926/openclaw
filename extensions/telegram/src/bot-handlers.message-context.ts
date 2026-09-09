@@ -148,13 +148,13 @@ export function buildSyntheticTextMessage(params: {
 }
 
 export const buildSyntheticContext = (
-  ctx: Pick<TelegramContext, "me" | "getFile" | "update" | "recipient">,
+  ctx: Pick<TelegramContext, "me" | "getFile" | "update" | "explicitAddress">,
   message: Message,
 ): TelegramContext => ({
   message,
   update: ctx.update,
   me: ctx.me,
-  recipient: ctx.recipient,
+  explicitAddress: ctx.explicitAddress,
   getFile: ctx.getFile.bind(ctx),
 });
 

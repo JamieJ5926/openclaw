@@ -781,23 +781,16 @@ export async function prepareSlackMessage(params: {
     });
   // Native Slack IDs do not encode bot identity. Reuse the user lookup cache;
   // failed lookups stay unknown and cannot turn human mentions into bot addresses.
-  let mentionsOtherBot = false;
+  let explicitAddress: "self" | "other" | undefined =
+    isRoomish && ctx.botUserId && explicitlyMentioned ? "self" : undefined;
   if (isRoomish && ctx.botUserId && !explicitlyMentioned) {
     for (const id of mentionedUserIds) {
       if ((await ctx.resolveUserName(id, opts.eventScope)).isBot === true) {
-        mentionsOtherBot = true;
+        explicitAddress = "other";
         break;
       }
     }
   }
-  const explicitAddress =
-    !isRoomish || !ctx.botUserId
-      ? undefined
-      : explicitlyMentioned
-        ? "self"
-        : mentionsOtherBot
-          ? "other"
-          : undefined;
   // Channels with `requireMention: false` and a non-`off` reply mode produce
   // a Slack-side thread on every top-level bot reply (because `replyToMode`
   // creates one). Seed thread routing for the root turn too, so the inbound

@@ -119,7 +119,7 @@ export function createTelegramInboundBuffers({
       entities.some(
         (entity) =>
           entity.type === "bot_command" ||
-          (entry.ctx.recipient?.explicitAddress !== "self" &&
+          (entry.ctx.explicitAddress !== "self" &&
             (entity.type === "mention" || entity.type === "text_mention")),
       )
     ) {
@@ -218,9 +218,11 @@ export function createTelegramInboundBuffers({
           };
           const syntheticContext = buildSyntheticContext(first.ctx, syntheticMessage);
           // A later native self mention activates the batch without replacing its ingress context.
-          syntheticContext.recipient =
-            entries.find((entry) => entry.ctx.recipient?.explicitAddress === "self")?.ctx
-              .recipient ?? first.ctx.recipient;
+          syntheticContext.explicitAddress = entries.some(
+            (entry) => entry.ctx.explicitAddress === "self",
+          )
+            ? "self"
+            : first.ctx.explicitAddress;
           const result = await processMessageWithReplyChain({
             ctx: syntheticContext,
             msg: syntheticMessage,
@@ -322,7 +324,7 @@ export function createTelegramInboundBuffers({
         settleSpooledReplayParticipants(entry.spooledReplayParticipants, { kind: "skipped" });
         return;
       }
-      if (first.ctx.recipient?.shouldSkip) {
+      if (first.ctx.explicitAddress === "other") {
         runtime.log?.("telegram: skipped text fragments addressed to another bot");
         releaseDispatchDedupeClaims(entry.dispatchDedupeClaims);
         settleSpooledReplayParticipants(entry.spooledReplayParticipants, { kind: "skipped" });
@@ -403,9 +405,8 @@ export function createTelegramInboundBuffers({
         // Plain continuation text inherits the first fragment's recipient. An
         // explicit recipient change starts a separate request, even inside the gap.
         const sameRecipient =
-          !params.ctx.recipient?.explicitAddress ||
-          params.ctx.recipient.explicitAddress ===
-            existing.messages[0]?.ctx.recipient?.explicitAddress;
+          !params.ctx.explicitAddress ||
+          params.ctx.explicitAddress === existing.messages[0]?.ctx.explicitAddress;
         const canAppend =
           sameRecipient && idGap > 0 && idGap <= 1 && timeGapMs >= 0 && timeGapMs <= maxGapMs;
         const nextTotalChars =
@@ -466,7 +467,7 @@ export function createTelegramInboundBuffers({
     } else if (
       text &&
       params.isAbortControlMessage &&
-      !params.ctx.recipient?.shouldSkip &&
+      params.ctx.explicitAddress !== "other" &&
       (await params.isAuthorizedAbortControlMessage())
     ) {
       const existing = textBuffer.get(key);

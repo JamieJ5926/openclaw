@@ -94,52 +94,12 @@ function hasNestedMentionDecisionParams(
   return "facts" in params && "policy" in params;
 }
 
-function normalizeMentionDecisionParams(
-  params: ResolveInboundMentionDecisionParams,
-): ResolveInboundMentionDecisionNestedParams {
-  if (hasNestedMentionDecisionParams(params)) {
-    return params;
-  }
-  const {
-    canDetectMention,
-    wasMentioned,
-    explicitAddress,
-    hasAnyMention,
-    implicitMentionKinds,
-    isGroup,
-    requireMention,
-    implicitMentions,
-    allowedImplicitMentionKinds,
-    allowTextCommands,
-    hasControlCommand,
-    commandAuthorized,
-  } = params;
-  return {
-    facts: {
-      canDetectMention,
-      wasMentioned,
-      explicitAddress,
-      hasAnyMention,
-      implicitMentionKinds,
-    },
-    policy: {
-      isGroup,
-      requireMention,
-      implicitMentions,
-      allowedImplicitMentionKinds,
-      allowTextCommands,
-      hasControlCommand,
-      commandAuthorized,
-    },
-  };
-}
-
 export function resolveInboundMentionDecision(
   params: ResolveInboundMentionDecisionParams,
 ): InboundMentionDecision {
-  const { facts, policy } = normalizeMentionDecisionParams(params);
-  // Recipient routing precedes activation: a reply, wake word, or command
-  // bypass cannot volunteer this bot for work explicitly assigned elsewhere.
+  const { facts, policy } = hasNestedMentionDecisionParams(params)
+    ? params
+    : { facts: params, policy: params };
   const addressedToOther = facts.explicitAddress === "other";
   const wasMentioned =
     !addressedToOther && (facts.explicitAddress === "self" || facts.wasMentioned);

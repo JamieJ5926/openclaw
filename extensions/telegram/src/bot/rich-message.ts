@@ -1,10 +1,4 @@
-import type {
-  Message,
-  RichBlock,
-  RichBlockCaption,
-  RichMessageButton,
-  RichText,
-} from "grammy/types";
+import type { Message, RichBlock, RichBlockCaption, RichText } from "grammy/types";
 
 type TelegramRichMessage = { rich_message?: Message.RichMessageMessage["rich_message"] };
 type TelegramRichMention = Extract<RichText, { type: "mention" | "text_mention" }>;
@@ -35,10 +29,6 @@ function joinRichText(parts: string[], separator: string): string {
   return parts.map(compactRichText).filter(Boolean).join(separator);
 }
 
-function renderRichMessageButton(button: RichMessageButton, state?: RichMessageTraversal): string {
-  return renderRichInlineText(button.text, state);
-}
-
 function renderRichInlineText(value: RichText | undefined, state?: RichMessageTraversal): string {
   if (value === undefined) {
     return "";
@@ -56,7 +46,7 @@ function renderRichInlineText(value: RichText | undefined, state?: RichMessageTr
     case "anchor":
       return "";
     case "button":
-      return renderRichMessageButton(value.button, state);
+      return renderRichInlineText(value.button.text, state);
     case "custom_emoji":
       return recordRichText(value.alternative_text, state);
     case "mathematical_expression":
@@ -163,7 +153,7 @@ function renderRichBlock(block: RichBlock, state?: RichMessageTraversal): string
       return renderRichCaption(block.caption, state);
     case "buttons":
       return joinRichText(
-        block.buttons.map((button) => renderRichMessageButton(button, state)),
+        block.buttons.map((button) => renderRichInlineText(button.text, state)),
         "\n",
       );
     case "anchor":

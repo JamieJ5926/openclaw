@@ -196,7 +196,7 @@ export async function resolveTelegramInboundBody(params: {
     providerPolicy: providerMentionPatterns,
   });
   const messageTextParts = getTelegramTextParts(msg);
-  const explicitAddress = primaryCtx.recipient?.explicitAddress;
+  const explicitAddress = primaryCtx.explicitAddress;
   const allowForCommands = isGroup ? effectiveGroupAllow : effectiveDmAllow;
   const useAccessGroups = true;
   const hasControlCommandInMessage = hasControlCommand(messageTextParts.text, cfg, {

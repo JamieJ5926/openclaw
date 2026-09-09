@@ -4,17 +4,11 @@ import {
   createPluginStateSyncKeyedStoreForTests,
 } from "openclaw/plugin-sdk/plugin-state-test-runtime";
 import { withTimeout } from "openclaw/plugin-sdk/text-utility-runtime";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  telegramBotInfoForTest,
-  type TelegramIngestGroupForTest,
-  type TelegramMentionPolicyForTest,
-} from "./bot.create-telegram-bot.test-support.js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { telegramBotInfoForTest } from "./bot.create-telegram-bot.test-support.js";
 import { setTelegramRuntime } from "./runtime.js";
 import type { TelegramRuntime } from "./runtime.types.js";
 
-const saveRemoteMedia = vi.fn();
-const rootRead = vi.fn();
 const { triggerInternalHookMock } = vi.hoisted(() => ({
   triggerInternalHookMock: vi.fn<(event: unknown) => Promise<void>>(async () => undefined),
 }));
@@ -29,30 +23,6 @@ vi.mock("openclaw/plugin-sdk/hook-runtime", async () => {
   };
 });
 
-vi.mock("openclaw/plugin-sdk/file-access-runtime", () => ({
-  root: async (rootDir: string) => ({
-    read: async (relativePath: string, options?: { maxBytes?: number }) =>
-      await rootRead({ rootDir, relativePath, maxBytes: options?.maxBytes }),
-  }),
-}));
-
-vi.mock("./telegram-media.runtime.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./telegram-media.runtime.js")>();
-  return {
-    ...actual,
-    saveRemoteMedia: (...args: unknown[]) => saveRemoteMedia(...args),
-  };
-});
-
-vi.mock("./sticker-cache.js", () => ({
-  cacheSticker: () => {},
-  getCachedSticker: () => null,
-  getCacheStats: () => ({ count: 0 }),
-  searchStickers: () => [],
-  getAllCachedStickers: () => [],
-  describeStickerImage: async () => null,
-}));
-
 const harness = await import("./bot.create-telegram-bot.test-harness.js");
 const {
   getChatSpy,
@@ -63,12 +33,20 @@ const {
   telegramBotDepsForTest,
 } = harness;
 const { createTelegramBotCore: createTelegramBotBase } = await import("./bot-core.js");
-const { MediaFetchError } = await import("./telegram-media.runtime.js");
 const { runWithTelegramSpooledReplayUpdate } = await import("./bot-processing-outcome.js");
 
-let createTelegramBot: (
-  opts: import("./bot.types.js").TelegramBotOptions,
-) => ReturnType<typeof import("./bot-core.js").createTelegramBotCore>;
+function createTelegramBot(opts: import("./bot.types.js").TelegramBotOptions) {
+  return createTelegramBotBase({
+    botInfo: telegramBotInfoForTest,
+    telegramTransport: {
+      fetch: globalThis.fetch,
+      sourceFetch: globalThis.fetch,
+      close: async () => {},
+    },
+    ...opts,
+    telegramDeps: telegramBotDepsForTest,
+  });
+}
 
 const loadConfig = getLoadConfigMock();
 
@@ -120,36 +98,17 @@ async function flushChannelPostMediaGroup(
   });
 }
 
-function replyPayload(): Record<string, unknown> {
-  const call = replySpy.mock.calls.at(0);
-  if (!call || !call[0] || typeof call[0] !== "object") {
-    throw new Error("Expected reply payload");
-  }
-  return call[0] as Record<string, unknown>;
+function replyPayload() {
+  return replySpy.mock.calls[0]![0];
 }
 
-function setTelegramIngestGroupConfig(
-  params: {
-    groups?: Record<string, TelegramIngestGroupForTest>;
-    groupAllowFrom?: string[];
-    providerPolicy?: TelegramMentionPolicyForTest;
-    accountPolicy?: TelegramMentionPolicyForTest;
-    customMentionPatterns?: boolean;
-  } = {},
-) {
+function setGroupConfig(requireMention: boolean, groupAllowFrom?: string[]) {
   loadConfig.mockReturnValue({
-    ...(params.customMentionPatterns
-      ? { messages: { groupChat: { mentionPatterns: ["\\bbert\\b"] } } }
-      : {}),
     channels: {
       telegram: {
         groupPolicy: "open",
-        ...(params.groupAllowFrom ? { groupAllowFrom: params.groupAllowFrom } : {}),
-        ...(params.providerPolicy ? { mentionPatterns: params.providerPolicy } : {}),
-        groups: params.groups ?? { "-100456": { requireMention: true, ingest: true } },
-        ...(params.accountPolicy
-          ? { accounts: { work: { mentionPatterns: params.accountPolicy } } }
-          : {}),
+        groupAllowFrom,
+        groups: { "-100456": { requireMention } },
       },
     },
   });
@@ -157,11 +116,10 @@ function setTelegramIngestGroupConfig(
 
 async function dispatchTelegramGroupPhoto(params: {
   messageId: number;
-  topicId?: number;
   albumId?: string;
   caption?: string;
   extraMessage?: Record<string, unknown>;
-  getFile?: () => Promise<{ file_path: string }>;
+  getFile: () => Promise<never>;
 }) {
   const handler = getOnHandler("message") as (ctx: Record<string, unknown>) => Promise<void>;
   await handler({
@@ -170,11 +128,9 @@ async function dispatchTelegramGroupPhoto(params: {
         id: -100456,
         type: "supergroup",
         title: "Ops Chat",
-        is_forum: params.topicId !== undefined,
       },
       message_id: params.messageId,
       date: 1736380800,
-      ...(params.topicId ? { message_thread_id: params.topicId, is_topic_message: true } : {}),
       ...(params.albumId ? { media_group_id: params.albumId } : {}),
       ...(params.caption ? { caption: params.caption } : {}),
       ...params.extraMessage,
@@ -182,7 +138,7 @@ async function dispatchTelegramGroupPhoto(params: {
       from: { id: 55, is_bot: false, first_name: "u" },
     },
     me: { id: 999, username: "openclaw_bot" },
-    getFile: params.getFile ?? (async () => ({ file_path: `photos/${params.messageId}.jpg` })),
+    getFile: params.getFile,
   });
 }
 
@@ -206,20 +162,6 @@ function createTelegramGroupTextContext(params: {
 }
 
 describe("createTelegramBot recipient routing", () => {
-  beforeAll(() => {
-    createTelegramBot = (opts) =>
-      createTelegramBotBase({
-        botInfo: telegramBotInfoForTest,
-        telegramTransport: {
-          fetch: globalThis.fetch,
-          sourceFetch: globalThis.fetch,
-          close: async () => {},
-        },
-        ...opts,
-        telegramDeps: telegramBotDepsForTest,
-      });
-  });
-
   beforeEach(() => {
     setTelegramRuntime({
       state: {
@@ -237,21 +179,6 @@ describe("createTelegramBot recipient routing", () => {
       channel: {},
     } as TelegramRuntime);
     triggerInternalHookMock.mockClear();
-    saveRemoteMedia.mockReset();
-    saveRemoteMedia.mockImplementation(
-      async (params: { fetchImpl: typeof fetch; maxBytes: number; url: string }) => {
-        const response = await params.fetchImpl(params.url);
-        const buffer = new Uint8Array(await response.arrayBuffer());
-        if (buffer.length > params.maxBytes) {
-          throw new MediaFetchError("max_bytes", `payload exceeds maxBytes ${params.maxBytes}`);
-        }
-        return {
-          path: "/tmp/telegram-media.bin",
-          contentType: response.headers.get("content-type"),
-        };
-      },
-    );
-    rootRead.mockReset();
   });
 
   it.each([
@@ -270,7 +197,7 @@ describe("createTelegramBot recipient routing", () => {
   ] as const)(
     "keeps long @$firstRecipient messages routed through the fragment buffer",
     async ({ messageId, firstRecipient, continuation, admitted }) => {
-      setTelegramIngestGroupConfig({ groups: { "-100456": { requireMention: true } } });
+      setGroupConfig(true);
       getChatSpy.mockResolvedValue({ id: 1000, type: "private", first_name: "Other" });
       const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
       try {
@@ -376,10 +303,7 @@ describe("createTelegramBot recipient routing", () => {
   );
 
   it("keeps buffered work when an authorized stop replies to another bot", async () => {
-    setTelegramIngestGroupConfig({
-      groups: { "-100456": { requireMention: true } },
-      groupAllowFrom: ["55"],
-    });
+    setGroupConfig(true, ["55"]);
     const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
     try {
       createTelegramBot({
@@ -433,7 +357,7 @@ describe("createTelegramBot recipient routing", () => {
   it.each([false, true])(
     "routes replies to another bot with explicit self mention=%s",
     async (mentionsSelf) => {
-      setTelegramIngestGroupConfig({ groups: { "-100456": { requireMention: false } } });
+      setGroupConfig(false);
       createTelegramBot({ token: "tok" });
       const text = mentionsSelf ? "@openclaw_bot inspect this" : "inspect this";
       await getOnHandler("message")(
@@ -465,7 +389,7 @@ describe("createTelegramBot recipient routing", () => {
     { messageId: 143040, album: false, surface: "photo" },
     { messageId: 143042, album: true, surface: "album" },
   ])("accepts a self text mention in a $surface caption", async ({ messageId, album }) => {
-    setTelegramIngestGroupConfig({ groups: { "-100456": { requireMention: true } } });
+    setGroupConfig(true);
     const getFile = vi.fn(async () => {
       throw new Error("Bad Request: file is too big");
     });
@@ -512,37 +436,19 @@ describe("createTelegramBot recipient routing", () => {
       messageId: 143010,
       surface: "photo",
       album: false,
-      failure: "download failure",
-      error: "Bad Request: wrong file identifier",
-    },
-    {
-      messageId: 143012,
-      surface: "photo",
-      album: false,
-      failure: "oversized file",
-      error: "Bad Request: file is too big",
     },
     {
       messageId: 143014,
       surface: "album",
       album: true,
-      failure: "download failure",
-      error: "Bad Request: wrong file identifier",
-    },
-    {
-      messageId: 143016,
-      surface: "album",
-      album: true,
-      failure: "oversized file",
-      error: "Bad Request: file is too big",
     },
   ])(
-    "does not warn about another bot's $surface after $failure",
-    async ({ messageId, album, error }) => {
-      setTelegramIngestGroupConfig({ groups: { "-100456": { requireMention: false } } });
+    "skips another bot's $surface before fetching media or sending warnings",
+    async ({ messageId, album }) => {
+      setGroupConfig(false);
       getChatSpy.mockResolvedValue({ id: 1000, type: "private", first_name: "Other" });
       const getFile = vi.fn(async () => {
-        throw new Error(error);
+        throw new Error("Unexpected media download");
       });
       const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
       try {
@@ -566,7 +472,6 @@ describe("createTelegramBot recipient routing", () => {
         }
 
         expect(getFile).not.toHaveBeenCalled();
-        expect(saveRemoteMedia).not.toHaveBeenCalled();
         expect(sendMessageSpy).not.toHaveBeenCalled();
         expect(replySpy).not.toHaveBeenCalled();
       } finally {

@@ -741,13 +741,11 @@ export async function preflightDiscordMessage(
   const ignoreOtherMentions =
     channelConfig?.ignoreOtherMentions ?? guildInfo?.ignoreOtherMentions ?? false;
   const referencedReply = resolveDiscordReferencedReplyMessage(message);
-  const referencedAuthor = referencedReply?.author;
-  const referencedWebhookId = referencedReply ? resolveDiscordWebhookId(referencedReply) : null;
   const replyTargetsOtherBot =
     Boolean(botId) &&
-    referencedAuthor?.bot === true &&
-    referencedAuthor.id !== botId &&
-    !referencedWebhookId;
+    referencedReply?.author?.bot === true &&
+    referencedReply.author.id !== botId &&
+    !resolveDiscordWebhookId(referencedReply);
   const mentionsOtherBot = mentionSources.some((source) => source.mentionsOtherBot);
   const requireMentionForOtherMentions =
     isGuildMessage &&

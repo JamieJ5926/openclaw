@@ -1,7 +1,4 @@
-import {
-  resolveInboundMentionDecision,
-  type InboundMentionFacts,
-} from "openclaw/plugin-sdk/channel-inbound";
+import type { InboundMentionFacts } from "openclaw/plugin-sdk/channel-mention-gating";
 import { isTelegramBadRequestError } from "../network-errors.js";
 import { getTelegramTextParts } from "./body-helpers.js";
 import { collectTelegramRichMessageAddress } from "./rich-message.js";
@@ -31,20 +28,23 @@ export function resolveTelegramNativeMessageAddress(params: {
       usernames: new Set(),
     };
   }
+  const users = [
+    ...entities.filter((entity) => entity.type === "text_mention").map((entity) => entity.user),
+    ...richAddress.mentions
+      .filter((mention) => mention.type === "text_mention")
+      .map((mention) => mention.user),
+  ];
+  const usernames = new Set([
+    ...entities
+      .filter((entity) => entity.type === "mention")
+      .map((entity) => text.slice(entity.offset, entity.offset + entity.length).toLowerCase()),
+    ...richAddress.mentions
+      .filter((mention) => mention.type === "mention")
+      .map((mention) => `@${mention.username.toLowerCase()}`),
+  ]);
   if (
-    entities.some(
-      (entity) =>
-        (entity.type === "text_mention" && entity.user.id === botId) ||
-        (entity.type === "mention" &&
-          selfUsername !== undefined &&
-          text.slice(entity.offset, entity.offset + entity.length).toLowerCase() ===
-            `@${selfUsername}`),
-    ) ||
-    richAddress.mentions.some((mention) =>
-      mention.type === "text_mention"
-        ? mention.user.id === botId
-        : mention.username.toLowerCase() === selfUsername,
-    )
+    users.some((user) => user.id === botId) ||
+    (selfUsername !== undefined && usernames.has(`@${selfUsername}`))
   ) {
     return { explicitAddress: "self", usernames: new Set() };
   }
@@ -56,16 +56,7 @@ export function resolveTelegramNativeMessageAddress(params: {
     (message.reply_to_message?.from?.is_bot &&
       !message.reply_to_message.sender_chat &&
       message.reply_to_message.from.id !== botId) ||
-    entities.some((entity) => entity.type === "text_mention" && entity.user.is_bot) ||
-    richAddress.mentions.some((mention) => mention.type === "text_mention" && mention.user.is_bot);
-  const usernames = new Set([
-    ...entities
-      .filter((entity) => entity.type === "mention")
-      .map((entity) => text.slice(entity.offset, entity.offset + entity.length).toLowerCase()),
-    ...richAddress.mentions
-      .filter((mention) => mention.type === "mention")
-      .map((mention) => `@${mention.username.toLowerCase()}`),
-  ]);
+    users.some((user) => user.is_bot);
   return { explicitAddress: addressedToOther ? "other" : undefined, usernames };
 }
 
@@ -102,10 +93,10 @@ async function resolveTelegramExplicitAddress(params: {
 }
 
 export async function prepareTelegramMessageAddress(
-  ctx: Pick<TelegramContext, "message" | "me" | "recipient">,
+  ctx: Pick<TelegramContext, "message" | "me" | "explicitAddress">,
   getChat: TelegramGetChat,
 ) {
-  const explicitAddress = ctx.me?.username
+  ctx.explicitAddress = ctx.me?.username
     ? await resolveTelegramExplicitAddress({
         message: ctx.message,
         botUsername: ctx.me.username,
@@ -114,16 +105,5 @@ export async function prepareTelegramMessageAddress(
         getChat,
       })
     : undefined;
-  const { shouldSkip } = resolveInboundMentionDecision({
-    facts: { canDetectMention: true, wasMentioned: explicitAddress === "self", explicitAddress },
-    policy: {
-      isGroup: true,
-      requireMention: false,
-      allowTextCommands: false,
-      hasControlCommand: false,
-      commandAuthorized: false,
-    },
-  });
-  ctx.recipient = { explicitAddress, shouldSkip };
-  return ctx.recipient;
+  return ctx.explicitAddress;
 }

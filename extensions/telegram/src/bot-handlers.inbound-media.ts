@@ -238,7 +238,7 @@ export function createTelegramInboundMedia({
       facts: {
         canDetectMention: Boolean(botUsername) || mentionRegexes.length > 0,
         wasMentioned,
-        explicitAddress: ctx.recipient?.explicitAddress,
+        explicitAddress: ctx.explicitAddress,
         hasAnyMention,
         implicitMentionKinds,
       },
@@ -323,7 +323,7 @@ export function createTelegramInboundMedia({
         primary = { ctx: combinedContext, msg: combinedMessage };
       }
       await prepareTelegramMessageAddress(primary.ctx, (target) => bot.api.getChat(target));
-      if (primary.ctx.recipient?.shouldSkip) {
+      if (primary.ctx.explicitAddress === "other") {
         logger.info(
           { chatId: entry.chatId, reason: "addressed-to-other" },
           "skipping Telegram album",

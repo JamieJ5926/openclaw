@@ -44,8 +44,6 @@ const loadTelegramPluginCommandExecutor = createLazyRuntimeModule(
   () => import("./bot-native-command-plugins.js"),
 );
 
-type TelegramNativeCommandContext = Context & { match?: string };
-
 type RegisterTelegramNativeCommandsParams = {
   bot: Bot;
   cfg: OpenClawConfig;
@@ -249,44 +247,37 @@ export const registerTelegramNativeCommands = ({
     telegramDeps,
     opts,
   });
-  let handleLoginCallback:
-    | ((
-        botUser: Context["me"],
-        msg: NonNullable<Context["message"]>,
-        rawText: string,
-      ) => Promise<boolean>)
-    | undefined;
+  type ExecutorParams = ReturnType<typeof buildExecutorParams>;
+  const registerCommand = (
+    name: string,
+    execute: (params: ExecutorParams) => Promise<boolean | void>,
+  ) =>
+    bot.command(name, async (ctx) => {
+      if (shouldSkipUpdate(ctx) || !ctx.message) {
+        return;
+      }
+      const address = await prepareTelegramMessageAddress(
+        { message: ctx.message, me: ctx.me },
+        (target) => bot.api.getChat(target),
+      );
+      if (address !== "other") {
+        await execute(
+          buildExecutorParams({ botUser: ctx.me, msg: ctx.message, rawText: ctx.match.trim() }),
+        );
+      }
+    });
+  let handleLoginCallback: ((params: ExecutorParams) => Promise<boolean>) | undefined;
   for (const command of nativeCommandsToHandle) {
     const normalizedCommandName = normalizeTelegramCommandName(command.name);
-    const handleNativeCommand = async (
-      botUser: Context["me"],
-      msg: NonNullable<Context["message"]>,
-      rawText: string,
-    ): Promise<boolean> => {
+    const handleNativeCommand = async (params: ExecutorParams): Promise<boolean> => {
       const { executeTelegramBuiltinCommand } = await loadTelegramBuiltinCommandExecutor();
       return await executeTelegramBuiltinCommand({
-        ...buildExecutorParams({ botUser, msg, rawText }),
+        ...params,
         commandName: command.name,
       });
     };
     if (nativeEnabled) {
-      bot.command(normalizedCommandName, async (ctx) => {
-        if (shouldSkipUpdate(ctx) || !ctx.message) {
-          return;
-        }
-        const recipient = await prepareTelegramMessageAddress(
-          { message: ctx.message, me: ctx.me },
-          (target) => bot.api.getChat(target),
-        );
-        if (recipient.shouldSkip) {
-          return;
-        }
-        await handleNativeCommand(
-          ctx.me,
-          ctx.message,
-          typeof ctx.match === "string" ? ctx.match.trim() : "",
-        );
-      });
+      registerCommand(normalizedCommandName, handleNativeCommand);
     }
     if (
       findCommandByNativeName(command.name, "telegram", { includeBundledChannelFallback: false })
@@ -297,24 +288,10 @@ export const registerTelegramNativeCommands = ({
   }
 
   for (const pluginCommand of pluginCatalog.selectedCommands) {
-    bot.command(pluginCommand.command, async (ctx: TelegramNativeCommandContext) => {
-      if (shouldSkipUpdate(ctx) || !ctx.message) {
-        return;
-      }
-      const recipient = await prepareTelegramMessageAddress(
-        { message: ctx.message, me: ctx.me },
-        (target) => bot.api.getChat(target),
-      );
-      if (recipient.shouldSkip) {
-        return;
-      }
+    registerCommand(pluginCommand.command, async (params) => {
       const { executeTelegramPluginCommand } = await loadTelegramPluginCommandExecutor();
       await executeTelegramPluginCommand({
-        ...buildExecutorParams({
-          botUser: ctx.me,
-          msg: ctx.message,
-          rawText: ctx.match?.trim() ?? "",
-        }),
+        ...params,
         commandName: pluginCommand.command,
         candidate: pluginCommand.spec,
       });
@@ -345,14 +322,16 @@ export const registerTelegramNativeCommands = ({
     }
     const rawText = separatorIndex === -1 ? "" : commandBody.slice(separatorIndex + 1).trim();
     const clearButtons = await handleLoginCallback(
-      botUser,
-      {
-        ...callbackMessage,
-        chat: callbackMessage.chat,
-        from: callbackQuery.from,
-        text: commandText,
-      },
-      rawText,
+      buildExecutorParams({
+        botUser,
+        msg: {
+          ...callbackMessage,
+          chat: callbackMessage.chat,
+          from: callbackQuery.from,
+          text: commandText,
+        },
+        rawText,
+      }),
     );
     return { handled: true, clearButtons };
   };
