@@ -6,9 +6,9 @@ import Testing
 @MainActor
 struct VoicePushToTalkHotkeyTests {
     @Test func `either Option release order ends the right hold`() {
-        let releaseOrders: [[(UInt16, UInt)]] = [
-            [(61, 0x80020), (58, 0)],
-            [(58, 0x80040), (61, 0)],
+        let releaseOrders: [[UInt]] = [
+            [0x80020, 0],
+            [0x80040, 0],
         ]
         for releases in releaseOrders {
             var began = 0
@@ -19,18 +19,18 @@ struct VoicePushToTalkHotkeyTests {
                     if !cancelled { ended += 1 }
                 })
             hotkey.setEnabled(true)
-            hotkey._testUpdateModifierState(keyCode: 58, modifierFlags: .init(rawValue: 0x80020))
+            hotkey._testUpdateModifierState(modifierFlags: .init(rawValue: 0x80020))
             #expect(began == 0)
             for flags in [UInt(0x80040), 0x80040, 0x80060] {
-                hotkey._testUpdateModifierState(keyCode: 61, modifierFlags: .init(rawValue: flags))
+                hotkey._testUpdateModifierState(modifierFlags: .init(rawValue: flags))
             }
             #expect(began == 1)
-            for (keyCode, flags) in releases {
-                hotkey._testUpdateModifierState(keyCode: keyCode, modifierFlags: .init(rawValue: flags))
+            for flags in releases {
+                hotkey._testUpdateModifierState(modifierFlags: .init(rawValue: flags))
             }
             #expect(ended == 1)
-            hotkey._testUpdateModifierState(keyCode: 61, modifierFlags: .init(rawValue: 0x80040))
-            hotkey._testUpdateModifierState(keyCode: 61, modifierFlags: [])
+            hotkey._testUpdateModifierState(modifierFlags: .init(rawValue: 0x80040))
+            hotkey._testUpdateModifierState(modifierFlags: [])
             #expect(began == 2)
             #expect(ended == 2)
         }
@@ -45,15 +45,15 @@ struct VoicePushToTalkHotkeyTests {
                 if forced { cancelled += 1 }
             })
         hotkey.setEnabled(true)
-        hotkey._testUpdateModifierState(keyCode: 61, modifierFlags: .init(rawValue: 0x80040))
+        hotkey._testUpdateModifierState(modifierFlags: .init(rawValue: 0x80040))
         hotkey.setTalkSuppressed(true)
         #expect(cancelled == 1)
         hotkey.setEnabled(false)
         hotkey.setEnabled(true)
-        hotkey._testUpdateModifierState(keyCode: 61, modifierFlags: .init(rawValue: 0x80040))
+        hotkey._testUpdateModifierState(modifierFlags: .init(rawValue: 0x80040))
         #expect(began == 1)
         hotkey.setTalkSuppressed(false)
-        hotkey._testUpdateModifierState(keyCode: 61, modifierFlags: .init(rawValue: 0x80040))
+        hotkey._testUpdateModifierState(modifierFlags: .init(rawValue: 0x80040))
         #expect(began == 2)
         hotkey.setEnabled(false)
     }

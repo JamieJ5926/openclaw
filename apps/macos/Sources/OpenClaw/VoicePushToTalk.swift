@@ -49,18 +49,16 @@ final class VoicePushToTalkHotkey {
         guard self.globalMonitor == nil, self.localMonitor == nil else { return }
         // Listen-only global monitor; we rely on Input Monitoring permission to receive events.
         self.globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-            let keyCode = event.keyCode
             let flags = event.modifierFlags
             MainActor.assumeIsolated {
-                self?.updateModifierState(keyCode: keyCode, modifierFlags: flags)
+                self?.updateModifierState(modifierFlags: flags)
             }
         }
         // Also listen locally so we still catch events when the app is active/focused.
         self.localMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-            let keyCode = event.keyCode
             let flags = event.modifierFlags
             MainActor.assumeIsolated {
-                self?.updateModifierState(keyCode: keyCode, modifierFlags: flags)
+                self?.updateModifierState(modifierFlags: flags)
             }
             return event
         }
@@ -80,7 +78,7 @@ final class VoicePushToTalkHotkey {
         self.endAction(true)
     }
 
-    private func updateModifierState(keyCode: UInt16, modifierFlags: NSEvent.ModifierFlags) {
+    private func updateModifierState(modifierFlags: NSEvent.ModifierFlags) {
         guard self.enabled, !self.talkSuppressed else { return }
         // Aggregate Option stays set when the other Option key remains held.
         let chordActive = modifierFlags.rawValue & UInt(NX_DEVICERALTKEYMASK) != 0
@@ -93,8 +91,8 @@ final class VoicePushToTalkHotkey {
         }
     }
 
-    func _testUpdateModifierState(keyCode: UInt16, modifierFlags: NSEvent.ModifierFlags) {
-        self.updateModifierState(keyCode: keyCode, modifierFlags: modifierFlags)
+    func _testUpdateModifierState(modifierFlags: NSEvent.ModifierFlags) {
+        self.updateModifierState(modifierFlags: modifierFlags)
     }
 }
 
