@@ -31,14 +31,17 @@ describe("ModelProvidersPage usage convergence", () => {
     const original = request.getMockImplementation()!;
     let usedPercent = 10;
     request.mockImplementation(async (method) => {
-      if (method === "models.authStatus") return createAuthStatus();
-      if (method === "models.authUsage")
+      if (method === "models.authStatus") {
+        return createAuthStatus();
+      }
+      if (method === "models.authUsage") {
         return {
           updatedAt: 1,
           providers: [
             { provider: "openai", displayName: "OpenAI", windows: [{ label: "5h", usedPercent }] },
           ],
         };
+      }
       return original(method);
     });
     const page = appendPage(context);

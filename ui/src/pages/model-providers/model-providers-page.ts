@@ -341,11 +341,9 @@ export class ModelProvidersPage extends OpenClawLightDomElement {
     this.catalogDiscovery.reset();
     this.supplemental.beginCoreRefresh(opts.force);
     if (opts.force) {
-      for (const account of this.querySelectorAll<ModelAccountUsage>(
-        "openclaw-model-account-usage",
-      )) {
-        account.refreshUsage();
-      }
+      this.querySelectorAll<ModelAccountUsage>("openclaw-model-account-usage").forEach((account) =>
+        account.refreshUsage(),
+      );
     }
     this.loadClient = client;
     return this.refreshTask.run([client, this.selectedAgentId, opts.force]);
