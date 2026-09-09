@@ -20,7 +20,6 @@ const suite = createControlUiE2eSuite({
   startServerBeforeBrowser: true,
   unavailableMessage: (executablePath) => `Playwright Chromium is unavailable at ${executablePath}`,
 });
-
 const captureUiProofEnabled = process.env.OPENCLAW_CAPTURE_UI_PROOF === "1";
 const catalogGroupingStorageKey = "openclaw:sidebar:sessions:catalog-grouping";
 const collapsedSessionSectionsStorageKey = "openclaw:sidebar:sessions:collapsed-sections";
@@ -853,7 +852,6 @@ suite.define(() => {
 
       if (captureUiProofEnabled) {
         await page.screenshot({
-          animations: "disabled",
           fullPage: true,
           path: path.join(uiProofArtifactDir, "02-independent-settings-toggles.png"),
         });
