@@ -29,6 +29,7 @@ import { isPinnableSessionEntry } from "../config/sessions/session-pin-policy.js
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { projectPluginSessionExtensionsSync } from "../plugins/host-hook-state.js";
 import { resolveActiveSessionAgentStatus } from "../sessions/session-agent-status.js";
+import { deriveSessionUnread } from "../shared/session-unread.js";
 import { getSessionRepositoryWorkspaceStore } from "../state/session-repository-workspaces.js";
 import { resolveActiveFallbackState } from "../status/fallback-notice-state.js";
 import { projectSessionDeliveryFields } from "../utils/delivery-context.shared.js";
@@ -47,11 +48,13 @@ import { resolveStoredSessionKeyForAgentStore } from "./session-store-key.js";
 import { buildSessionSwarmSummary } from "./session-swarm-summary.js";
 import { readSessionTerminalModelFromTranscript } from "./session-transcript-readers.js";
 import { readSessionTitleFieldsFromTranscript as readScopedSessionTitleFieldsFromTranscript } from "./session-transcript-title-reader.js";
-import type { SessionListRowContext } from "./session-utils-contracts.js";
+import type {
+  GatewaySessionModelSource,
+  SessionListRowContext,
+} from "./session-utils-contracts.js";
 import {
   buildCompactionCheckpointPreview,
   deriveSessionTitle,
-  deriveSessionUnread,
   resolveEstimatedSessionCostUsd,
   resolveLatestCompactionCheckpoint,
   resolvePositiveNumber,
@@ -85,6 +88,7 @@ export function buildGatewaySessionRow(params: {
   cfg: OpenClawConfig;
   storePath: string;
   store: Record<string, SessionEntry>;
+  modelSource?: GatewaySessionModelSource;
   key: string;
   entry?: InternalSessionEntry;
   modelCatalog?: SessionListModelCatalog | ModelCatalogEntry[];
@@ -154,9 +158,8 @@ export function buildGatewaySessionRow(params: {
   const selectedModel = resolveSessionSelectedModelRef({
     cfg,
     sessionKey: key,
-    entry,
+    source: params.modelSource ?? { entry, loadSessionEntry: (parentKey) => store[parentKey] },
     agentId: sessionAgentId,
-    sessionStore: store,
     rowContext,
     allowPluginNormalization: !lightweight,
   });

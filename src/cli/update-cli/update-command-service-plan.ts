@@ -1,6 +1,7 @@
 // Read-only managed Gateway ownership and Node selection for update planning.
 import fs from "node:fs/promises";
 import path from "node:path";
+import { asNullableRecord } from "@openclaw/normalization-core/record-coerce";
 import { err as resultError, ok, type Result } from "@openclaw/normalization-core/result";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { createConfigIO } from "../../config/io.js";
@@ -10,6 +11,7 @@ import { summarizeGatewayServiceLayout } from "../../daemon/service-layout.js";
 import type { GatewayServiceCommandConfig } from "../../daemon/service-types.js";
 import { resolveGatewayService } from "../../daemon/service.js";
 import { assertGatewayServiceMutationAllowed } from "../../infra/gateway-supervision.js";
+import { tryReadJson } from "../../infra/json-files.js";
 import { nodeVersionSatisfiesEngine } from "../../infra/runtime-guard.js";
 import { parseTcpPortFromArgs } from "../../infra/tcp-port.js";
 import { runCommandWithTimeout } from "../../process/exec.js";
@@ -100,13 +102,31 @@ type PackageRuntimePreflight = {
 
 export async function resolvePackageRuntimePreflight(params: {
   target?: { version: string; nodeEngine: string | null };
+  installedRoot?: string;
   timeoutMs?: number;
   nodeRunner?: string;
   fallbackNodeRunner?: string;
 }): Promise<Result<PackageRuntimePreflight, string>> {
   const nodeRunner = normalizeOptionalString(params.nodeRunner);
   const unchanged = (): PackageRuntimePreflight => (nodeRunner ? { nodeRunner } : {});
-  const target = params.target;
+  let target = params.target;
+  if (!target && params.installedRoot) {
+    const manifest = asNullableRecord(
+      await tryReadJson<unknown>(path.join(params.installedRoot, "package.json"), {
+        maxBytes: 1024 * 1024,
+      }),
+    );
+    const version = normalizeOptionalString(manifest?.version);
+    if (!version) {
+      return resultError(
+        "Cannot inspect the installed OpenClaw runtime requirement; repair its package.json before retrying openclaw update.",
+      );
+    }
+    target = {
+      version,
+      nodeEngine: normalizeOptionalString(asNullableRecord(manifest?.engines)?.node) ?? null,
+    };
+  }
   if (!target) {
     return ok(unchanged());
   }
@@ -146,13 +166,13 @@ export async function resolvePackageRuntimePreflight(params: {
     : `Node ${runtime.version ?? "unknown"}`;
   return resultError(
     [
-      `${runtimeLabel} is too old for openclaw@${targetVersion}.`,
+      `${runtimeLabel} is incompatible with openclaw@${targetVersion}.`,
       `The requested package requires ${target.nodeEngine}.`,
       runtime.nodeRunner
-        ? "Upgrade the Node runtime that owns the managed Gateway service, then rerun `openclaw update`."
-        : "Upgrade to Node 24.16.0+ or Node 26.1.0+, then rerun `openclaw update`.",
+        ? "Use a compatible version of the Node runtime that owns the managed Gateway service, then rerun `openclaw update`."
+        : "Use a Node runtime that satisfies the engine range above, then rerun `openclaw update`.",
       "Bare `npm i -g openclaw` can silently install an older compatible release.",
-      "After upgrading Node, use `npm i -g openclaw@latest`.",
+      "After switching Node versions, use `npm i -g openclaw@latest`.",
     ].join("\n"),
   );
 }
