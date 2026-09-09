@@ -1808,6 +1808,50 @@ describeBrowserLayout.concurrent("chat responsive browser layout", () => {
     }
   });
 
+  it("aligns mobile cards with the composer after Chat styles load", async () => {
+    const page = await openBrowserPage(390, 844);
+    try {
+      // New Session can load composer styles before Chat's lazy layout stylesheet.
+      await page.setContent(`<style>${readUiCss()}${readStyleSheet("ui/src/styles/chat/layout.css")}</style>
+        <section class="card chat"><div class="chat-main__conversation">
+          <div class="chat-inline-approval">Approval</div>
+          <div class="chat-prs">Pull request</div>
+          <div class="session-suggestions">Suggestion</div>
+          <div class="chat-swarm">Parallel task</div>
+          <div class="agent-chat__composer-shell"><div class="agent-chat__input">Composer</div></div>
+        </div></section>`);
+      await page.locator(".card.chat").evaluate(finishElementAnimations);
+      const composer = await getRect(page, ".agent-chat__composer-shell");
+      for (const selector of [
+        ".chat-prs",
+        ".chat-swarm",
+        ".session-suggestions",
+        ".chat-inline-approval",
+      ]) {
+        const card = await getRect(page, selector);
+        expect(card.left, selector).toBeCloseTo(composer.left, 0);
+        expect(card.right, selector).toBeCloseTo(composer.right, 0);
+      }
+    } finally {
+      await closeBrowserPage(page);
+    }
+  });
+
+  it("paints a visible outline when a chat image action receives keyboard focus", async () => {
+    const page = await openBrowserPage(390, 844);
+    try {
+      await page.setContent(`<style>${readUiCss()}</style>
+        <button class="chat-tool-card__preview-image-button">Open image</button>`);
+      await page.keyboard.press("Tab");
+      const button = page.locator("button");
+      await expectBrowser(button).toBeFocused();
+      await expectBrowser(button).toHaveCSS("outline-style", "solid");
+      await expectBrowser(button).toHaveCSS("outline-width", "2px");
+    } finally {
+      await closeBrowserPage(page);
+    }
+  });
+
   it("applies configured chat width to tool rows and composer without changing defaults", async () => {
     const page = await openBrowserPage(1600, 900);
     const renderFixture = async (configured: boolean) => {
@@ -4037,8 +4081,9 @@ describeBrowserLayout.concurrent("chat responsive browser layout", () => {
       const page = await openFixture(width, height);
       try {
         await expectNoHorizontalOverflow(page);
-        // Measure the settled footer row after the context ring's 200ms entrance animation.
-        await page.waitForTimeout(220);
+        // Wall-clock sleeps can expire before Chromium advances compositor animations
+        // on a contended CI runner. Measure the footer after its finite entrance effect.
+        await page.locator(".context-ring").evaluate(finishElementAnimations);
         const controls = await page.evaluate(() => {
           const rectFor = (selector: string) => {
             const node = document.querySelector(selector) as HTMLElement | null;
@@ -4135,6 +4180,9 @@ describeBrowserLayout.concurrent("chat responsive browser layout", () => {
         expect(rectsOverlap(model, send)).toBe(false);
         const contextModelGap = model.x - (context.x + context.width);
         expect(contextModelGap).toBeGreaterThanOrEqual(-1);
+        expect(
+          Math.abs(context.y + context.height / 2 - (model.y + model.height / 2)),
+        ).toBeLessThanOrEqual(2);
         const composerFontSizes = await page.evaluate(() => {
           const textareaNode = document.querySelector<HTMLTextAreaElement>(
             ".agent-chat__composer-combobox > textarea",
@@ -4195,11 +4243,6 @@ describeBrowserLayout.concurrent("chat responsive browser layout", () => {
         if (width <= 768) {
           expect(send.width).toBeCloseTo(32, 2);
           expect(send.height).toBeCloseTo(32, 2);
-          for (const control of [model, context]) {
-            expect(
-              Math.abs(control.y + control.height / 2 - (model.y + model.height / 2)),
-            ).toBeLessThanOrEqual(2);
-          }
           expect(footer.height).toBeLessThanOrEqual(53);
         } else {
           // The editor reads at input size, while the controls around it stay
