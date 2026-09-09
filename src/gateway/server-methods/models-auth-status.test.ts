@@ -282,6 +282,7 @@ function createPreparedOwnerSnapshot(agentId: string) {
     authModes: {},
     authStore: preparedAuthStore,
     authMaterializations: [],
+    isCurrent: () => true,
     metadataSnapshot: preparedMetadataSnapshot as never,
   };
 }

@@ -1,6 +1,9 @@
 // Stale-while-revalidate cache for models.authStatus provider usage enrichment.
-import type { AuthProfileStore } from "../../agents/auth-profiles.js";
+import { isDeepStrictEqual } from "node:util";
+import type { AuthProfileCredential, AuthProfileStore } from "../../agents/auth-profiles.js";
 import { getRuntimeAuthProfileStoreCredentialsRevision } from "../../agents/auth-profiles/runtime-snapshots.js";
+import { fingerprintAuthProfileCredential } from "../../agents/execution-auth-binding.js";
+import { getPreparedModelRuntimeAuthStore } from "../../agents/prepared-model-runtime-auth.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { loadProviderUsageSummary } from "../../infra/provider-usage.load.js";
 import { PROVIDER_USAGE_TIMEOUT_MS } from "../../infra/provider-usage.shared.js";
@@ -39,6 +42,7 @@ type ProviderUsageCacheEntry = {
   providerKey: string;
   refreshedAt: number;
   summary: UsageSummary;
+  isCurrent?: () => boolean;
   usageByProvider: Map<string, ProviderUsageStatus>;
 };
 
@@ -134,6 +138,7 @@ function retainLastGoodOnTimeout(
 
 function scheduleProviderUsageRefresh(params: {
   cacheOwnerKey: string;
+  agentId?: string;
   agentDir: string;
   workspaceDir?: string;
   authStore?: AuthProfileStore;
@@ -143,6 +148,7 @@ function scheduleProviderUsageRefresh(params: {
   providerIds: UsageProviderId[];
   providerKey: string;
   lastGood?: UsageSummary;
+  isCurrent?: () => boolean;
 }): Promise<UsageSummary> {
   const active = usageRefreshByAgentId.get(params.cacheOwnerKey);
   if (
@@ -155,17 +161,62 @@ function scheduleProviderUsageRefresh(params: {
   }
   const publishGeneration = cacheGeneration;
   const ownerToken = {};
-  const credentialsRevision = getRuntimeAuthProfileStoreCredentialsRevision();
-  const isCurrent = () =>
+  let credentialsRevision = getRuntimeAuthProfileStoreCredentialsRevision();
+  let isOwnerCurrent = params.isCurrent;
+  const isCacheCurrent = () =>
     publishGeneration === cacheGeneration &&
-    usageRefreshByAgentId.get(params.cacheOwnerKey)?.ownerToken === ownerToken &&
-    (!params.authProfile ||
-      credentialsRevision === getRuntimeAuthProfileStoreCredentialsRevision());
+    usageRefreshByAgentId.get(params.cacheOwnerKey)?.ownerToken === ownerToken;
+  const isAuthCurrent = () =>
+    isOwnerCurrent?.() !== false &&
+    credentialsRevision === getRuntimeAuthProfileStoreCredentialsRevision();
+  const isCurrent = () => isCacheCurrent() && (!params.authProfile || isAuthCurrent());
   const load = () =>
     loadProviderUsageSummary({
       providers: params.providerIds,
       ...(params.authProfile ? { authProfile: params.authProfile } : {}),
-      ...(params.authProfile ? { isAuthProfileCurrent: isCurrent } : {}),
+      ...(params.authProfile
+        ? {
+            isAuthProfileCurrent: isCurrent,
+            onAuthProfileResolved: async (credential: AuthProfileCredential) => {
+              if (credentialsRevision === getRuntimeAuthProfileStoreCredentialsRevision()) {
+                return;
+              }
+              if (!isCacheCurrent() || !params.authProfile) {
+                return;
+              }
+              // OAuth settlement may replace its own prepared auth owner. Await that owner's
+              // publication and accept only the exact credential the resolver settled on.
+              const { prepareModelRuntimeSnapshot } =
+                await import("../../agents/prepared-model-runtime.js");
+              const owner = await prepareModelRuntimeSnapshot({
+                agentId: params.agentId,
+                agentDir: params.agentDir,
+                workspaceDir: params.workspaceDir,
+                config: params.configRef,
+              });
+              const profileId = params.authProfile.profileId;
+              if (
+                !isCacheCurrent() ||
+                !owner.isCurrent() ||
+                owner.config !== params.configRef ||
+                !isDeepStrictEqual(
+                  getPreparedModelRuntimeAuthStore(owner)?.profiles[profileId],
+                  credential,
+                )
+              ) {
+                return;
+              }
+              isOwnerCurrent = owner.isCurrent;
+              credentialsRevision = getRuntimeAuthProfileStoreCredentialsRevision();
+              params.credentialKey =
+                fingerprintAuthProfileCredential({ profileId, credential }) ?? params.credentialKey;
+              const refresh = usageRefreshByAgentId.get(params.cacheOwnerKey);
+              if (refresh) {
+                refresh.credentialKey = params.credentialKey;
+              }
+            },
+          }
+        : {}),
       agentDir: params.agentDir,
       workspaceDir: params.workspaceDir,
       authStore: params.authStore,
@@ -185,6 +236,7 @@ function scheduleProviderUsageRefresh(params: {
             providerKey: params.providerKey,
             refreshedAt: Date.now(),
             summary: usage,
+            ...(params.authProfile ? { isCurrent: isAuthCurrent } : {}),
             usageByProvider: mapProviderUsage(usage),
           });
         }
@@ -241,7 +293,8 @@ function resolveProviderUsageCacheRead(params: ProviderUsageCacheParams) {
     cached?.agentDir === params.agentDir &&
     cached.configRef === params.configRef &&
     cached.credentialKey === credentialKey &&
-    cached.providerKey === providerKey
+    cached.providerKey === providerKey &&
+    cached.isCurrent?.() !== false
       ? cached
       : undefined;
   const needsRefresh =
@@ -291,7 +344,11 @@ export async function loadProfileUsage(params: {
   profileId: string;
   providerId: UsageProviderId;
   now: number;
+  isCurrent?: () => boolean;
 }): Promise<UsageSummary> {
+  if (params.isCurrent?.() === false) {
+    throw new Error("Account credentials changed while loading usage. Refresh the account.");
+  }
   const ownerPrefix = `${params.agentId}\0profile\0`;
   // A read of any account revokes work for removed or replaced credentials,
   // including accounts whose rows are no longer displayed.
@@ -329,6 +386,7 @@ export async function loadProfileUsage(params: {
   // Publication and delivery both require the same live owner after provider I/O.
   if (
     generation !== cacheGeneration ||
+    usageCacheByAgentId.get(cacheParams.cacheOwnerKey)?.isCurrent?.() === false ||
     usageCacheByAgentId.get(cacheParams.cacheOwnerKey)?.summary !== summary
   ) {
     throw new Error("Account credentials changed while loading usage. Refresh the account.");
