@@ -48,6 +48,15 @@ type SuccessfulTelemetryState = TelemetryState & {
   latestVersion: string;
 };
 
+type RuntimeUtcOffsetBucket =
+  | "neg_12_6"
+  | "neg_6_0"
+  | "utc_0"
+  | "pos_0_6"
+  | "pos_6_12"
+  | "pos_12_14"
+  | "unknown";
+
 type TelemetryPayload = {
   schema: 1;
   version: string;
@@ -60,6 +69,7 @@ type TelemetryPayload = {
     plugins: string[];
     pluginsEnabled: number;
     sessionsLast24h: number;
+    runtimeUtcOffsetBucket?: RuntimeUtcOffsetBucket;
   };
 };
 
@@ -184,34 +194,72 @@ function persistTelemetrySuccess(
   }
 }
 
+function resolveTelemetryStatusReason(config: OpenClawConfig): TelemetryStatusReason {
+  if (isAutomatedEnvironment()) {
+    return "automated-environment";
+  }
+  if (isUpdateCheckDisabled(config)) {
+    return "update-disabled";
+  }
+  if (isDoNotTrackEnabled()) {
+    return "do-not-track";
+  }
+  if (config.telemetry?.enabled === true) {
+    return "enabled";
+  }
+  return config.telemetry?.enabled === false || config.telemetry?.consentedAt
+    ? "config-disabled"
+    : "never-asked";
+}
+
 export function resolveTelemetryStatus(config: OpenClawConfig): {
   enabled: boolean;
   reason: TelemetryStatusReason;
+  runtimeUtcOffset: { optedIn: boolean; active: boolean };
   endpoint: string;
   lastPingAt?: number;
 } {
-  let reason: TelemetryStatusReason;
-  if (isAutomatedEnvironment()) {
-    reason = "automated-environment";
-  } else if (isUpdateCheckDisabled(config)) {
-    reason = "update-disabled";
-  } else if (isDoNotTrackEnabled()) {
-    reason = "do-not-track";
-  } else if (config.telemetry?.enabled === true) {
-    reason = "enabled";
-  } else if (config.telemetry?.enabled === false || config.telemetry?.consentedAt) {
-    reason = "config-disabled";
-  } else {
-    reason = "never-asked";
-  }
-
+  const reason = resolveTelemetryStatusReason(config);
+  const runtimeUtcOffsetOptedIn = config.telemetry?.runtimeUtcOffsetEnabled === true;
   const { lastPingAt } = readTelemetryState();
   return {
     enabled: reason === "enabled",
     reason,
+    runtimeUtcOffset: {
+      optedIn: runtimeUtcOffsetOptedIn,
+      active: runtimeUtcOffsetOptedIn && reason === "enabled",
+    },
     endpoint: resolveTelemetryEndpoint(),
     ...(lastPingAt === undefined ? {} : { lastPingAt }),
   };
+}
+
+function resolveRuntimeUtcOffsetBucket(reportTimeMs: number): RuntimeUtcOffsetBucket {
+  let minutes: number;
+  try {
+    minutes = -new Date(reportTimeMs).getTimezoneOffset();
+  } catch {
+    return "unknown";
+  }
+  if (!Number.isFinite(minutes) || minutes < -720 || minutes > 840) {
+    return "unknown";
+  }
+  if (minutes < -360) {
+    return "neg_12_6";
+  }
+  if (minutes < 0) {
+    return "neg_6_0";
+  }
+  if (minutes === 0) {
+    return "utc_0";
+  }
+  if (minutes < 360) {
+    return "pos_0_6";
+  }
+  if (minutes < 720) {
+    return "pos_6_12";
+  }
+  return "pos_12_14";
 }
 
 export function buildTelemetryPayload(
@@ -254,6 +302,20 @@ export function buildTelemetryPayload(
   const plugins = [...new Set(publicPlugins.map((plugin) => plugin.id))]
     .filter((pluginId) => SAFE_FEATURE_NAME.test(pluginId))
     .toSorted();
+  const features: TelemetryPayload["features"] = {
+    channels,
+    providerFamilies,
+    plugins,
+    pluginsEnabled: enabledPlugins.length,
+    sessionsLast24h: countRecentSessions(Date.now()),
+  };
+  if (
+    config.telemetry?.runtimeUtcOffsetEnabled === true &&
+    resolveTelemetryStatusReason(config) === "enabled"
+  ) {
+    // Sample the runtime clock when building the report, not the daily scheduling timestamp.
+    features.runtimeUtcOffsetBucket = resolveRuntimeUtcOffsetBucket(Date.now());
+  }
 
   return {
     schema: 1,
@@ -261,13 +323,7 @@ export function buildTelemetryPayload(
     platform: `${process.platform}-${process.arch}`,
     node: process.versions.node,
     surface: options.surface,
-    features: {
-      channels,
-      providerFamilies,
-      plugins,
-      pluginsEnabled: enabledPlugins.length,
-      sessionsLast24h: countRecentSessions(Date.now()),
-    },
+    features,
   };
 }
 

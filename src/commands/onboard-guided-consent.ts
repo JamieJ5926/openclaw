@@ -17,7 +17,11 @@ async function persistRiskAcknowledgement(config: OpenClawConfig): Promise<strin
         draft.wizard = { ...draft.wizard, securityAcknowledgedAt };
       }
       if (config.telemetry?.consentedAt && !draft.telemetry?.consentedAt) {
-        draft.telemetry = config.telemetry;
+        draft.telemetry = {
+          ...draft.telemetry,
+          enabled: config.telemetry.enabled,
+          consentedAt: config.telemetry.consentedAt,
+        };
       }
     },
   });

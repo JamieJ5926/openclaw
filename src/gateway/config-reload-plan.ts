@@ -272,6 +272,8 @@ const DEFAULT_RELOAD_POLICIES: ReloadPolicy[] = [
       "update.auto.enabled",
       "telemetry.enabled",
       "telemetry.consentedAt",
+      "telemetry.runtimeUtcOffsetEnabled",
+      "telemetry.runtimeUtcOffsetConsentedAt",
     ],
     kind: "hot",
   },

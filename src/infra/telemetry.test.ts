@@ -35,9 +35,12 @@ function installPluginRegistry(...plugins: Parameters<typeof createPluginRecord>
   pluginRuntime.setActivePluginRegistry(registry);
 }
 
-function createFeatureConfig(enabled = true): OpenClawConfig {
+function createFeatureConfig(enabled = true, runtimeUtcOffsetEnabled?: boolean): OpenClawConfig {
   return {
-    telemetry: { enabled },
+    telemetry: {
+      enabled,
+      ...(runtimeUtcOffsetEnabled === undefined ? {} : { runtimeUtcOffsetEnabled }),
+    },
     auth: {
       profiles: {
         "anthropic:private-account": {
@@ -100,6 +103,7 @@ describe("anonymous telemetry", () => {
         OPENCLAW_NIX_MODE: undefined,
         OPENCLAW_NO_AUTO_UPDATE: undefined,
         OPENCLAW_TELEMETRY_ENDPOINT: undefined,
+        TZ: undefined,
       },
     });
     installPluginRegistry(
@@ -525,6 +529,14 @@ describe("anonymous telemetry", () => {
   it.each([
     { name: "never opted in", config: {} satisfies OpenClawConfig },
     { name: "explicitly opted out", config: createFeatureConfig(false) },
+    {
+      name: "only offset buckets opted in",
+      config: { telemetry: { runtimeUtcOffsetEnabled: true } },
+    },
+    {
+      name: "feature stats revoked with offset opt-in retained",
+      config: createFeatureConfig(false, true),
+    },
   ])("sends only an anonymous GET when $name", async ({ config }) => {
     mockHttp.intercept({
       url: TELEMETRY_URL,
@@ -544,6 +556,212 @@ describe("anonymous telemetry", () => {
     ).resolves.toEqual({ version: "2026.8.24" });
 
     expect(mockHttp.requests()).toHaveLength(1);
+    expect(mockHttp.requests()[0]?.body ?? null).toBeNull();
+    expect(mockHttp.requests()[0]?.headers).not.toHaveProperty("content-type");
+  });
+
+  it.each([
+    { name: "existing feature consent", telemetry: { enabled: true } },
+    {
+      name: "explicit offset opt-out",
+      telemetry: {
+        enabled: true,
+        runtimeUtcOffsetEnabled: false,
+        runtimeUtcOffsetConsentedAt: "2026-09-01T12:00:00.000Z",
+      },
+    },
+    {
+      name: "an offset timestamp without its opt-in flag",
+      telemetry: { enabled: true, runtimeUtcOffsetConsentedAt: "2026-09-01T12:00:00.000Z" },
+    },
+  ])("omits the UTC-offset bucket for $name", async ({ telemetry }) => {
+    const config = { ...createFeatureConfig(), telemetry };
+    mockHttp.intercept({
+      url: TELEMETRY_URL,
+      method: "POST",
+      reply: { json: { version: "2026.8.24" } },
+    });
+
+    await expect(
+      checkTelemetryUpdate(config, { surface: "gateway", fetchImpl: globalThis.fetch, nowMs: NOW }),
+    ).resolves.toEqual({ version: "2026.8.24" });
+
+    expect(mockHttp.requests()).toHaveLength(1);
+    expect(JSON.parse(mockHttp.requests()[0]?.body ?? "{}").features).not.toHaveProperty(
+      "runtimeUtcOffsetBucket",
+    );
+    expect(resolveTelemetryStatus(config).runtimeUtcOffset).toEqual({
+      optedIn: false,
+      active: false,
+    });
+  });
+
+  it.each([
+    { timezoneOffset: 720, expected: "neg_12_6" },
+    { timezoneOffset: 420, expected: "neg_12_6" },
+    { timezoneOffset: 360.25, expected: "neg_12_6" },
+    { timezoneOffset: 360, expected: "neg_6_0" },
+    { timezoneOffset: 359.75, expected: "neg_6_0" },
+    { timezoneOffset: 0.25, expected: "neg_6_0" },
+    { timezoneOffset: 0, expected: "utc_0" },
+    { timezoneOffset: -0, expected: "utc_0" },
+    { timezoneOffset: -0.25, expected: "pos_0_6" },
+    { timezoneOffset: -345, expected: "pos_0_6" },
+    { timezoneOffset: -359.75, expected: "pos_0_6" },
+    { timezoneOffset: -360, expected: "pos_6_12" },
+    { timezoneOffset: -360.25, expected: "pos_6_12" },
+    { timezoneOffset: -705, expected: "pos_6_12" },
+    { timezoneOffset: -719.75, expected: "pos_6_12" },
+    { timezoneOffset: -720, expected: "pos_12_14" },
+    { timezoneOffset: -765, expected: "pos_12_14" },
+    { timezoneOffset: -840, expected: "pos_12_14" },
+    { timezoneOffset: 720.25, expected: "unknown" },
+    { timezoneOffset: -840.25, expected: "unknown" },
+    { timezoneOffset: NaN, expected: "unknown" },
+    { timezoneOffset: Infinity, expected: "unknown" },
+    { timezoneOffset: -Infinity, expected: "unknown" },
+  ])(
+    "serializes UTC-offset bucket $expected for native offset $timezoneOffset",
+    async ({ timezoneOffset, expected }) => {
+      const config = createFeatureConfig(true, true);
+      config.telemetry = {
+        ...config.telemetry,
+        consentedAt: "2026-08-23T12:00:00.000Z",
+        runtimeUtcOffsetConsentedAt: "2026-09-01T12:00:00.000Z",
+      };
+      const offset = vi.spyOn(Date.prototype, "getTimezoneOffset").mockReturnValue(timezoneOffset);
+      mockHttp.intercept({
+        url: TELEMETRY_URL,
+        method: "POST",
+        reply: { json: { version: "2026.8.24" } },
+      });
+      try {
+        await expect(
+          checkTelemetryUpdate(config, {
+            surface: "gateway",
+            fetchImpl: globalThis.fetch,
+            nowMs: NOW,
+          }),
+        ).resolves.toEqual({ version: "2026.8.24" });
+        expect(mockHttp.requests()).toHaveLength(1);
+        const serialized = mockHttp.requests()[0]?.body ?? "{}";
+        expect(JSON.parse(serialized).features.runtimeUtcOffsetBucket).toBe(expected);
+        expect(serialized).not.toMatch(
+          /"(?:runtimeUtcOffset|runtimeUtcOffsetEnabled|runtimeUtcOffsetConsentedAt|consentedAt|timezone|timeZone|tz|location|latitude|longitude|deviceModel|role|id|installId|machineId|timestamp)"\s*:/u,
+        );
+        expect(serialized).not.toContain("private-");
+        expect(serialized).not.toContain("2026-09-01T12:00:00.000Z");
+        expect(resolveTelemetryStatus(config).runtimeUtcOffset).toEqual({
+          optedIn: true,
+          active: true,
+        });
+      } finally {
+        offset.mockRestore();
+      }
+    },
+  );
+
+  it.each(["invalid clock", "unavailable offset"] as const)(
+    "still sends feature statistics with an unknown bucket for an %s",
+    async (scenario) => {
+      const clock =
+        scenario === "invalid clock"
+          ? vi.spyOn(Date, "now").mockReturnValue(NaN)
+          : vi.spyOn(Date.prototype, "getTimezoneOffset").mockImplementation(() => {
+              throw new Error("Timezone offset unavailable");
+            });
+      mockHttp.intercept({
+        url: TELEMETRY_URL,
+        method: "POST",
+        reply: { json: { version: "2026.8.24" } },
+      });
+      try {
+        await expect(
+          checkTelemetryUpdate(createFeatureConfig(true, true), {
+            surface: "gateway",
+            fetchImpl: globalThis.fetch,
+            nowMs: NOW,
+          }),
+        ).resolves.toEqual({ version: "2026.8.24" });
+        expect(mockHttp.requests()).toHaveLength(1);
+        expect(
+          JSON.parse(mockHttp.requests()[0]?.body ?? "{}").features.runtimeUtcOffsetBucket,
+        ).toBe("unknown");
+      } finally {
+        clock.mockRestore();
+      }
+    },
+  );
+
+  it("uses the send-time runtime offset across a DST bucket boundary, not the preview or scheduling time", async () => {
+    const config = createFeatureConfig(true, true);
+    const winter = Date.parse("2026-01-15T12:00:00.000Z");
+    const summer = Date.parse("2026-07-15T12:00:00.000Z");
+    setTestEnvValue("TZ", "America/Denver");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(winter);
+      expect(new Date().getTimezoneOffset()).toBe(420);
+      expect(
+        buildTelemetryPayload(config, { surface: "gateway" }).features.runtimeUtcOffsetBucket,
+      ).toBe("neg_12_6");
+      vi.setSystemTime(summer);
+      expect(new Date().getTimezoneOffset()).toBe(360);
+      mockHttp.intercept({
+        url: TELEMETRY_URL,
+        method: "POST",
+        reply: { json: { version: "2026.8.24" } },
+      });
+
+      await expect(
+        checkTelemetryUpdate(config, {
+          surface: "gateway",
+          fetchImpl: globalThis.fetch,
+          nowMs: winter,
+        }),
+      ).resolves.toEqual({ version: "2026.8.24" });
+
+      const serialized = mockHttp.requests()[0]?.body ?? "{}";
+      expect(JSON.parse(serialized).features.runtimeUtcOffsetBucket).toBe("neg_6_0");
+      expect(serialized).not.toContain("America/Denver");
+      expect(readConfigMachineState(TELEMETRY_STATE_KEY)).toEqual({
+        lastPingAt: winter,
+        latestVersion: "2026.8.24",
+      });
+      await checkTelemetryUpdate(config, {
+        surface: "gateway",
+        fetchImpl: globalThis.fetch,
+        nowMs: winter + DAY_MS - 1,
+      });
+      expect(mockHttp.requests()).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("omits a revoked UTC-offset opt-in on the next daily report without sending an extra request", async () => {
+    const config = createFeatureConfig(true, true);
+    mockHttp.intercept({
+      url: TELEMETRY_URL,
+      method: "POST",
+      reply: { json: { version: "2026.8.24" } },
+      times: 2,
+    });
+    const options = { surface: "gateway" as const, fetchImpl: globalThis.fetch };
+    await checkTelemetryUpdate(config, { ...options, nowMs: NOW });
+    expect(JSON.parse(mockHttp.requests()[0]?.body ?? "{}").features).toHaveProperty(
+      "runtimeUtcOffsetBucket",
+    );
+    config.telemetry = { ...config.telemetry, runtimeUtcOffsetEnabled: false };
+    await checkTelemetryUpdate(config, { ...options, nowMs: NOW + 1 });
+    expect(mockHttp.requests()).toHaveLength(1);
+
+    await checkTelemetryUpdate(config, { ...options, nowMs: NOW + DAY_MS });
+
+    expect(mockHttp.requests()).toHaveLength(2);
+    expect(JSON.parse(mockHttp.requests()[1]?.body ?? "{}").features).not.toHaveProperty(
+      "runtimeUtcOffsetBucket",
+    );
   });
 
   it("POSTs exactly the canonical payload only after explicit feature-stats opt-in", async () => {
@@ -579,7 +797,7 @@ describe("anonymous telemetry", () => {
       });
 
       await expect(
-        checkTelemetryUpdate(createFeatureConfig(), {
+        checkTelemetryUpdate(createFeatureConfig(true, true), {
           surface: "gateway",
           fetchImpl: globalThis.fetch,
           nowMs: NOW,
@@ -587,51 +805,55 @@ describe("anonymous telemetry", () => {
       ).resolves.toEqual({ version: "2026.8.24" });
 
       expect(mockHttp.requests()).toHaveLength(1);
+      expect(mockHttp.requests()[0]?.body ?? null).toBeNull();
+      expect(resolveTelemetryStatus(createFeatureConfig(true, true)).runtimeUtcOffset).toEqual({
+        optedIn: true,
+        active: false,
+      });
+      expect(
+        buildTelemetryPayload(createFeatureConfig(true, true), { surface: "gateway" }).features,
+      ).not.toHaveProperty("runtimeUtcOffsetBucket");
     },
   );
 
-  it("never sends a request when startup update checks are disabled", async () => {
-    await expect(
-      checkTelemetryUpdate(
-        { ...createFeatureConfig(), update: { checkOnStart: false } },
-        { surface: "gateway", fetchImpl: globalThis.fetch, nowMs: NOW },
-      ),
-    ).resolves.toBeNull();
+  it.each([
+    { policy: "update.checkOnStart", envKey: undefined, reason: "update-disabled" },
+    {
+      policy: "OPENCLAW_NO_AUTO_UPDATE",
+      envKey: "OPENCLAW_NO_AUTO_UPDATE",
+      reason: "update-disabled",
+    },
+    { policy: "CI", envKey: "CI", reason: "automated-environment" },
+    { policy: "OPENCLAW_NIX_MODE", envKey: "OPENCLAW_NIX_MODE", reason: "update-disabled" },
+  ])(
+    "never sends a request under $policy suppression, including offset opt-in",
+    async ({ envKey, reason }) => {
+      const config = createFeatureConfig(true, true);
+      if (envKey) {
+        setTestEnvValue(envKey, "1");
+      } else {
+        config.update = { checkOnStart: false };
+      }
+      await expect(
+        checkTelemetryUpdate(config, {
+          surface: "gateway",
+          fetchImpl: globalThis.fetch,
+          nowMs: NOW,
+        }),
+      ).resolves.toBeNull();
 
-    expect(mockHttp.requests()).toHaveLength(0);
-    expect(readConfigMachineState(TELEMETRY_STATE_KEY)).toBeUndefined();
-  });
-
-  it("never sends a request when OPENCLAW_NO_AUTO_UPDATE disables update checks", async () => {
-    setTestEnvValue("OPENCLAW_NO_AUTO_UPDATE", "1");
-
-    await expect(
-      checkTelemetryUpdate(createFeatureConfig(), {
-        surface: "gateway",
-        fetchImpl: globalThis.fetch,
-        nowMs: NOW,
-      }),
-    ).resolves.toBeNull();
-
-    expect(mockHttp.requests()).toHaveLength(0);
-    expect(readConfigMachineState(TELEMETRY_STATE_KEY)).toBeUndefined();
-  });
-
-  it("never sends a request from an automated environment", async () => {
-    setTestEnvValue("CI", "true");
-
-    await expect(
-      checkTelemetryUpdate(createFeatureConfig(), {
-        surface: "gateway",
-        fetchImpl: globalThis.fetch,
-        nowMs: NOW,
-      }),
-    ).resolves.toBeNull();
-
-    expect(mockHttp.requests()).toHaveLength(0);
-    expect(readConfigMachineState(TELEMETRY_STATE_KEY)).toBeUndefined();
-    expect(resolveTelemetryStatus(createFeatureConfig()).reason).toBe("automated-environment");
-  });
+      expect(mockHttp.requests()).toHaveLength(0);
+      expect(readConfigMachineState(TELEMETRY_STATE_KEY)).toBeUndefined();
+      expect(resolveTelemetryStatus(config)).toMatchObject({
+        enabled: false,
+        reason,
+        runtimeUtcOffset: { optedIn: true, active: false },
+      });
+      expect(buildTelemetryPayload(config, { surface: "gateway" }).features).not.toHaveProperty(
+        "runtimeUtcOffsetBucket",
+      );
+    },
+  );
 
   it("still reports from an automated environment when an endpoint is configured for it", async () => {
     const customEndpoint = "https://telemetry.example.invalid/api/latest-version";
@@ -646,23 +868,102 @@ describe("anonymous telemetry", () => {
     expect(mockHttp.requests()).toHaveLength(1);
   });
 
-  it("never sends a request for Nix-managed installations", async () => {
-    setTestEnvValue("OPENCLAW_NIX_MODE", "1");
+  it.each([
+    {
+      name: "CI override",
+      envKey: undefined,
+      updateDisabled: false,
+      method: "POST",
+      reason: "enabled",
+    },
+    {
+      name: "DO_NOT_TRACK",
+      envKey: "DO_NOT_TRACK",
+      updateDisabled: false,
+      method: "GET",
+      reason: "do-not-track",
+    },
+    {
+      name: "startup update policy",
+      envKey: undefined,
+      updateDisabled: true,
+      method: null,
+      reason: "update-disabled",
+    },
+    {
+      name: "environment update policy",
+      envKey: "OPENCLAW_NO_AUTO_UPDATE",
+      updateDisabled: false,
+      method: null,
+      reason: "update-disabled",
+    },
+    {
+      name: "Nix policy",
+      envKey: "OPENCLAW_NIX_MODE",
+      updateDisabled: false,
+      method: null,
+      reason: "update-disabled",
+    },
+  ])(
+    "keeps UTC-offset status, preview, and transport consistent under custom-endpoint $name",
+    async ({ envKey, updateDisabled, method, reason }) => {
+      const customEndpoint = "https://telemetry.example.invalid/api/latest-version";
+      setTestEnvValue("CI", "true");
+      setTestEnvValue("OPENCLAW_TELEMETRY_ENDPOINT", customEndpoint);
+      if (envKey) {
+        setTestEnvValue(envKey, "1");
+      }
+      const config = {
+        ...createFeatureConfig(true, true),
+        ...(updateDisabled ? { update: { checkOnStart: false } } : {}),
+      };
+      const offset = vi.spyOn(Date.prototype, "getTimezoneOffset").mockReturnValue(0);
+      if (method) {
+        mockHttp.intercept({
+          url: customEndpoint,
+          method,
+          reply: { json: { version: "2026.8.24" } },
+        });
+      }
+      try {
+        expect(resolveTelemetryStatus(config)).toMatchObject({
+          enabled: method === "POST",
+          reason,
+          runtimeUtcOffset: { optedIn: true, active: method === "POST" },
+        });
+        const preview = buildTelemetryPayload(config, { surface: "gateway" });
+        if (method === "POST") {
+          expect(preview.features.runtimeUtcOffsetBucket).toBe("utc_0");
+        } else {
+          expect(preview.features).not.toHaveProperty("runtimeUtcOffsetBucket");
+        }
 
-    await expect(
-      checkTelemetryUpdate(createFeatureConfig(), {
-        surface: "gateway",
-        fetchImpl: globalThis.fetch,
-        nowMs: NOW,
-      }),
-    ).resolves.toBeNull();
+        const result = await checkTelemetryUpdate(config, {
+          surface: "gateway",
+          fetchImpl: globalThis.fetch,
+          nowMs: NOW,
+        });
 
-    expect(mockHttp.requests()).toHaveLength(0);
-    expect(readConfigMachineState(TELEMETRY_STATE_KEY)).toBeUndefined();
-  });
+        expect(result).toEqual(method ? { version: "2026.8.24" } : null);
+        expect(mockHttp.requests()).toHaveLength(method ? 1 : 0);
+        if (method === "POST") {
+          expect(
+            JSON.parse(mockHttp.requests()[0]?.body ?? "{}").features.runtimeUtcOffsetBucket,
+          ).toBe("utc_0");
+        } else if (method === "GET") {
+          expect(mockHttp.requests()[0]?.body ?? null).toBeNull();
+          expect(mockHttp.requests()[0]?.headers).not.toHaveProperty("content-type");
+        }
+      } finally {
+        offset.mockRestore();
+      }
+    },
+  );
 
   it("never accesses the network in a test environment without an injected fetch", async () => {
-    await expect(checkTelemetryUpdate({}, { surface: "gateway", nowMs: NOW })).resolves.toBeNull();
+    await expect(
+      checkTelemetryUpdate(createFeatureConfig(true, true), { surface: "gateway", nowMs: NOW }),
+    ).resolves.toBeNull();
 
     expect(mockHttp.requests()).toHaveLength(0);
   });

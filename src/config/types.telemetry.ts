@@ -5,4 +5,8 @@ export type TelemetryConfig = {
   enabled?: boolean;
   /** ISO timestamp recording when the operator accepted or declined feature statistics. */
   consentedAt?: string;
+  /** Shares a coarse runtime UTC-offset bucket only with separately enabled feature statistics. */
+  runtimeUtcOffsetEnabled?: boolean;
+  /** Local-only ISO timestamp recording explicit consent to runtime UTC-offset buckets. */
+  runtimeUtcOffsetConsentedAt?: string;
 };

@@ -13,6 +13,14 @@ const TelemetryConfigShape = {
     label: "Feature Statistics Consent Timestamp",
     help: "ISO timestamp recording when the operator accepted or declined anonymous feature statistics. Prevents the setup wizard from asking again.",
   }),
+  runtimeUtcOffsetEnabled: z.boolean().optional().register(configUiMetadata, {
+    label: "Runtime UTC-Offset Buckets",
+    help: "Shares a coarse bucket of the runtime clock's UTC offset for timezone compatibility analysis. Disabled by default; requires separate opt-in and enabled anonymous feature statistics. Never sent when DO_NOT_TRACK=1.",
+  }),
+  runtimeUtcOffsetConsentedAt: z.string().datetime().optional().register(configUiMetadata, {
+    label: "Runtime UTC-Offset Consent Timestamp",
+    help: "Local-only ISO timestamp recording explicit consent to runtime UTC-offset buckets. Never sent; the runtimeUtcOffsetEnabled flag controls this separate choice.",
+  }),
 } satisfies ConfigSchemaShape<TelemetryConfig>;
 
 export const TelemetryConfigSchema = z.object(TelemetryConfigShape).strict().optional();

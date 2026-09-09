@@ -30,6 +30,49 @@ afterEach(async () => {
   }
 });
 
+it("preserves a persisted UTC-offset revocation when guided consent replays an older config", async () => {
+  root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-onboard-consent-"));
+  vi.stubEnv("OPENCLAW_STATE_DIR", root);
+  vi.stubEnv("OPENCLAW_CONFIG_PATH", path.join(root, "openclaw.json"));
+  vi.stubEnv("HOME", root);
+  vi.stubEnv("USERPROFILE", root);
+  const { mutateConfigFileWithRetry, readConfigFileSnapshot, writeConfigFile } =
+    await import("../config/config.js");
+  const { requestGuidedOnboardingConsent } = await import("./onboard-guided-consent.js");
+  await writeConfigFile({
+    telemetry: {
+      runtimeUtcOffsetEnabled: true,
+      runtimeUtcOffsetConsentedAt: "2026-09-01T12:00:00.000Z",
+    },
+  });
+  const staleSnapshot = await readConfigFileSnapshot();
+  expect(staleSnapshot.valid).toBe(true);
+  await mutateConfigFileWithRetry({
+    mutate: (draft) => {
+      draft.telemetry = { ...draft.telemetry, runtimeUtcOffsetEnabled: false };
+      delete draft.telemetry.runtimeUtcOffsetConsentedAt;
+    },
+  });
+  const prompter = createWizardPrompter();
+  vi.mocked(prompter.select).mockResolvedValue(true);
+
+  const consent = await requestGuidedOnboardingConsent({
+    opts: { acceptRisk: true },
+    prompter,
+    config: staleSnapshot.config,
+    offerQuickstart: false,
+  });
+
+  const persisted = await readConfigFileSnapshot();
+  expect(persisted.valid).toBe(true);
+  expect(persisted.config.telemetry).toEqual({
+    enabled: true,
+    consentedAt: expect.any(String),
+    runtimeUtcOffsetEnabled: false,
+  });
+  expect(persisted.config.wizard?.securityAcknowledgedAt).toBe(consent.securityAcknowledgedAt);
+});
+
 it.each(["fresh", "interrupted", "replaced"] as const)(
   "keeps skipped baseline setup owner-fenced and resumable: %s",
   async (scenario) => {
