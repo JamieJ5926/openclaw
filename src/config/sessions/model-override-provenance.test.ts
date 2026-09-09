@@ -43,6 +43,15 @@ describe("hasUserPinnedModelSelection", () => {
       },
       expected: false,
     },
+    {
+      name: "explicit default with stale override fields",
+      entry: {
+        providerOverride: "openai",
+        modelOverride: "gpt-5.6-sol",
+        modelOverrideSource: "default" as const,
+      },
+      expected: false,
+    },
   ])("returns $expected for $name", ({ entry, expected }) => {
     expect(hasUserPinnedModelSelection(entry)).toBe(expected);
   });
@@ -67,6 +76,11 @@ describe("resolveSessionModelOverrideSource", () => {
       name: "automatic fallback",
       entry: { modelOverride: "fallback", modelOverrideSource: "auto" as const },
       expected: "auto",
+    },
+    {
+      name: "explicit default with stale override fields",
+      entry: { modelOverride: "gpt-5.6-sol", modelOverrideSource: "default" as const },
+      expected: null,
     },
     {
       name: "legacy user pin",

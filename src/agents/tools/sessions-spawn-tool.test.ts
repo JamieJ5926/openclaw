@@ -672,6 +672,7 @@ describe("sessions_spawn tool", () => {
         category: "P1 issues from beta feedback",
         model: "anthropic/claude-sonnet-4-6",
         task: "inspect issue",
+        timeoutMs: 120000,
         parentSessionKey: "agent:main:main",
         spawnDepth: 1,
         fork: true,
@@ -996,37 +997,49 @@ describe("sessions_spawn tool", () => {
     });
   });
 
-  it("applies a per-run timeout to visible dashboard sessions", async () => {
-    const callGateway = vi.fn(async () => ({
-      key: "agent:main:dashboard:timed-child",
-      runStarted: true,
-      runId: "run-visible-timed",
-    }));
-    const registerRun = vi.fn();
-    const tool = createSessionsSpawnTool({
-      agentSessionKey: "agent:main:main",
-      config: {
-        agents: {
-          defaults: { subagents: { runTimeoutSeconds: 120 } },
-          list: [{ id: "main" }],
+  it.each([
+    { requested: 1800, configured: 120, seconds: 1800 },
+    { requested: 0, configured: 120, seconds: 0 },
+    { requested: undefined, configured: 120, seconds: 120 },
+    { requested: undefined, configured: undefined, seconds: 0 },
+  ])(
+    "forwards visible run timeout $requested (default $configured)",
+    async ({ requested, configured, seconds }) => {
+      const callGateway = vi.fn(async () => ({
+        key: "agent:main:dashboard:timed-child",
+        runStarted: true,
+        runId: "run-visible-timed",
+      }));
+      const registerRun = vi.fn();
+      const tool = createSessionsSpawnTool({
+        agentSessionKey: "agent:main:main",
+        config: {
+          agents: {
+            defaults: { timeoutSeconds: 180, subagents: { runTimeoutSeconds: configured } },
+            list: [{ id: "main" }],
+          },
         },
-      },
-      callGateway: callGateway as never,
-      registerRun,
-      countActiveRuns: () => 0,
-    });
+        callGateway: callGateway as never,
+        registerRun,
+        countActiveRuns: () => 0,
+      });
 
-    const result = await tool.execute("visible-timeout", {
-      task: "inspect issue",
-      visible: true,
-      runTimeoutSeconds: 7,
-    });
+      const result = await tool.execute("visible-timeout", {
+        task: "inspect issue",
+        visible: true,
+        ...(requested !== undefined ? { runTimeoutSeconds: requested } : {}),
+      });
 
-    expect(result.details).toMatchObject({ status: "accepted", runId: "run-visible-timed" });
-    expect(registerRun).toHaveBeenCalledWith(
-      expect.objectContaining({ runId: "run-visible-timed", runTimeoutSeconds: 7 }),
-    );
-  });
+      expect(result.details).toMatchObject({ status: "accepted", runId: "run-visible-timed" });
+      expect(callGateway).toHaveBeenCalledWith(
+        "sessions.create",
+        expect.objectContaining({ timeoutMs: seconds * 1000 }),
+      );
+      expect(registerRun).toHaveBeenCalledWith(
+        expect.objectContaining({ runId: "run-visible-timed", runTimeoutSeconds: seconds }),
+      );
+    },
+  );
 
   it.each([undefined, "default", "fast", "custom/model-b"])(
     "lets sessions.create resolve visible model input %s against its current config",

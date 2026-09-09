@@ -30,6 +30,9 @@ function readStoredOverrideFromEntry(
   entry: SessionEntry | undefined,
   source: StoredModelOverride["source"],
 ): StoredModelOverride | null {
+  if (entry?.modelOverrideSource === "default") {
+    return null;
+  }
   const model = normalizeOptionalString(entry?.modelOverride);
   return model
     ? {
@@ -60,6 +63,9 @@ function resolveParentSessionKeyCandidate(params: {
 export function readStoredModelOverride(
   params: StoredModelOverrideReadParams,
 ): StoredModelOverride | null {
+  if (params.sessionEntry?.modelOverrideSource === "default") {
+    return null;
+  }
   const direct = readStoredOverrideFromEntry(params.sessionEntry, "session");
   if (direct) {
     return direct;
@@ -79,6 +85,7 @@ export function readStoredModelOverride(
 export function resolveStoredModelOverride(
   params: StoredModelOverrideReadParams & {
     defaultProvider: string;
+    allowPluginNormalization?: boolean;
   },
 ): StoredModelOverride | null {
   const stored = readStoredModelOverride(params);
@@ -90,6 +97,7 @@ export function resolveStoredModelOverride(
     overrideProvider: stored.provider,
     overrideModel: stored.model,
     overrideRouteResolution: stored.routeResolution,
+    allowPluginNormalization: params.allowPluginNormalization,
   });
   return ref ? { ...ref, source: stored.source, routeResolution: stored.routeResolution } : null;
 }

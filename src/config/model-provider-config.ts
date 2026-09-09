@@ -15,12 +15,28 @@ export function findProviderModelConfig<T extends { id?: string }>(
   models: readonly T[] | undefined,
   provider: string,
   modelId: string,
+  canonicalizeModelId?: (modelId: string) => string,
 ): T | undefined {
-  return resolveRawProviderModelConfigs({
+  const rows = resolveRawProviderModelConfigs({
     models,
     provider,
     normalizeModelId: (id) => normalizeConfiguredProviderCatalogModelId(provider, id.trim()),
-  }).get(modelId);
+  });
+  const exact = rows.get(modelId);
+  if (exact || !canonicalizeModelId) {
+    return exact;
+  }
+  const canonicalId = canonicalizeModelId(modelId);
+  const canonical = rows.get(canonicalId);
+  if (canonical) {
+    return canonical;
+  }
+  for (const [id, row] of rows) {
+    if (canonicalizeModelId(id) === canonicalId) {
+      return row;
+    }
+  }
+  return undefined;
 }
 
 const BUILT_IN_MODEL_PROVIDER_OVERLAY_IDS = new Set([
@@ -286,4 +302,31 @@ export function resolveMergedModelProviderConfig(
   provider: string,
 ): ModelProviderConfig | undefined {
   return resolveMergedModelProviderEntry(config, provider)?.providerConfig;
+}
+
+/** Projects a resolved request onto one transient canonical provider entry. */
+export function projectModelProviderConfig(
+  config: OpenClawConfig | undefined,
+  providerId: string,
+  overrides: Pick<ModelProviderConfig, "baseUrl"> &
+    Partial<Pick<ModelProviderConfig, "api" | "auth">>,
+): OpenClawConfig {
+  const provider = normalizeProviderId(providerId);
+  const entry = resolveMergedModelProviderEntry(config, provider);
+  const providerKey = entry?.providerKey ?? provider;
+  const providers = Object.fromEntries(
+    Object.entries(config?.models?.providers ?? {}).filter(
+      ([candidate]) => normalizeProviderId(candidate) !== provider || candidate === providerKey,
+    ),
+  );
+  return {
+    ...config,
+    models: {
+      ...config?.models,
+      providers: {
+        ...providers,
+        [providerKey]: { ...(entry?.providerConfig ?? { models: [] }), ...overrides },
+      },
+    },
+  };
 }

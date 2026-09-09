@@ -43,6 +43,7 @@ import { clearSessionAuthProfileOverride } from "../auth-profiles/session-overri
 import { ensureAuthProfileStore } from "../auth-profiles/store-runtime.js";
 import { ensureSelectedAgentHarnessPlugin } from "../harness/runtime-plugin.js";
 import { resolveAvailableAgentHarnessPolicy } from "../harness/selection.js";
+import { resolveModelProviderAuthConfig } from "../model-auth-provider-route.js";
 import { loadManifestModelCatalog } from "../model-catalog.js";
 import { splitTrailingAuthProfile } from "../model-ref-profile.js";
 import type { ModelManifestNormalizationContext } from "../model-ref-shared.js";
@@ -95,8 +96,15 @@ export async function resolveEmbeddedModelSelection(params: {
   let provider = defaultProvider;
   let model = defaultModel;
   let sessionEntry = params.sessionEntry;
-  const hasStoredOverride = Boolean(sessionEntry?.modelOverride || sessionEntry?.providerOverride);
-  let storedModelOverrideSource = hasStoredOverride ? sessionEntry?.modelOverrideSource : undefined;
+  const initialModelOverrideSource = sessionEntry?.modelOverrideSource;
+  const hasStoredOverride = Boolean(
+    initialModelOverrideSource !== "default" &&
+    (sessionEntry?.modelOverride || sessionEntry?.providerOverride),
+  );
+  let storedModelOverrideSource =
+    hasStoredOverride && initialModelOverrideSource !== "default"
+      ? initialModelOverrideSource
+      : undefined;
   let hasStoredAutoFallbackProvenance =
     hasStoredOverride && hasSessionAutoModelFallbackProvenance(sessionEntry);
   let hasLegacyAutoFallbackOverrideWithoutOrigin =
@@ -217,11 +225,15 @@ export async function resolveEmbeddedModelSelection(params: {
         initialEntry,
         entry,
       });
+      const adoptedModelOverrideSource = sessionEntry?.modelOverrideSource;
       const adoptedHasStoredOverride = Boolean(
-        sessionEntry?.modelOverride || sessionEntry?.providerOverride,
+        adoptedModelOverrideSource !== "default" &&
+        (sessionEntry?.modelOverride || sessionEntry?.providerOverride),
       );
       storedModelOverrideSource = adoptedHasStoredOverride
-        ? sessionEntry?.modelOverrideSource
+        ? adoptedModelOverrideSource === "default"
+          ? undefined
+          : adoptedModelOverrideSource
         : undefined;
       hasStoredAutoFallbackProvenance =
         adoptedHasStoredOverride && hasSessionAutoModelFallbackProvenance(sessionEntry);
@@ -246,12 +258,15 @@ export async function resolveEmbeddedModelSelection(params: {
     storedModelOverrideSource = undefined;
     hasStoredAutoFallbackProvenance = false;
   }
+  const canUseStoredOverrideFields = sessionEntry?.modelOverrideSource !== "default";
   const storedProviderOverride = hasLegacyAutoFallbackOverrideWithoutOrigin
     ? undefined
-    : (effectiveStoredOverride?.provider ?? sessionEntry?.providerOverride?.trim());
+    : (effectiveStoredOverride?.provider ??
+      (canUseStoredOverrideFields ? sessionEntry?.providerOverride?.trim() : undefined));
   const storedModelOverride = hasLegacyAutoFallbackOverrideWithoutOrigin
     ? undefined
-    : (effectiveStoredOverride?.model ?? sessionEntry?.modelOverride?.trim());
+    : (effectiveStoredOverride?.model ??
+      (canUseStoredOverrideFields ? sessionEntry?.modelOverride?.trim() : undefined));
   const currentRunModelChannel = [
     params.runContext.messageChannel,
     params.opts.replyChannel,
@@ -391,6 +406,13 @@ export async function resolveEmbeddedModelSelection(params: {
   const authProfileId = sessionEntryForAttempt?.authProfileOverride;
   if (sessionEntryForAttempt && authProfileId) {
     const entry = sessionEntryForAttempt;
+    const authConfig = resolveModelProviderAuthConfig({
+      config: params.cfg,
+      provider: providerForAuthProfileValidation,
+      modelId: model,
+      workspaceDir: params.workspaceDir,
+      metadataSnapshot: params.pluginsEnabled ? params.manifestMetadataSnapshot : { plugins: [] },
+    });
     const agentDir = resolveAgentDir(params.cfg, params.sessionAgentId);
     const store = ensureAuthProfileStore(agentDir, {
       profileId: authProfileId,
@@ -407,14 +429,14 @@ export async function resolveEmbeddedModelSelection(params: {
     });
     const authAliasLookupParams = params.pluginsEnabled
       ? {
-          config: params.cfg,
+          config: authConfig,
           workspaceDir: params.workspaceDir,
           ...(params.manifestMetadataSnapshot
             ? { metadataSnapshot: params.manifestMetadataSnapshot }
             : {}),
         }
       : {
-          config: params.cfg,
+          config: authConfig,
           workspaceDir: params.workspaceDir,
           metadataSnapshot: { plugins: [] },
         };
@@ -431,7 +453,7 @@ export async function resolveEmbeddedModelSelection(params: {
       profile &&
       acceptedAuthProviders.some((candidateProvider) =>
         isStoredCredentialCompatibleWithAuthProvider({
-          cfg: params.cfg,
+          cfg: authConfig,
           authAliasLookupParams,
           provider: candidateProvider,
           credential: profile,
@@ -439,7 +461,7 @@ export async function resolveEmbeddedModelSelection(params: {
       );
     const preserveUnavailableSelection = shouldPreserveUnavailableSessionAuthProfileOverride({
       store,
-      cfg: params.cfg,
+      cfg: authConfig,
       agentDir,
       entry,
       currentProvider: entry.providerOverride ?? defaultProvider,

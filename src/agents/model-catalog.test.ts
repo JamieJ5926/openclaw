@@ -227,7 +227,7 @@ describe("prepared model catalog builder", () => {
       const entries = rows.map((row) => ({ ...row, provider: "custom" }));
       const snapshot = configured
         ? prepareConfiguredRuntimeFacts({
-            agentFacts: { configuredModelRefs: [] },
+            agentFacts: { input: { config: {} }, configuredModelRefs: [] },
             workspaceFacts: { configuredCatalogEntries: entries, inlineProviderModels: [] },
             templateModelRegistry: registry([]),
             configuredRuntimeModels: [],
@@ -865,6 +865,7 @@ describe("prepared model catalog builder", () => {
       });
 
       const selectedRoute = {
+        name: retarget ? "Earlier Route A" : "Route A",
         api: "openai-responses",
         baseUrl: "https://route-a.example.test/v1",
         thinkingLevelMap: retarget ? { xhigh: "high", max: "max" } : { xhigh: null, max: null },

@@ -32,7 +32,7 @@ vi.mock("../../provider-model-normalization.runtime.js", () => ({
 }));
 vi.mock("./subagent-spawn-deps.js", () => ({
   getSubagentSpawnDeps: () => ({
-    loadPreparedModelCatalog: (...args: unknown[]) => state.live(...args),
+    readPreparedModelCatalog: (...args: unknown[]) => state.live(...args),
     resolveProviderRefOwnership: (...args: Parameters<typeof resolveProviderRefOwnership>) =>
       resolveProviderRefOwnership(...args),
   }),

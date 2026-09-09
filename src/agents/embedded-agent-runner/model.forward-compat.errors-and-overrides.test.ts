@@ -294,11 +294,18 @@ describe("resolveModel forward-compat errors and overrides", () => {
     cost?: Partial<ModelDefinitionConfig["cost"]>;
     expected: ModelDefinitionConfig["cost"];
     missingSource?: boolean;
+    providerEquivalent?: boolean;
   }>([
     { name: "omitted", expected: catalogCost },
     { name: "empty", cost: {}, expected: catalogCost },
     {
       name: "partial",
+      cost: { input: 7 },
+      expected: { input: 7, output: 22, cacheRead: 3, cacheWrite: 4 },
+    },
+    {
+      name: "provider wire row",
+      providerEquivalent: true,
       cost: { input: 7 },
       expected: { input: 7, output: 22, cacheRead: 3, cacheWrite: 4 },
     },
@@ -317,9 +324,9 @@ describe("resolveModel forward-compat errors and overrides", () => {
     { name: "missing source row", missingSource: true, expected: staleCost },
   ])(
     "resolves authored $name cost over the complete discovered schedule",
-    async ({ cost, expected, missingSource }) => {
-      const provider = "pricing-fixture";
-      const modelId = "priced-model";
+    async ({ cost, expected, missingSource, providerEquivalent }) => {
+      const provider = providerEquivalent ? "arcee" : "pricing-fixture";
+      const modelId = providerEquivalent ? "trinity-large-thinking" : "priced-model";
       const model = {
         ...makeModel(modelId),
         api: "openai-completions" as const,
@@ -334,15 +341,19 @@ describe("resolveModel forward-compat errors and overrides", () => {
       const source = {
         models: {
           providers: {
-            " Pricing-Fixture ": {
+            [` ${provider} `]: {
               ...providerConfig,
               models: [
-                { id: "pricing-fixture/priced-model", cost: { input: 333, output: 555 } },
+                ...(providerEquivalent
+                  ? []
+                  : [{ id: "pricing-fixture/priced-model", cost: { input: 333, output: 555 } }]),
                 ...(missingSource
                   ? []
                   : [
                       {
-                        id: " priced-model ",
+                        id: providerEquivalent
+                          ? "arcee-ai/trinity-large-thinking"
+                          : " priced-model ",
                         contextWindow: 8192,
                         ...(cost === undefined ? {} : { cost }),
                       },

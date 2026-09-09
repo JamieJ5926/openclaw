@@ -465,6 +465,7 @@ export async function getReplyFromConfig(
         timeoutMs: resolveAgentTimeoutMs({
           cfg,
           overrideSeconds: opts?.timeoutOverrideSeconds,
+          overrideMs: opts?.timeoutOverrideMs,
         }),
       };
     });

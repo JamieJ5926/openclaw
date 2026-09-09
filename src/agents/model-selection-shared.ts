@@ -1052,12 +1052,17 @@ function buildAllowedModelSetFromPrepared(
   }
 
   const allowedKeys = new Set<string>();
+  const identity = (provider: string, model: string) =>
+    JSON.stringify([normalizeProviderId(provider), model]);
+  const catalogIdentities = new Set(catalog.map((entry) => identity(entry.provider, entry.id)));
+  const allowedCatalogIdentities = new Set<string>();
   const syntheticCatalogEntries = new Map<string, ModelCatalogEntry>();
   for (const wildcardKey of wildcardModelKeys) {
     allowedKeys.add(wildcardKey);
   }
   for (const entry of expandModelCatalogWildcards(catalog, wildcardModelKeys)) {
     allowedKeys.add(modelKey(entry.provider, entry.id));
+    allowedCatalogIdentities.add(identity(entry.provider, entry.id));
   }
   for (const raw of visibility.exactModelRefs) {
     const parsed = resolvePolicyModelRef(raw);
@@ -1066,7 +1071,11 @@ function buildAllowedModelSetFromPrepared(
     }
     const key = modelKey(parsed.provider, parsed.model);
     allowedKeys.add(key);
-    if (!catalogKeys.has(key) && !syntheticCatalogEntries.has(key)) {
+    allowedCatalogIdentities.add(identity(parsed.provider, parsed.model));
+    if (
+      !catalogIdentities.has(identity(parsed.provider, parsed.model)) &&
+      !syntheticCatalogEntries.has(key)
+    ) {
       // Config can allow a model before it appears in live provider catalogs.
       // Synthetic entries keep UI/model switchers aligned with that allowlist.
       // Configured rows are already in catalog; missing keys need only aliases.
@@ -1086,10 +1095,13 @@ function buildAllowedModelSetFromPrepared(
       isModelKeyAllowedBySet(wildcardModelKeys, defaultKey))
   ) {
     allowedKeys.add(defaultKey);
+    if (defaultRef) {
+      allowedCatalogIdentities.add(identity(defaultRef.provider, defaultRef.model));
+    }
   }
 
   const allowedCatalog = [
-    ...catalog.filter((entry) => allowedKeys.has(modelKey(entry.provider, entry.id))),
+    ...catalog.filter((entry) => allowedCatalogIdentities.has(identity(entry.provider, entry.id))),
     ...syntheticCatalogEntries.values(),
   ];
 

@@ -55,7 +55,7 @@ async function resolveSpawnModelSelection(params: {
   let catalog = runtime.modelCatalog.entries;
   if (params.request.model?.trim() || params.request.outputSchema) {
     try {
-      catalog = await getSubagentSpawnDeps().loadPreparedModelCatalog({
+      catalog = await getSubagentSpawnDeps().readPreparedModelCatalog({
         config: cfg,
         agentId: targetAgentId,
         agentDir: runtime.agentDir,

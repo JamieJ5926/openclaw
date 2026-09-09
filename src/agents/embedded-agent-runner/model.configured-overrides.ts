@@ -9,6 +9,7 @@ import { projectConfigOntoRuntimeSourceSnapshot } from "../../config/runtime-sou
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { Api, Model } from "../../llm/types.js";
 import type { PluginMetadataSnapshotOwnerMaps } from "../../plugins/plugin-metadata-snapshot.types.js";
+import { createProviderModelCatalogIdNormalizer } from "../../plugins/provider-model-routes.js";
 import type { ProviderRuntimeModel } from "../../plugins/provider-runtime-model.types.js";
 import { resolveCatalogOwnedModelCompat } from "../model-compat-catalog.js";
 import { findNormalizedProviderValue, normalizeProviderId } from "../model-selection.js";
@@ -113,16 +114,19 @@ export function findInlineModelMatch(params: {
 }) {
   const inlineModels = params.preparedModels ?? buildInlineProviderModels(params.providers);
   const normalizedProvider = normalizeProviderId(params.provider);
+  const normalizeModelId = createProviderModelCatalogIdNormalizer(params.provider);
   return (
     findProviderModelConfig(
       inlineModels.filter((entry) => entry.provider === params.provider),
       params.provider,
       params.modelId,
+      normalizeModelId,
     ) ??
     findProviderModelConfig(
       inlineModels.filter((entry) => normalizeProviderId(entry.provider) === normalizedProvider),
       normalizedProvider,
       params.modelId,
+      normalizeModelId,
     )
   );
 }
@@ -161,12 +165,20 @@ export function mergeConfiguredModelCost(params: {
     const source = projectConfigOntoRuntimeSourceSnapshot(params.cfg);
     if (source !== params.cfg) {
       // Runtime rows may already be canonical; only authored source aliases normalize here.
-      const sourceModels = resolveConfiguredProviderConfig(source, params.provider)?.models?.filter(
+      const authoredModels = resolveConfiguredProviderConfig(source, params.provider)?.models;
+      let sourceModels = authoredModels?.filter(
         (model) =>
           model.id.trim() === params.modelId ||
           normalizeConfiguredProviderCatalogModelId(params.provider, model.id).trim() ===
             params.modelId,
       );
+      if (!sourceModels?.length) {
+        const normalizeModelId = createProviderModelCatalogIdNormalizer(params.provider);
+        const identity = normalizeModelId(params.modelId);
+        sourceModels = authoredModels?.filter(
+          (row) => normalizeModelId(row.id.trim()) === identity,
+        );
+      }
       if (sourceModels?.length) {
         // First-row fields win below; aliases only fill omissions in exact rows.
         sourceModels.sort(
@@ -360,15 +372,22 @@ export function applyConfiguredProviderOverrides(params: {
       headers: requestConfig.headers,
     };
   }
+  const normalizeModelId = createProviderModelCatalogIdNormalizer(params.provider);
   const requestedConfiguredModel = findProviderModelConfig(
     providerConfig.models,
     params.provider,
     modelId,
+    normalizeModelId,
   );
   const configuredModel =
     requestedConfiguredModel ??
     (discoveredModel.id !== modelId
-      ? findProviderModelConfig(providerConfig.models, params.provider, discoveredModel.id)
+      ? findProviderModelConfig(
+          providerConfig.models,
+          params.provider,
+          discoveredModel.id,
+          normalizeModelId,
+        )
       : undefined);
   const configuredStaticCatalogModel =
     configuredModel && (params.staticCatalogModel ?? params.getStaticCatalogModel?.());

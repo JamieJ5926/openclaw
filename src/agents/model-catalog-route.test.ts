@@ -396,7 +396,10 @@ describe("projectModelCatalogEntryForRoute", () => {
       models: {
         providers: {
           openai: {
-            models: [{ id: "openai/acme-model", name: "Configured Acme" }],
+            models: [
+              { id: "openai/acme-model", name: "Configured Acme" },
+              { id: "acme-model", name: "Other executable model", contextTokens: 32_000 },
+            ],
           },
         },
       },
@@ -410,5 +413,12 @@ describe("projectModelCatalogEntryForRoute", () => {
         policy: routePolicy,
       }),
     ).toEqual({ name: "Configured Acme" });
+    expect(
+      resolveConfiguredModelCatalogOverrides({
+        cfg,
+        entry: { ...literalEntry, id: "acme-model" },
+        policy: routePolicy,
+      }),
+    ).toEqual({ name: "Other executable model", contextTokens: 32_000 });
   });
 });

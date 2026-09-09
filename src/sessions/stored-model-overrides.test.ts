@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { applyModelOverrideToSessionEntry } from "./model-overrides.js";
-import { resolveStoredModelOverride } from "./stored-model-overrides.js";
+import { readStoredModelOverride, resolveStoredModelOverride } from "./stored-model-overrides.js";
 
 vi.mock("../agents/provider-model-normalization.runtime.js", () => ({
   normalizeProviderModelIdWithRuntime: ({ context }: { context: { modelId: string } }) =>
@@ -130,6 +130,64 @@ describe("resolveStoredModelOverride", () => {
       source: "parent",
       routeResolution: "resolved",
     });
+  });
+
+  it("rejects stale direct fields behind an explicit Default marker", () => {
+    expect(
+      readStoredModelOverride({
+        sessionEntry: {
+          sessionId: "default-session",
+          updatedAt: 1,
+          modelOverrideSource: "default",
+          providerOverride: "anthropic",
+          modelOverride: "stale-model",
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it("does not inherit stale fields from a parent that explicitly selected Default", () => {
+    expect(
+      resolveStoredModelOverride({
+        defaultProvider: "openai",
+        sessionKey: "agent:main:dashboard:parent:thread:child",
+        sessionStore: {
+          "agent:main:dashboard:parent": {
+            sessionId: "parent-session",
+            updatedAt: 1,
+            modelOverrideSource: "default",
+            providerOverride: "anthropic",
+            modelOverride: "stale-model",
+          },
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it("does not inherit a parent pin after the child explicitly selects default", () => {
+    expect(
+      resolveStoredModelOverride({
+        defaultProvider: "openai",
+        sessionEntry: {
+          sessionId: "child-session",
+          updatedAt: 2,
+          modelOverrideSource: "default",
+          providerOverride: "google-vertex",
+          modelOverride: "stale-model",
+        },
+        sessionKey: "agent:main:dashboard:child",
+        parentSessionKey: "agent:main:dashboard:parent",
+        sessionStore: {
+          "agent:main:dashboard:parent": {
+            sessionId: "parent-session",
+            updatedAt: 1,
+            providerOverride: "anthropic",
+            modelOverride: "claude-sonnet-4-6",
+            modelOverrideSource: "user",
+          },
+        },
+      }),
+    ).toBeNull();
   });
 });
 

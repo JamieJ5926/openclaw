@@ -27,11 +27,12 @@ export function resolveSessionModelRef(
   cfg: OpenClawConfig,
   entry?: SessionModelEntry,
   agentId?: string,
-  options?: { allowPluginNormalization?: boolean },
+  options?: { allowPluginNormalization?: boolean; overrideRouteResolution?: "raw" | "resolved" },
 ): { provider: string; model: string } {
   const overrideProvider = normalizeOptionalString(entry?.providerOverride);
   const overrideModel = normalizeOptionalString(entry?.modelOverride);
-  const overrideRouteResolution = resolveSessionModelOverrideRouteResolution(entry);
+  const overrideRouteResolution =
+    options?.overrideRouteResolution ?? resolveSessionModelOverrideRouteResolution(entry);
   if (overrideProvider && overrideModel) {
     return resolvePersistedSelectedModelRef({
       defaultProvider: overrideProvider,

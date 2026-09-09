@@ -486,6 +486,7 @@ export async function handleDirectiveOnly(
         entry: sessionEntry,
         currentProvider: provider,
         selection: modelSelection,
+        explicitDefaultSelection: modelSelection.isDefault,
         profileOverride,
         markLiveSwitchPending: true,
       });

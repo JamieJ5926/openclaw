@@ -44,7 +44,7 @@ import "./get-reply.test-runtime-mocks.js";
 registerGetReplyBaselineBypass();
 
 type LoadModelCatalogFn =
-  typeof import("../../agents/prepared-model-catalog.js").loadPreparedModelCatalog;
+  typeof import("../../agents/prepared-model-catalog.js").readPreparedModelCatalog;
 type GetAvailableModelCatalogFn =
   typeof import("../../agents/prepared-model-catalog.js").getPreparedModelCatalogSnapshot;
 
@@ -70,7 +70,7 @@ vi.mock("./commands-status.js", () => ({
 vi.mock("../../agents/prepared-model-catalog.js", () => ({
   getPreparedModelCatalogSnapshot: mocks.getAvailableModelCatalog,
   loadProviderScopedThinkingCatalog: vi.fn(async () => []),
-  loadPreparedModelCatalog: mocks.loadModelCatalog,
+  readPreparedModelCatalog: mocks.loadModelCatalog,
 }));
 
 vi.mock("../../agents/workspace.js", () => ({

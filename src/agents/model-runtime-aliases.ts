@@ -5,6 +5,7 @@ import { parseModelCatalogRef } from "@openclaw/model-catalog-core/model-catalog
 import { normalizeProviderId } from "@openclaw/model-catalog-core/provider-id";
 import { normalizeOptionalLowercaseString } from "@openclaw/normalization-core/string-coerce";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { resolveProviderModelCatalogId } from "../plugins/provider-model-routes.js";
 import { resolveAgentDir } from "./agent-scope-config.js";
 import { resolveExplicitAuthOrderSelection } from "./auth-profiles/order.js";
 import { getPreparedRuntimeAuthProfileStoreSnapshotCore } from "./auth-profiles/runtime-snapshots.js";
@@ -113,10 +114,19 @@ export function areRuntimeModelRefsEquivalent(
 ): boolean {
   const leftRef = parseRuntimeModelRefForComparison(left);
   const rightRef = parseRuntimeModelRefForComparison(right);
-  // CLI aliases change the provider, never the model ID. Different models
-  // cannot be equivalent and must not discover the setup registry on status reads.
   if (leftRef.modelId !== rightRef.modelId) {
-    return false;
+    const leftModel =
+      leftRef.modelId &&
+      (resolveProviderModelCatalogId({ provider: leftRef.provider, modelId: leftRef.modelId }) ??
+        leftRef.modelId);
+    const rightModel =
+      rightRef.modelId &&
+      (resolveProviderModelCatalogId({ provider: rightRef.provider, modelId: rightRef.modelId }) ??
+        rightRef.modelId);
+    // Only provider-declared equivalents may cross model IDs; CLI aliases change providers.
+    if (leftModel !== rightModel) {
+      return false;
+    }
   }
   return (
     leftRef.provider === rightRef.provider ||
@@ -170,9 +180,14 @@ type RuntimeAuthAliasParams = {
   metadataSnapshot?: ProviderAuthAliasLookupParams["metadataSnapshot"];
 };
 
-function resolveRuntimeAuthProvider(provider: string, params: RuntimeAuthAliasParams): string {
+function resolveRuntimeAuthProvider(
+  provider: string,
+  params: RuntimeAuthAliasParams,
+  storedCredential = false,
+): string {
   return resolveProviderIdForAuth(provider, {
     config: params.cfg,
+    storedCredential,
     ...(params.metadataSnapshot ? { metadataSnapshot: params.metadataSnapshot } : {}),
   });
 }
@@ -189,7 +204,7 @@ function resolveProfileRuntimeAlias(
     return undefined;
   }
   const providerAuthKey = resolveRuntimeAuthProvider(provider, params);
-  const profileAuthKey = resolveRuntimeAuthProvider(profileProvider, params);
+  const profileAuthKey = resolveRuntimeAuthProvider(profileProvider, params, true);
   if (providerAuthKey !== profileAuthKey) {
     return undefined;
   }
@@ -239,7 +254,7 @@ function resolveCliRuntimeFromAuthProfile(
     if (!profile?.provider) {
       continue;
     }
-    const profileAuthKey = resolveRuntimeAuthProvider(profile.provider, params);
+    const profileAuthKey = resolveRuntimeAuthProvider(profile.provider, params, true);
     if (profileAuthKey !== providerAuthKey) {
       continue;
     }

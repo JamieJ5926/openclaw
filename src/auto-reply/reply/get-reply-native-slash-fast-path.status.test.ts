@@ -65,7 +65,7 @@ describe("native /status channel model routing", () => {
     vi.stubEnv("OPENCLAW_TEST_FAST", "1");
     resetPluginRuntimeStateForTest();
     setActivePluginRegistry(createSessionConversationTestRegistry());
-    vi.spyOn(preparedModelCatalog, "loadPreparedModelCatalog").mockResolvedValue([]);
+    vi.spyOn(preparedModelCatalog, "readPreparedModelCatalog").mockResolvedValue([]);
     vi.spyOn(preparedModelCatalog, "getPreparedModelCatalogSnapshot").mockReturnValue({
       entries: [
         {
@@ -400,7 +400,7 @@ describe("native /status channel model routing", () => {
       if (parentPin) {
         await expect(statusCall.resolveDefaultThinkingLevel()).resolves.toBe("medium");
         await expect(statusCall.resolveDefaultThinkingLevel()).resolves.toBe("medium");
-        expect(vi.mocked(preparedModelCatalog.loadPreparedModelCatalog).mock.calls.length).toBe(0);
+        expect(vi.mocked(preparedModelCatalog.readPreparedModelCatalog).mock.calls.length).toBe(0);
         expect(vi.mocked(manifestScan.listOpenClawPluginManifestMetadata).mock.calls.length).toBe(
           0,
         );
