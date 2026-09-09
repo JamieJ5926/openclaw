@@ -3508,6 +3508,46 @@
     "target": "Telegram 故障排查"
   },
   {
+    "source": "Session rail and side chat",
+    "target": "会话轨道与侧边聊天"
+  },
+  {
+    "source": "Session rail",
+    "target": "会话轨道"
+  },
+  {
+    "source": "Composer capability menu",
+    "target": "输入框功能菜单"
+  },
+  {
+    "source": "Composer",
+    "target": "输入框"
+  },
+  {
+    "source": "Chat behavior",
+    "target": "聊天行为"
+  },
+  {
+    "source": "Transcript rendering",
+    "target": "对话记录渲染"
+  },
+  {
+    "source": "Rendering",
+    "target": "渲染"
+  },
+  {
+    "source": "Hosted embeds",
+    "target": "托管嵌入"
+  },
+  {
+    "source": "Transcript layout and width",
+    "target": "对话记录布局与宽度"
+  },
+  {
+    "source": "Layout and width",
+    "target": "布局与宽度"
+  },
+  {
     "source": "Microsoft Teams setup",
     "target": "Microsoft Teams 设置"
   },

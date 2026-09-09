@@ -2515,6 +2515,17 @@
                       "web/control-ui/connect-and-pair",
                       "web/control-ui/sessions-and-sidebar",
                       "web/control-ui/chat",
+                      {
+                        "group": "Chat",
+                        "pages": [
+                          "web/control-ui/chat/session-rail",
+                          "web/control-ui/chat/composer",
+                          "web/control-ui/chat/chat-behavior",
+                          "web/control-ui/chat/rendering",
+                          "web/control-ui/chat/hosted-embeds",
+                          "web/control-ui/chat/layout"
+                        ]
+                      },
                       "web/control-ui/panels",
                       "web/control-ui/settings",
                       "web/control-ui/feature-reference",
