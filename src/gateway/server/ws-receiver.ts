@@ -1,5 +1,5 @@
 import type { WebSocket } from "ws";
-import type { GatewayRole } from "../role-policy.js";
+import type { GatewayRole } from "../role-policy.types.js";
 import { MAX_PAYLOAD_BYTES } from "../server-constants.js";
 import type { PrepareGatewayAuthenticatedReceive } from "./connection-transport.js";
 
