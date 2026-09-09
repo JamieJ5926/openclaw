@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   planManifestModelCatalogRows,
   planManifestModelCatalogSuppressions,
+  selectManifestModelCatalogRows,
 } from "./manifest-planner.js";
 
 describe("manifest model catalog planner", () => {
@@ -192,12 +193,19 @@ describe("manifest model catalog planner", () => {
     const remoteOverlay = Object.fromEntries(
       providers.map(([provider]) => [provider, { models: [{ id: "refreshed" }] }]),
     );
-    const refsFor = (selection?: Parameters<typeof planManifestModelCatalogRows>[0]["selection"]) =>
-      planManifestModelCatalogRows({
+    const completed = planManifestModelCatalogRows({ registry, remoteOverlay });
+    const refsFor = (
+      selection?: Parameters<typeof planManifestModelCatalogRows>[0]["selection"],
+    ) => {
+      const selected = selectManifestModelCatalogRows(completed, selection);
+      const direct = planManifestModelCatalogRows({
         registry,
         remoteOverlay,
         ...(selection ? { selection } : {}),
-      }).rows.map((row) => row.ref);
+      });
+      expect(selected).toEqual(direct.rows);
+      return selected.map((row) => row.ref);
+    };
 
     expect(refsFor()).toEqual([
       "refreshable-provider/known",
@@ -217,35 +225,59 @@ describe("manifest model catalog planner", () => {
     ]);
   });
 
-  it("keeps conflicting model rows excluded from every catalog selection", () => {
-    const registry = {
-      plugins: [
-        {
-          id: "first-owner",
-          modelCatalog: {
-            providers: { shared: { models: [{ id: "conflicted" }] } },
-            discovery: { shared: "static" as const },
+  it.each([false, true])(
+    "keeps conflicting model rows excluded from every catalog selection with siblings=%s",
+    (withSiblings) => {
+      const registry = {
+        plugins: [
+          {
+            id: "first-owner",
+            modelCatalog: {
+              providers: {
+                shared: {
+                  models: [{ id: "conflicted" }, ...(withSiblings ? [{ id: "static-only" }] : [])],
+                },
+              },
+              discovery: { shared: "static" as const },
+            },
           },
-        },
-        {
-          id: "second-owner",
-          modelCatalog: {
-            providers: { shared: { models: [{ id: "conflicted" }] } },
-            discovery: { shared: "runtime" as const },
+          {
+            id: "second-owner",
+            modelCatalog: {
+              providers: {
+                shared: {
+                  models: [{ id: "conflicted" }, ...(withSiblings ? [{ id: "runtime-only" }] : [])],
+                },
+              },
+              discovery: { shared: "runtime" as const },
+            },
           },
-        },
-      ],
-    };
-
-    for (const selection of [undefined, "static", "supplemental"] as const) {
-      const plan = planManifestModelCatalogRows({
-        registry,
-        ...(selection ? { selection } : {}),
-      });
-      expect(plan.rows, selection).toEqual([]);
-      expect(plan.conflicts, selection).toHaveLength(1);
-    }
-  });
+        ],
+      };
+      const completed = planManifestModelCatalogRows({ registry });
+      expect(completed.conflicts).toHaveLength(1);
+      for (const selection of [undefined, "static", "supplemental"] as const) {
+        const expected = withSiblings
+          ? selection
+            ? ["shared/static-only"]
+            : ["shared/runtime-only", "shared/static-only"]
+          : [];
+        const plan = planManifestModelCatalogRows({
+          registry,
+          ...(selection ? { selection } : {}),
+        });
+        expect(
+          plan.rows.map((row) => row.ref),
+          selection,
+        ).toEqual(expected);
+        expect(
+          selectManifestModelCatalogRows(completed, selection).map((row) => row.ref),
+          selection,
+        ).toEqual(expected);
+        expect(plan.conflicts, selection).toEqual(completed.conflicts);
+      }
+    },
+  );
 
   it("builds manifest rows from plugin-owned catalog providers", () => {
     const plan = planManifestModelCatalogRows({
@@ -380,6 +412,9 @@ describe("manifest model catalog planner", () => {
     expect(plan.rows[0]?.mergeKey).toBe("azure-openai-responses::gpt-5.4");
     expect(plan.rows[0]?.api).toBe("azure-openai-responses");
     expect(plan.rows[0]?.baseUrl).toBe("https://example.openai.azure.com/openai/v1");
+    for (const selection of [undefined, "static", "supplemental"] as const) {
+      expect(selectManifestModelCatalogRows(plan, selection)).toEqual(plan.rows);
+    }
   });
 
   // Regression for https://github.com/openclaw/openclaw/issues/73876.

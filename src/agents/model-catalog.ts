@@ -7,7 +7,10 @@ import { normalizeProviderId } from "@openclaw/model-catalog-core/provider-id";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { isDiagnosticFlagEnabled } from "../infra/diagnostic-flags.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
-import { planEffectiveModelCatalogRows } from "../model-catalog/index.js";
+import {
+  planEffectiveModelCatalogRows,
+  selectManifestModelCatalogRows,
+} from "../model-catalog/index.js";
 import { getCurrentPluginMetadataSnapshot } from "../plugins/current-plugin-metadata-snapshot.js";
 import { isManifestPluginAvailableForControlPlane } from "../plugins/manifest-contract-eligibility.js";
 import { resolvePluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot.js";
@@ -341,18 +344,25 @@ export function loadManifestModelCatalog(params: {
           env: params.env ?? process.env,
           allowWorkspaceScopedCurrent: params.workspaceDir === undefined,
         }));
-  if (!resolvedSnapshot) {
-    return [];
-  }
-  const cached = manifestModelCatalogCache.get(params.config);
-  if (cached?.snapshot === resolvedSnapshot) {
+  return resolvedSnapshot
+    ? loadManifestModelCatalogFromSnapshot(params.config, resolvedSnapshot)
+    : [];
+}
+
+function loadManifestModelCatalogFromSnapshot(
+  config: OpenClawConfig,
+  snapshot: PluginMetadataSnapshot,
+  prepared?: {
+    plugins: PluginMetadataSnapshot["plugins"];
+    plan: ReturnType<typeof planEffectiveModelCatalogRows>;
+  },
+): ModelCatalogEntry[] {
+  const cached = manifestModelCatalogCache.get(config);
+  if (cached?.snapshot === snapshot) {
     return cached.rows;
   }
-  const plugins = resolveEligibleManifestCatalogPlugins(resolvedSnapshot, params.config);
-  const plan = planEffectiveModelCatalogRows({
-    registry: { plugins },
-    config: params.config,
-  });
+  const plugins = prepared?.plugins ?? resolveEligibleManifestCatalogPlugins(snapshot, config);
+  const plan = prepared?.plan ?? planEffectiveModelCatalogRows({ registry: { plugins }, config });
   const providerOrderByKey = new Map<string, number>();
   for (const plugin of plugins) {
     for (const [provider, providerCatalog] of Object.entries(
@@ -374,7 +384,7 @@ export function loadManifestModelCatalog(params: {
     }
     return entry;
   });
-  manifestModelCatalogCache.set(params.config, { snapshot: resolvedSnapshot, rows });
+  manifestModelCatalogCache.set(config, { snapshot, rows });
   return rows;
 }
 
@@ -416,11 +426,14 @@ export async function buildPreparedModelCatalogSnapshot(
     const { buildShouldSuppressBuiltInModelCore } = await loadModelSuppression();
     logStage("catalog-deps-ready");
     const entries = params.modelRegistry.getAll();
-    const declaredManifestModels = loadManifestModelCatalog({
-      config: cfg,
-      env,
-      metadataSnapshot: manifestMetadataSnapshot,
-    });
+    const plugins = resolveEligibleManifestCatalogPlugins(manifestMetadataSnapshot, cfg);
+    const manifestPlan = planEffectiveModelCatalogRows({ registry: { plugins }, config: cfg });
+    // Both projections share this build's facts; the public cache retains only declaration rows.
+    const declaredManifestModels = loadManifestModelCatalogFromSnapshot(
+      cfg,
+      manifestMetadataSnapshot,
+      { plugins, plan: manifestPlan },
+    );
     logStage("registry-read", `entries=${entries.length}`);
 
     const shouldSuppressBuiltInModel = buildShouldSuppressBuiltInModelCore({ config: cfg });
@@ -458,21 +471,14 @@ export async function buildPreparedModelCatalogSnapshot(
     });
     models.splice(0, models.length, ...orderedRegistryModels);
     mergeCatalogRouteVariants(routeVariants, orderedRegistryModels);
-    const supplementalManifestPlan = planEffectiveModelCatalogRows({
-      registry: {
-        plugins: resolveEligibleManifestCatalogPlugins(manifestMetadataSnapshot, cfg),
-      },
-      config: cfg,
-      selection: "supplemental",
-    });
     const supplementalManifestKeys = new Set(
-      supplementalManifestPlan.rows.map((entry) =>
+      selectManifestModelCatalogRows(manifestPlan, "supplemental").map((entry) =>
         buildModelCatalogMergeKey(entry.provider, entry.id),
       ),
     );
     const runtimeDiscoveryProviders = new Set([
       ...observedProviders,
-      ...supplementalManifestPlan.entries.flatMap((entry) =>
+      ...manifestPlan.entries.flatMap((entry) =>
         entry.discovery === "runtime" ? [normalizeProviderId(entry.provider)] : [],
       ),
     ]);

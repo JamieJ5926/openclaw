@@ -116,14 +116,7 @@ export function planManifestModelCatalogRows(params: {
     }
   }
 
-  const seenRows = new Map<
-    string,
-    {
-      pluginId: string;
-      row: NormalizedModelCatalogRow;
-      discovery: ModelCatalogDiscovery | undefined;
-    }
-  >();
+  const seenRows = new Map<string, { pluginId: string; row: NormalizedModelCatalogRow }>();
   const conflicts = new Map<string, ManifestModelCatalogConflict>();
   for (const entry of entries) {
     for (const row of entry.rows) {
@@ -146,35 +139,35 @@ export function planManifestModelCatalogRows(params: {
       seenRows.set(row.mergeKey, {
         pluginId: entry.pluginId,
         row,
-        discovery: entry.discovery,
       });
     }
   }
 
-  const rows: NormalizedModelCatalogRow[] = [];
-  for (const { row, discovery } of seenRows.values()) {
-    if (
-      conflicts.has(row.mergeKey) ||
-      (params.selection === "static"
-        ? discovery !== "static"
-        : params.selection === "supplemental" &&
-          discovery === "runtime" &&
-          row.source !== "runtime-refresh")
-    ) {
-      continue;
-    }
-    rows.push(row);
-  }
+  const completed = { entries, conflicts: [...conflicts.values()] };
+  return { ...completed, rows: selectManifestModelCatalogRows(completed, params.selection) };
+}
 
-  return {
-    entries,
-    conflicts: [...conflicts.values()],
-    // oxlint-disable-next-line unicorn/no-array-sort -- Selection owns this array until publication.
-    rows: rows.sort(
-      (left, right) =>
-        left.provider.localeCompare(right.provider) || left.id.localeCompare(right.id),
+export function selectManifestModelCatalogRows(
+  plan: Pick<ManifestModelCatalogPlan, "entries" | "conflicts">,
+  selection?: ManifestModelCatalogRowSelection,
+): NormalizedModelCatalogRow[] {
+  const conflicts = new Set(plan.conflicts.map((conflict) => conflict.mergeKey));
+  // Selection cannot revive conflicts, and discovery belongs to each owner entry, not a provider.
+  const rows = plan.entries.flatMap((entry) =>
+    entry.rows.filter(
+      (row) =>
+        !conflicts.has(row.mergeKey) &&
+        (selection === "static"
+          ? entry.discovery === "static"
+          : selection !== "supplemental" ||
+            entry.discovery !== "runtime" ||
+            row.source === "runtime-refresh"),
     ),
-  };
+  );
+  // oxlint-disable-next-line unicorn/no-array-sort -- Selection owns this array until publication.
+  return rows.sort(
+    (left, right) => left.provider.localeCompare(right.provider) || left.id.localeCompare(right.id),
+  );
 }
 
 function planManifestModelCatalogPluginEntries(params: {

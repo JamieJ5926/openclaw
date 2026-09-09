@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelDefinitionConfig } from "../config/types.models.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { finalizePluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot.js";
 import type { PluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot.types.js";
 import {
   createPluginManifestRecordFixture,
   createPluginMetadataSnapshotFixture,
 } from "../plugins/plugin-metadata.test-support.js";
+import { withPluginRuntimeGenerationScope } from "../plugins/runtime/generation-scope.js";
 import { resolveOAuthApiKeyMarker } from "./model-auth-markers.js";
 import {
   buildPreparedModelCatalogSnapshot,
@@ -25,6 +27,45 @@ const mocks = vi.hoisted(() => ({
     async () => [],
   ),
 }));
+
+const catalogWork = vi.hoisted(() => ({
+  enabled: false,
+  counts: { plannerCalls: 0, normalizerCalls: 0, normalizedRows: 0 },
+}));
+
+vi.mock("../model-catalog/index.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../model-catalog/index.js")>();
+  return {
+    ...actual,
+    planEffectiveModelCatalogRows: (
+      ...args: Parameters<typeof actual.planEffectiveModelCatalogRows>
+    ) => {
+      const result = actual.planEffectiveModelCatalogRows(...args);
+      if (catalogWork.enabled) {
+        catalogWork.counts.plannerCalls += 1;
+      }
+      return result;
+    },
+  };
+});
+
+vi.mock("@openclaw/model-catalog-core/model-catalog-normalize", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@openclaw/model-catalog-core/model-catalog-normalize")>();
+  return {
+    ...actual,
+    normalizeModelCatalogProviderRows: (
+      ...args: Parameters<typeof actual.normalizeModelCatalogProviderRows>
+    ) => {
+      const rows = actual.normalizeModelCatalogProviderRows(...args);
+      if (catalogWork.enabled) {
+        catalogWork.counts.normalizerCalls += 1;
+        catalogWork.counts.normalizedRows += rows.length;
+      }
+      return rows;
+    },
+  };
+});
 
 vi.mock("../plugins/provider-runtime.runtime.js", () => ({
   augmentModelCatalogWithProviderPlugins: (
@@ -208,6 +249,166 @@ describe("prepared model catalog builder", () => {
     expect(loadManifestModelCatalog({ config, metadataSnapshot: runtimeManifest })).toBe(
       declaredManifestModels,
     );
+  });
+
+  it("plans cold manifest rows once for prepared catalog and cached reads", async () => {
+    const config: OpenClawConfig = {
+      plugins: { enabled: false },
+      models: { catalogRefresh: { enabled: false } },
+    };
+    const runtimeManifest = finalizePluginMetadataSnapshot(
+      providerManifestSnapshot({
+        provider: "openai",
+        discovery: "runtime",
+        modelIds: ["allowed", "denied"],
+      }),
+    );
+    const params = {
+      agentDir: "/tmp/model-catalog-test",
+      authCredentials: {},
+      config,
+      metadataSnapshot: runtimeManifest,
+      modelRegistry: registry([{ provider: "openai", id: "allowed", name: "Allowed" }]),
+      readOnly: true,
+    };
+
+    await withPluginRuntimeGenerationScope({ metadataSnapshot: runtimeManifest }, async () => {
+      catalogWork.enabled = true;
+      try {
+        const snapshot = await buildPreparedModelCatalogSnapshot(params);
+        const afterBuild = { ...catalogWork.counts };
+        const firstRead = loadManifestModelCatalog({ config, metadataSnapshot: runtimeManifest });
+        const afterFirstRead = { ...catalogWork.counts };
+        const secondRead = loadManifestModelCatalog({ config, metadataSnapshot: runtimeManifest });
+        const afterSecondRead = { ...catalogWork.counts };
+
+        const allowed = ["openai/allowed"];
+        expect(snapshot.entries.map((row) => `${row.provider}/${row.id}`)).toEqual(allowed);
+        expect(snapshot.routeVariants.map((row) => `${row.provider}/${row.id}`)).toEqual(allowed);
+        expect(firstRead.map((entry) => `${entry.provider}/${entry.id}`)).toEqual([
+          "openai/allowed",
+          "openai/denied",
+        ]);
+        expect(secondRead).toBe(firstRead);
+        expect(mocks.augmentModelCatalogWithProviderPlugins).not.toHaveBeenCalled();
+        for (const [phase, counts] of Object.entries({
+          afterBuild,
+          afterFirstRead,
+          afterSecondRead,
+        })) {
+          expect(counts, phase).toEqual({
+            plannerCalls: 1,
+            normalizerCalls: 1,
+            normalizedRows: 2,
+          });
+        }
+      } finally {
+        catalogWork.enabled = false;
+        catalogWork.counts = { plannerCalls: 0, normalizerCalls: 0, normalizedRows: 0 };
+      }
+    });
+  });
+
+  it.each([false, true])(
+    "reuses cached declaration rows with a warm prepared build=%s",
+    async (prepareBuild) => {
+      const config: OpenClawConfig = {
+        plugins: { enabled: false },
+        models: { catalogRefresh: { enabled: false } },
+      };
+      const runtimeManifest = finalizePluginMetadataSnapshot(
+        providerManifestSnapshot({
+          provider: "openai",
+          discovery: "runtime",
+          modelIds: ["allowed", "denied"],
+        }),
+      );
+      const params = { config, metadataSnapshot: runtimeManifest };
+      const entries = [{ provider: "openai", id: "allowed", name: "Allowed" }];
+      const declared = loadManifestModelCatalog(params);
+
+      await withPluginRuntimeGenerationScope({ metadataSnapshot: runtimeManifest }, async () => {
+        catalogWork.enabled = true;
+        try {
+          if (prepareBuild) {
+            const snapshot = await build({ ...params, entries });
+            expect(snapshot.entries.map((entry) => entry.id)).toEqual(["allowed"]);
+            expect(snapshot.routeVariants.map((entry) => entry.id)).toEqual(["allowed"]);
+          }
+          expect(loadManifestModelCatalog(params)).toBe(declared);
+          expect(loadManifestModelCatalog(params)).toBe(declared);
+          expect(declared.map((entry) => entry.id)).toEqual(["allowed", "denied"]);
+          expect(catalogWork.counts).toEqual({
+            plannerCalls: prepareBuild ? 1 : 0,
+            normalizerCalls: prepareBuild ? 1 : 0,
+            normalizedRows: prepareBuild ? 2 : 0,
+          });
+          expect(mocks.augmentModelCatalogWithProviderPlugins).not.toHaveBeenCalled();
+        } finally {
+          catalogWork.enabled = false;
+          catalogWork.counts = { plannerCalls: 0, normalizerCalls: 0, normalizedRows: 0 };
+        }
+      });
+    },
+  );
+
+  it("keeps the old declaration cache when replacement planning fails", async () => {
+    const config: OpenClawConfig = {
+      plugins: { enabled: false },
+      models: { catalogRefresh: { enabled: false } },
+    };
+    const initial = finalizePluginMetadataSnapshot(
+      providerManifestSnapshot({
+        provider: "openai",
+        discovery: "static",
+        modelIds: ["initial"],
+      }),
+    );
+    const planningError = new Error("catalog planning failed");
+    let failPlanning = false;
+    const replacement = finalizePluginMetadataSnapshot(
+      createPluginMetadataSnapshotFixture({
+        plugins: [
+          {
+            id: "openai",
+            providers: ["openai"],
+            modelCatalog: {
+              providers: {
+                openai: {
+                  models: [
+                    {
+                      id: "replacement",
+                      get name() {
+                        if (failPlanning) {
+                          throw planningError;
+                        }
+                        return "Replacement";
+                      },
+                    },
+                  ],
+                },
+              },
+              discovery: { openai: "static" },
+            },
+          },
+        ],
+      }),
+    );
+    const originalRows = loadManifestModelCatalog({ config, metadataSnapshot: initial });
+    const params = { config, metadataSnapshot: replacement };
+    await withPluginRuntimeGenerationScope({ metadataSnapshot: replacement }, async () => {
+      failPlanning = true;
+      await expect(build(params)).rejects.toBe(planningError);
+      expect(loadManifestModelCatalog({ config, metadataSnapshot: initial })).toBe(originalRows);
+      failPlanning = false;
+      const snapshot = await build(params);
+      expect(snapshot.entries.map((entry) => entry.id)).toEqual(["replacement"]);
+      const replacementRows = loadManifestModelCatalog(params);
+      expect(replacementRows.map((entry) => entry.id)).toEqual(["replacement"]);
+      expect(replacementRows).not.toBe(originalRows);
+      expect(loadManifestModelCatalog(params)).toBe(replacementRows);
+      expect(originalRows.map((entry) => entry.id)).toEqual(["initial"]);
+    });
   });
 
   it("carries manifest capability metadata into the prepared catalog", async () => {

@@ -7,7 +7,10 @@ import {
   type ManifestModelCatalogRowSelection,
 } from "./manifest-planner.js";
 import { getRemoteModelCatalogProviderOverlay } from "./remote-overlay.js";
-export { planManifestModelCatalogSuppressions } from "./manifest-planner.js";
+export {
+  planManifestModelCatalogSuppressions,
+  selectManifestModelCatalogRows,
+} from "./manifest-planner.js";
 
 export function planEffectiveModelCatalogRows(params: {
   registry: Parameters<typeof planManifestModelCatalogRows>[0]["registry"];
