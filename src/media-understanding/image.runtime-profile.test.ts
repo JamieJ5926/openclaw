@@ -668,8 +668,9 @@ describe("describeImageWithModelCore", () => {
     );
   });
 
-  it("reuses a parent run generation without acquiring another image lease", async () => {
+  it("preserves caller config while reusing a parent run generation", async () => {
     const cfg: OpenClawConfig = { logging: { level: "info" } };
+    const preparedConfig: OpenClawConfig = { logging: { level: "warn" } };
     discoverModelsMock.mockReturnValue({
       find: vi.fn(() => ({
         provider: "google",
@@ -689,7 +690,7 @@ describe("describeImageWithModelCore", () => {
     });
     const preparedModelRuntime = {
       agentDir: "/tmp/parent-agent",
-      config: cfg,
+      config: preparedConfig,
       workspaceDir: "/tmp/parent-workspace",
       metadataSnapshot: createEmptyPluginMetadataSnapshot("/tmp/parent-workspace"),
       modelCatalog: { entries: [] },
@@ -716,7 +717,15 @@ describe("describeImageWithModelCore", () => {
     expect(acquireAgentRunPreparedModelRuntimeMock).not.toHaveBeenCalled();
     expect(releasePreparedModelRuntimeMock).not.toHaveBeenCalled();
     for (const call of resolveModelAsyncMock.mock.calls) {
+      expect(call[3]).toBe(cfg);
       expect(call[4]).toEqual(expect.objectContaining({ preparedModelRuntime }));
     }
+    expect(registerProviderStreamForModelMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cfg,
+        agentDir: "/tmp/parent-agent",
+        workspaceDir: "/tmp/parent-workspace",
+      }),
+    );
   });
 });

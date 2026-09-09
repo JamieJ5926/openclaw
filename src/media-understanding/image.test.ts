@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { attachModelProviderRequestTransport } from "../agents/provider-request-config.js";
 import { createEmptyPluginMetadataSnapshot } from "../agents/test-helpers/embedded-agent-runner-e2e-mocks.js";
 import { mintSecretSentinel } from "../secrets/sentinel.js";
+import { AsyncWorkScope } from "../shared/async-work-scope.js";
 import {
   API_KEY_FIELD,
   SET_RUNTIME_API_KEY_FIELD,
@@ -116,14 +117,19 @@ describe("describeImageWithModelCore", () => {
       mime: "image/png",
       fileName: "synthetic.png",
     };
-    const result =
-      mode === "resolved-multiple-middle"
-        ? await describeImagesWithResolvedModelCore({ ...request, images: [input, input] })
-        : await (
-            mode === "resolved-middle"
+    const owner = new AsyncWorkScope();
+    let result: Awaited<ReturnType<typeof describeImageWithModelCore>>;
+    try {
+      result = await owner.track(() =>
+        mode === "resolved-multiple-middle"
+          ? describeImagesWithResolvedModelCore({ ...request, images: [input, input] })
+          : (mode === "resolved-middle"
               ? describeImageWithResolvedModelCore
-              : describeImageWithModelCore
-          )({ ...request, ...input });
+              : describeImageWithModelCore)({ ...request, ...input }),
+      );
+    } finally {
+      await owner.drain();
+    }
     expect(result).toEqual({ text: "image identity ok", model: "middle" });
     expect(completeMock.mock.calls[0]?.[0]).toMatchObject({
       provider: "image-fixture",
@@ -177,17 +183,25 @@ describe("describeImageWithModelCore", () => {
         modelRegistry: { find: () => undefined },
         error: `Unknown model: ${provider}/MiniMax-VL-01`,
       });
-      const result = await describeImageWithModelCore({
-        cfg,
-        agentDir: "/tmp/openclaw-agent",
-        provider,
-        model: "latest",
-        buffer: Buffer.from("png-bytes"),
-        fileName: "image.png",
-        mime: "image/png",
-        prompt: "Describe the image.",
-        timeoutMs: 1000,
-      });
+      const owner = new AsyncWorkScope();
+      let result: Awaited<ReturnType<typeof describeImageWithModelCore>>;
+      try {
+        result = await owner.track(() =>
+          describeImageWithModelCore({
+            cfg,
+            agentDir: "/tmp/openclaw-agent",
+            provider,
+            model: "latest",
+            buffer: Buffer.from("png-bytes"),
+            fileName: "image.png",
+            mime: "image/png",
+            prompt: "Describe the image.",
+            timeoutMs: 1000,
+          }),
+        );
+      } finally {
+        await owner.drain();
+      }
       expect(result).toEqual({ text: "portal ok", model: "MiniMax-VL-01" });
       expect(fetchMock.mock.calls[0]?.[0]).toBe(
         provider === "MiniMax-CN"
@@ -662,19 +676,27 @@ describe("describeImageWithModelCore", () => {
       content: [{ type: "text", text: "workspace ok" }],
     });
 
-    const result = await describeImageWithModelCore({
-      cfg: {},
-      agentId: "vision-agent",
-      agentDir: "/tmp/openclaw-agent",
-      workspaceDir: "/tmp/openclaw-workspace",
-      provider: "google",
-      model: "gemini-2.5-flash",
-      buffer: Buffer.from("png-bytes"),
-      fileName: "image.png",
-      mime: "image/png",
-      prompt: "Describe the image.",
-      timeoutMs: 1000,
-    });
+    const owner = new AsyncWorkScope();
+    let result: Awaited<ReturnType<typeof describeImageWithModelCore>>;
+    try {
+      result = await owner.track(() =>
+        describeImageWithModelCore({
+          cfg: {},
+          agentId: "vision-agent",
+          agentDir: "/tmp/openclaw-agent",
+          workspaceDir: "/tmp/openclaw-workspace",
+          provider: "google",
+          model: "gemini-2.5-flash",
+          buffer: Buffer.from("png-bytes"),
+          fileName: "image.png",
+          mime: "image/png",
+          prompt: "Describe the image.",
+          timeoutMs: 1000,
+        }),
+      );
+    } finally {
+      await owner.drain();
+    }
 
     expect(result.text).toBe("workspace ok");
     expect(ensureOpenClawModelsJsonMock).not.toHaveBeenCalled();

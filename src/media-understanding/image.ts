@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { clampPositiveTimerTimeoutMs } from "@openclaw/normalization-core/number-coercion";
 import { isPromiseLike } from "@openclaw/normalization-core/promise-like";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
@@ -20,6 +21,8 @@ import {
 } from "../agents/tools/image-tool.helpers.js";
 import { complete } from "../llm/stream.js";
 import type { AssistantMessage, Context, Model, ProviderStreamOptions } from "../llm/types.js";
+import { AsyncWorkScope, getAsyncWorkSignal, trackAsyncWork } from "../shared/async-work-scope.js";
+import { createDeferredCore } from "../shared/deferred.js";
 import { resolveImageRuntime, resolveImageRuntimeForModel } from "./image-model-runtime.js";
 import type {
   ImageDescriptionRequest,
@@ -189,6 +192,7 @@ async function describeImagesWithMinimax(params: {
   allowPrivateNetwork?: boolean;
   request?: ModelProviderRequestTransportOverrides;
   signal?: AbortSignal;
+  assertResourcesOpen?: () => void;
 }): Promise<ImagesDescriptionResult> {
   const responses: string[] = [];
   // MiniMax VLM handles its own outbound fetch, so unwrap only at this final handoff.
@@ -201,6 +205,7 @@ async function describeImagesWithMinimax(params: {
     // One MiniMax request is issued per image, so cancellation must gate every
     // iteration or a dead run can continue buying calls after the first image.
     params.signal?.throwIfAborted();
+    params.assertResourcesOpen?.();
     const prompt =
       params.images.length > 1
         ? `${params.prompt}\n\nDescribe image ${index + 1} of ${params.images.length} independently.`
@@ -314,130 +319,147 @@ async function describeImagesWithModelInternal(
 ): Promise<ImagesDescriptionResult> {
   // Multi-image callers may retain their request object while setup awaits admission.
   const params = { ...request };
-  const prompt = params.prompt ?? "Describe the image.";
-  params.signal?.throwIfAborted();
-  const startedAtMs = Date.now();
-  const controller = new AbortController();
-  const requestSignal = params.signal
-    ? AbortSignal.any([params.signal, controller.signal])
-    : controller.signal;
-  const configuredTimeoutMs = resolveImageDescriptionTimeoutMs(params.timeoutMs);
-  let resolved: Awaited<ReturnType<typeof resolveImageRuntime>>;
-  const resolutionTask = options.resolveRuntime({
-    ...params,
-    signal: requestSignal,
-  });
-
-  try {
-    resolved = await withImageDescriptionTimeout({
-      controller,
-      signal: params.signal,
-      timeoutMs: configuredTimeoutMs,
-      createTimeoutError: (timeoutMs) =>
-        buildImageDescriptionTimeoutError({ phase: "setup", timeoutMs }),
-      task: resolutionTask,
-    });
-  } catch (err) {
-    // The setup timeout does not cancel catalog preparation. If it wins the race, release any
-    // generation that resolves afterward instead of abandoning its retained lease.
-    void resolutionTask.then(
-      (late) => late.release(),
-      () => undefined,
-    );
-    throw err;
-  }
-
-  try {
-    params.signal?.throwIfAborted();
-    const setupDurationMs = Date.now() - startedAtMs;
-
-    if (resolved.kind === "minimax") {
-      return await describeImagesWithMinimax({
-        ...resolved,
-        prompt,
-        timeoutMs: params.timeoutMs,
-        images: params.images,
-        signal: requestSignal,
-      });
+  const reported = createDeferredCore<ImagesDescriptionResult>();
+  const parentSignal = getAsyncWorkSignal();
+  // Admit drainage before setup; reporting a deadline does not settle provider work.
+  void trackAsyncWork(async () => {
+    const work = new AsyncWorkScope();
+    const runInScope = work.run(() => AsyncLocalStorage.snapshot());
+    const closeWork = () => runInScope(() => work.beginClose(parentSignal?.reason));
+    parentSignal?.addEventListener("abort", closeWork, { once: true });
+    if (parentSignal?.aborted) {
+      closeWork();
     }
-
-    const { model, runtimeValue: apiKey } = resolved;
-    // Prepared auth may carry sentinel-protected request headers. Resolve them only at this
-    // final direct-completion boundary so provider SDKs never receive sentinel placeholders.
-    const requestModel = unwrapModelHeaderSentinelsForProviderEgress(
-      model,
-      "image description provider request",
-    );
-    const providerStreamFn = registerProviderStreamForModel({
-      model: requestModel,
-      cfg: resolved.cfg,
-      agentDir: resolved.agentDir,
-      wrapProviderStream: true,
-      capability: "image",
-      ...(resolved.workspaceDir ? { workspaceDir: resolved.workspaceDir } : {}),
-    });
-
-    const context = buildImageContext(prompt, params.images, {
-      promptInUserContent: shouldPlaceImagePromptInUserContent(model),
-    });
-
-    const maxTokens = resolveImageToolMaxTokens(model.maxTokens, params.maxTokens);
-    const completeImage = async (onPayload?: ProviderStreamOptions["onPayload"]) => {
-      params.signal?.throwIfAborted();
-      const payloadHandler = composeImageDescriptionPayloadHandlers(onPayload, options.onPayload);
-      const timeoutMs = configuredTimeoutMs;
-      const headers = buildImageRequestHeaders(requestModel);
-      const streamOptions = {
-        apiKey,
-        maxTokens,
-        signal: requestSignal,
-        ...(timeoutMs !== undefined ? { timeoutMs } : {}),
-        ...(headers ? { headers } : {}),
-        ...(payloadHandler ? { onPayload: payloadHandler } : {}),
-      };
-      const task: Promise<AssistantMessage> = providerStreamFn
-        ? (async () =>
-            await (await providerStreamFn(requestModel, context, streamOptions)).result())()
-        : complete(requestModel, context, streamOptions);
-      return await withImageDescriptionTimeout({
-        controller,
-        signal: params.signal,
-        timeoutMs,
-        createTimeoutError: (requestTimeoutMs) =>
-          buildImageDescriptionTimeoutError({
-            phase: "request",
-            timeoutMs: requestTimeoutMs,
-            setupDurationMs,
-          }),
-        task,
-      });
-    };
-
-    const message = await completeImage();
+    let releaseRuntime: (() => void) | undefined;
+    let assertResourcesOpen: (() => void) | undefined;
     try {
-      const text = coerceImageAssistantText({
-        message,
-        provider: model.provider,
-        model: model.id,
-      });
-      return { text, model: model.id };
-    } catch (err) {
-      if (!isImageModelNoTextError(err) || !hasImageReasoningOnlyResponse(message)) {
-        throw err;
-      }
-    }
+      reported.resolve(
+        await work.track(async () => {
+          const prompt = params.prompt ?? "Describe the image.";
+          params.signal?.throwIfAborted();
+          const startedAtMs = Date.now();
+          const controller = new AbortController();
+          const requestSignal = params.signal
+            ? AbortSignal.any([params.signal, controller.signal])
+            : controller.signal;
+          const configuredTimeoutMs = resolveImageDescriptionTimeoutMs(params.timeoutMs);
+          const resolutionTask = work.track(() =>
+            options.resolveRuntime({ ...params, signal: requestSignal }, (resources) => {
+              releaseRuntime = resources.release;
+              assertResourcesOpen = resources.assertResourcesOpen;
+            }),
+          );
+          const resolved = await withImageDescriptionTimeout({
+            controller,
+            signal: params.signal,
+            timeoutMs: configuredTimeoutMs,
+            createTimeoutError: (timeoutMs) =>
+              buildImageDescriptionTimeoutError({ phase: "setup", timeoutMs }),
+            task: resolutionTask,
+          });
+          params.signal?.throwIfAborted();
+          assertResourcesOpen?.();
+          const setupDurationMs = Date.now() - startedAtMs;
 
-    params.signal?.throwIfAborted();
-    const retryMessage = await completeImage(disableReasoningForImageRetryPayload);
-    const text = coerceImageAssistantText({
-      message: retryMessage,
-      provider: model.provider,
-      model: model.id,
-    });
-    return { text, model: model.id };
-  } finally {
-    resolved.release();
-  }
+          if (resolved.kind === "minimax") {
+            return await describeImagesWithMinimax({
+              ...resolved,
+              assertResourcesOpen,
+              prompt,
+              timeoutMs: params.timeoutMs,
+              images: params.images,
+              signal: requestSignal,
+            });
+          }
+
+          const { model, runtimeValue: apiKey } = resolved;
+          // Prepared auth may carry sentinel-protected request headers. Resolve them only at this
+          // final direct-completion boundary so provider SDKs never receive sentinel placeholders.
+          const requestModel = unwrapModelHeaderSentinelsForProviderEgress(
+            model,
+            "image description provider request",
+          );
+          const providerStreamFn = registerProviderStreamForModel({
+            model: requestModel,
+            cfg: resolved.cfg,
+            agentDir: resolved.agentDir,
+            wrapProviderStream: true,
+            capability: "image",
+            ...(resolved.workspaceDir ? { workspaceDir: resolved.workspaceDir } : {}),
+          });
+          const context = buildImageContext(prompt, params.images, {
+            promptInUserContent: shouldPlaceImagePromptInUserContent(model),
+          });
+          const maxTokens = resolveImageToolMaxTokens(model.maxTokens, params.maxTokens);
+          const completeImage = async (onPayload?: ProviderStreamOptions["onPayload"]) => {
+            params.signal?.throwIfAborted();
+            assertResourcesOpen?.();
+            const payloadHandler = composeImageDescriptionPayloadHandlers(
+              onPayload,
+              options.onPayload,
+            );
+            const timeoutMs = configuredTimeoutMs;
+            const headers = buildImageRequestHeaders(requestModel);
+            const streamOptions = {
+              apiKey,
+              maxTokens,
+              signal: requestSignal,
+              ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+              ...(headers ? { headers } : {}),
+              ...(payloadHandler ? { onPayload: payloadHandler } : {}),
+            };
+            const task: Promise<AssistantMessage> = work.track(() =>
+              providerStreamFn
+                ? (async () =>
+                    await (await providerStreamFn(requestModel, context, streamOptions)).result())()
+                : complete(requestModel, context, streamOptions),
+            );
+            return await withImageDescriptionTimeout({
+              controller,
+              signal: params.signal,
+              timeoutMs,
+              createTimeoutError: (requestTimeoutMs) =>
+                buildImageDescriptionTimeoutError({
+                  phase: "request",
+                  timeoutMs: requestTimeoutMs,
+                  setupDurationMs,
+                }),
+              task,
+            });
+          };
+          const message = await completeImage();
+          try {
+            const text = coerceImageAssistantText({
+              message,
+              provider: model.provider,
+              model: model.id,
+            });
+            return { text, model: model.id };
+          } catch (err) {
+            if (!isImageModelNoTextError(err) || !hasImageReasoningOnlyResponse(message)) {
+              throw err;
+            }
+          }
+          params.signal?.throwIfAborted();
+          const retryMessage = await completeImage(disableReasoningForImageRetryPayload);
+          const text = coerceImageAssistantText({
+            message: retryMessage,
+            provider: model.provider,
+            model: model.id,
+          });
+          return { text, model: model.id };
+        }),
+      );
+    } catch (error) {
+      reported.reject(error);
+    } finally {
+      await work.runWhenIdle(() => undefined);
+      await runInScope(() => work.drain());
+      parentSignal?.removeEventListener("abort", closeWork);
+      releaseRuntime?.();
+    }
+  }).catch((error: unknown) => reported.reject(error));
+  return await reported.promise;
 }
 
 function toImagesDescriptionRequest(params: ImageDescriptionRequest): ImagesDescriptionRequest {
