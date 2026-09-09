@@ -1,6 +1,6 @@
 {
   "id": "codex",
-  "categories": ["developer-tools", "agent-orchestration", "web"],
+  "categories": ["developer-tools"],
   "backupResources": [
     {
       "disposition": "regenerable",
