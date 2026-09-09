@@ -229,46 +229,6 @@ export function normalizeFeaturedAt(value: unknown): number | undefined {
   return asSafeIntegerInRange(value, { min: 0 });
 }
 
-/** Coarse manifest-derived grouping so catalog UIs can shelve a large inventory. */
-export function derivePluginCategory(
-  manifest: PluginManifestRecord | undefined,
-): string | undefined {
-  if (!manifest) {
-    return undefined;
-  }
-  if (manifest.channels.length > 0 || Object.keys(manifest.channelConfigs ?? {}).length > 0) {
-    return "channel";
-  }
-  const mediaProvider =
-    Object.keys(manifest.imageGenerationProviderMetadata ?? {}).length > 0 ||
-    Object.keys(manifest.videoGenerationProviderMetadata ?? {}).length > 0 ||
-    Object.keys(manifest.musicGenerationProviderMetadata ?? {}).length > 0 ||
-    Object.keys(manifest.mediaUnderstandingProviderMetadata ?? {}).length > 0;
-  if (
-    manifest.providers.length > 0 ||
-    manifest.providerEndpoints?.length ||
-    manifest.modelCatalog ||
-    mediaProvider
-  ) {
-    return "provider";
-  }
-  const kinds = normalizeKinds(manifest.kind);
-  if (kinds?.includes("memory")) {
-    return "memory";
-  }
-  if (kinds?.includes("context-engine")) {
-    return "context-engine";
-  }
-  if (
-    manifest.contracts?.tools?.length ||
-    Object.keys(manifest.toolMetadata ?? {}).length > 0 ||
-    manifest.skills.length > 0
-  ) {
-    return "tool";
-  }
-  return undefined;
-}
-
 export function firstPluginError(
   diagnostics: readonly PluginDiagnostic[],
   pluginId: string,
