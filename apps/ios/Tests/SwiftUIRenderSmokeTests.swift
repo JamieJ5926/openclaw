@@ -8,7 +8,7 @@ import UIKit
 
 struct SwiftUIRenderSmokeTests {
     @MainActor @Observable
-    private final class NativeChatPresentation {
+    fileprivate final class NativeChatPresentation {
         var binding: IOSNativeActionBinding?
     }
 
