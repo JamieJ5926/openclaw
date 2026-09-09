@@ -86,6 +86,8 @@ final class AppState {
     private var conflictedGatewayConfigFields: Set<GatewayConfigField> = []
     private var suppressVoiceWakeGlobalSync = false
     @ObservationIgnored private var voiceWakeEnableGeneration: UInt64 = 0
+    @ObservationIgnored private var talkEnableGeneration: UInt64 = 0
+    @ObservationIgnored private var talkTransitionTask: Task<Void, Never>?
     @ObservationIgnored private var locationModeGeneration: UInt64 = 0
     @ObservationIgnored private let voiceWakeGlobalSyncScheduler = VoiceWakeGlobalSyncScheduler()
     @ObservationIgnored private var activeComputerPresenceTask: Task<Void, Never>?
@@ -224,7 +226,7 @@ final class AppState {
         didSet {
             self.ifNotPreview {
                 AppDefaults.standard.set(self.talkEnabled, forKey: talkEnabledKey)
-                Task { await TalkModeController.shared.setEnabled(self.talkEnabled) }
+                self.applyTalkEnabled()
             }
         }
     }
@@ -600,7 +602,7 @@ final class AppState {
 
         if !self.isPreview {
             Task { await VoiceWakeRuntime.shared.refresh(state: self) }
-            Task { await TalkModeController.shared.setEnabled(self.talkEnabled) }
+            self.applyTalkEnabled()
         }
 
         if !self.isPreview {
@@ -1091,23 +1093,31 @@ extension AppState {
         AppDefaults.standard.set(mode.rawValue, forKey: locationModeKey)
     }
 
+    private func applyTalkEnabled() {
+        let enabled = self.talkEnabled
+        self.talkTransitionTask = Task { await TalkModeController.shared.setEnabled(enabled) }
+    }
+
     func setTalkEnabled(_ enabled: Bool) async {
+        self.talkEnableGeneration &+= 1
+        let generation = self.talkEnableGeneration
         self.talkEnabled = enabled && voiceWakeSupported
         guard !self.isPreview else { return }
-
-        if !self.talkEnabled {
-            await GatewayConnection.shared.talkMode(enabled: false, phase: "disabled")
-            return
+        var transition = self.talkTransitionTask
+        var phase = self.talkEnabled ? "enabled" : "disabled"
+        if self.talkEnabled, !PermissionManager.voiceWakePermissionsGranted() {
+            let granted = await PermissionManager.ensureVoiceWakePermissions(interactive: true)
+            if generation == self.talkEnableGeneration {
+                self.talkEnabled = granted
+                transition = self.talkTransitionTask
+                phase = granted ? "enabled" : "denied"
+            }
         }
-
-        if PermissionManager.voiceWakePermissionsGranted() {
-            await GatewayConnection.shared.talkMode(enabled: true, phase: "enabled")
-            return
-        }
-
-        let granted = await PermissionManager.ensureVoiceWakePermissions(interactive: true)
-        self.talkEnabled = granted
-        await GatewayConnection.shared.talkMode(enabled: granted, phase: granted ? "enabled" : "denied")
+        // Even a replaced wake handoff waits for its Talk pause acknowledgement.
+        // Only the latest request may project completion or restore permission-gated intent.
+        await transition?.value
+        guard generation == self.talkEnableGeneration else { return }
+        await GatewayConnection.shared.talkMode(enabled: self.talkEnabled, phase: phase)
     }
 
     // MARK: - Global wake words sync (Gateway-owned)

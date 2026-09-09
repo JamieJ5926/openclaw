@@ -65,6 +65,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     }
 
     func stop() {
+        VoicePushToTalkHotkey.shared.setEnabled(false)
         self.observationGeneration &+= 1
         self.refreshTask?.cancel()
         self.refreshTask = nil

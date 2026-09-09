@@ -15,6 +15,10 @@ final class TalkModeController {
     private(set) var level: Double = 0
     private(set) var partialTranscript: String = ""
     private(set) var recentTranscripts: [String] = []
+    @ObservationIgnored private var transitionID = UUID()
+    @ObservationIgnored private var wakePauseLease: UUID?
+    @ObservationIgnored private var wakePauseTask: Task<Void, Never>?
+    @ObservationIgnored private var shutdownTask: Task<Void, Never>?
 
     /// Meters streamed PCM speech so the orb waveform follows the audible
     /// envelope instead of a synthetic pulse.
@@ -23,25 +27,52 @@ final class TalkModeController {
     }
 
     func setEnabled(_ enabled: Bool) async {
+        let transitionID = UUID()
+        self.transitionID = transitionID
+        // Preference updates must not reopen PTT during Talk admission or audio teardown.
+        VoicePushToTalkHotkey.shared.setTalkSuppressed(true)
         self.logger.info("talk enabled=\(enabled)")
         if enabled {
             self.partialTranscript = ""
             self.recentTranscripts = []
             TalkOverlayController.shared.present()
-            await VoiceWakeRuntime.shared.pauseForPushToTalk()
         } else {
             TalkOverlayController.shared.dismiss()
         }
         TalkSpeechInterruptMonitor.shared.setEnabled(enabled && AppStateStore.shared.talkShiftToStopEnabled)
-        // Talk Mode and Push-to-Talk share the right Option key — disable PTT while Talk Mode is active.
-        let pttEnabled = !enabled && AppStateStore.shared.voicePushToTalkEnabled
-        VoicePushToTalkHotkey.shared.setEnabled(pttEnabled)
-        await TalkModeRuntime.shared.setEnabled(enabled)
-        // Resume voice wake listener *after* TalkMode audio is fully torn down.
-        // Check swabbleEnabled (not voiceWakeTriggersTalkMode) so the paused wake listener
-        // resumes even if the user toggled "Trigger Talk Mode" off during the session.
-        if !enabled, AppStateStore.shared.swabbleEnabled {
-            Task { await VoiceWakeRuntime.shared.refresh(state: AppStateStore.shared) }
+        if !enabled {
+            let previousShutdown = self.shutdownTask
+            self.shutdownTask = Task {
+                // Disable invalidates a suspended startup immediately. A repeated disable still
+                // joins the original shutdown before PTT or another Talk start can acquire audio.
+                await TalkModeRuntime.shared.setEnabled(false)
+                await previousShutdown?.value
+            }
+        }
+        let shutdown = self.shutdownTask
+        if enabled, self.wakePauseLease == nil {
+            let lease = UUID()
+            self.wakePauseLease = lease
+            self.wakePauseTask = Task { await VoiceWakeRuntime.shared.pauseForPushToTalk(lease: lease) }
+        }
+        // Overlapping transitions share the acquisition until the latest Off has shut down.
+        // A replaced caller may release its wake handoff only after this insertion is acknowledged.
+        await self.wakePauseTask?.value
+        guard self.transitionID == transitionID else { return }
+        await shutdown?.value
+        if enabled, self.transitionID == transitionID {
+            await TalkModeRuntime.shared.setEnabled(true)
+        }
+
+        guard self.transitionID == transitionID else { return }
+        self.shutdownTask = nil
+        guard !enabled else { return }
+        let lease = self.wakePauseLease
+        self.wakePauseLease = nil
+        self.wakePauseTask = nil
+        VoicePushToTalkHotkey.shared.setTalkSuppressed(false)
+        if let lease {
+            await VoiceWakeRuntime.shared.resumeAfterPushToTalk(lease: lease)
         }
     }
 

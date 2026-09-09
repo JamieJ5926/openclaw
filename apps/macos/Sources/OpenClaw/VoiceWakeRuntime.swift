@@ -58,6 +58,8 @@ actor VoiceWakeRuntime {
     private var preDetectTask: Task<Void, Never>?
     private var isStarting: Bool = false
     private var triggerOnlyTask: Task<Void, Never>?
+    private var pauseLeases: Set<UUID> = []
+    private var refreshGeneration: UInt64 = 0
 
     /// Tunables
     /// Silence threshold once we've captured user speech (post-trigger).
@@ -105,6 +107,8 @@ actor VoiceWakeRuntime {
     }
 
     func refresh(state: AppState) async {
+        self.refreshGeneration &+= 1
+        let generation = self.refreshGeneration
         let snapshot = await MainActor.run { () -> (Bool, RuntimeConfig) in
             let enabled = state.swabbleEnabled
             let config = RuntimeConfig(
@@ -116,6 +120,7 @@ actor VoiceWakeRuntime {
                 triggersTalkMode: state.voiceWakeTriggersTalkMode)
             return (enabled, config)
         }
+        guard generation == self.refreshGeneration, self.pauseLeases.isEmpty else { return }
 
         guard voiceWakeSupported, snapshot.0 else {
             self.stop()
@@ -146,11 +151,12 @@ actor VoiceWakeRuntime {
         }
 
         self.stop()
-        await self.start(with: config)
+        self.start(with: config)
     }
 
-    private func start(with config: RuntimeConfig) async {
-        if self.isStarting { return }
+    private func start(with config: RuntimeConfig) {
+        // Scheduled restarts also enter here, without passing through refresh.
+        guard self.pauseLeases.isEmpty, !self.isStarting else { return }
         self.isStarting = true
         defer { self.isStarting = false }
         do {
@@ -563,11 +569,13 @@ actor VoiceWakeRuntime {
         if config.triggersTalkMode {
             self.logger.info("voicewake trigger -> activating Talk Mode (skipping capture)")
             DiagnosticsFileLog.shared.log(category: "voicewake.runtime", event: "triggerTalkMode")
+            let lease = UUID()
+            self.pauseForPushToTalk(lease: lease)
             if config.triggerChime != .none {
                 await MainActor.run { VoiceWakeChimePlayer.play(config.triggerChime, reason: "voicewake.trigger") }
             }
-            self.pauseForPushToTalk()
             await AppStateStore.shared.setTalkEnabled(true)
+            await self.resumeAfterPushToTalk(lease: lease)
             return
         }
         self.isCapturing = true
@@ -725,12 +733,13 @@ actor VoiceWakeRuntime {
         let current = self.currentConfig
         self.stop(dismissOverlay: false, cancelScheduledRestart: false)
         if let current {
-            Task { await self.start(with: current) }
+            self.start(with: current)
         }
     }
 
-    private func restartRecognizerIfIdleAndOverlayHidden() async {
-        if self.isCapturing { return }
+    private func restartRecognizerIfIdleAndOverlayHidden() {
+        guard !Task.isCancelled, self.pauseLeases.isEmpty, !self.isCapturing else { return }
+        self.scheduledRestartTask = nil
         self.restartRecognizer()
     }
 
@@ -740,21 +749,22 @@ actor VoiceWakeRuntime {
             let nanos = UInt64(max(0, delay) * 1_000_000_000)
             guard await VoiceWakeRuntimeTaskSupport.wait(nanoseconds: nanos) else { return }
             guard let self else { return }
-            await self.consumeScheduledRestart()
             await self.restartRecognizerIfIdleAndOverlayHidden()
         }
     }
 
-    private func consumeScheduledRestart() {
-        self.scheduledRestartTask = nil
-    }
-
-    func applyPushToTalkCooldown() {
-        self.cooldownUntil = Date().addingTimeInterval(self.debounceAfterSend)
-    }
-
-    func pauseForPushToTalk() {
+    func pauseForPushToTalk(lease: UUID) {
+        guard self.pauseLeases.insert(lease).inserted else { return }
+        self.refreshGeneration &+= 1
         self.stop(dismissOverlay: false)
+    }
+
+    func resumeAfterPushToTalk(lease: UUID) async {
+        guard self.pauseLeases.remove(lease) != nil else { return }
+        self.refreshGeneration &+= 1
+        guard self.pauseLeases.isEmpty else { return }
+        self.cooldownUntil = Date().addingTimeInterval(self.debounceAfterSend)
+        await self.refresh(state: AppStateStore.shared)
     }
 
     private func updateHeardBeyondTrigger(withTrimmed trimmed: String) {
