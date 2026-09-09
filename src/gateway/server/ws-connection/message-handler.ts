@@ -53,10 +53,7 @@ import type {
   GatewayConnectPhaseContext,
   GatewayWsMessageHandlerParams,
 } from "./message-handler-types.js";
-export type {
-  GatewayWsMessageHandlerParams,
-  WsOriginCheckMetrics,
-} from "./message-handler-types.js";
+export type { GatewayWsMessageHandlerParams } from "./message-handler-types.js";
 
 const GATEWAY_WORK_ADMISSION_RETRY_AFTER_MS = 1_000;
 const GATEWAY_WORK_ADMISSION_CLOSE_CODE = 1013;

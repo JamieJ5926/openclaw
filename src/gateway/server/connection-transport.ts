@@ -1,5 +1,5 @@
 import type { Result } from "@openclaw/normalization-core/result";
-import type { GatewayRole } from "../role-policy.js";
+import type { GatewayRole } from "../role-policy.types.js";
 
 export type GatewayConnectionFrame = Buffer | ArrayBuffer | Buffer[];
 
