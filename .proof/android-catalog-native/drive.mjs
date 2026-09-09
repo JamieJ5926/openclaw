@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import {readFixtureEndpoint} from './fixture-endpoint.mjs';
 import {execFileSync} from 'node:child_process';
 import {nodes, point, applicationNodes, createStartupRecovery} from './startup-surface.mjs';
 const out=process.env.EVIDENCE+'/public';
@@ -36,6 +37,7 @@ async function expect(label){
 async function tap(label,xml){
   if(!xml)await expect(label);
   xml=capture('before-app-tap');
+  if(label==='Test connection')record('fixture-endpoint-readback',{capture:lastCapture,...readFixtureEndpoint(xml)});
   const matches=nodes(xml).filter(n=>(n.text===label||n['content-desc']===label)&&n.enabled==='true');
   const unique=new Map(matches.map(n=>[n.bounds,n]));if(unique.size!==1)throw Error('Ambiguous or disabled control: '+label);
   const xy=point([...unique.values()][0]);record('tap',{label,xy});adb('shell','input','tap',...xy);await wait(300);
@@ -82,7 +84,7 @@ async function startupWelcome(){
 try{
   await tap('Continue',await startupWelcome());
   await tap('Set up manually');
-  await expect('Manual setup');typeField(0,'ws://127.0.0.1');typeField(2,'fixture-android-catalog');
+  await expect('Manual setup');typeField(0,'127.0.0.1');typeField(2,'fixture-android-catalog');
   await tap('Test connection');
   await tap('Continue',await expect('Gateway paired'));
   await tap('Continue',await expect('Only enable access you are comfortable letting OpenClaw use while this phone is connected. You can change these later in Android Settings.'));
