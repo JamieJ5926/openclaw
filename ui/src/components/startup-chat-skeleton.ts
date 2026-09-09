@@ -1,5 +1,6 @@
 import { html, nothing } from "lit";
 import { property } from "lit/decorators.js";
+import { styleMap } from "lit/directives/style-map.js";
 import { classifySessionKind } from "../../../src/sessions/classify-session-kind.js";
 import type { UiSettings } from "../app/settings.ts";
 import { t } from "../i18n/index.ts";
@@ -44,13 +45,12 @@ export function renderChatTranscriptSkeleton() {
 }
 
 function renderPane(
-  sessionKey: string,
+  direct: boolean,
   assistantName: string,
   layout: SidebarLayout,
   width: number,
+  chatMessageMaxWidth: string | undefined,
 ) {
-  const kind = classifySessionKind(sessionKey);
-  const direct = kind === "direct" || kind === "cron" || kind === "spawn-child";
   const header = html`<div class="chat-pane__header" aria-hidden="true" inert>
     <div class="chat-pane__crumbs">
       <span class="chat-pane__workspace-chip">
@@ -64,7 +64,17 @@ function renderPane(
     </div>
   </div>`;
   const primary = html`<div class="chat-pane-primary-column">
-    <div class="chat">
+    <div
+      class="chat"
+      style=${styleMap(
+        chatMessageMaxWidth
+          ? {
+              "--chat-thread-max-width": chatMessageMaxWidth,
+              "--chat-message-max-width": "100%",
+            }
+          : {},
+      )}
+    >
       <div class="chat-main__conversation">
         <div class="chat-thread ${direct ? "chat-thread--direct" : ""}">
           <div class="chat-thread-inner">${renderChatTranscriptSkeleton()}</div>
@@ -81,6 +91,8 @@ function renderPane(
 class StartupChatPane extends OpenClawLightDomElement {
   @property() sessionKey = "";
   @property() assistantName = "";
+  @property() chatMessageMaxWidth?: string;
+  private initialSessionKind?: ReturnType<typeof classifySessionKind>;
   @property({ attribute: false }) sidebarLayout: SidebarLayout = { columns: [] };
   private readonly resizeObserver = new ResizeObserver(() => this.requestUpdate());
   override connectedCallback() {
@@ -94,11 +106,14 @@ class StartupChatPane extends OpenClawLightDomElement {
   }
   override render() {
     const width = this.getBoundingClientRect().width;
+    // Alias hydration must not change the already-painted placeholder's avatar column.
+    const kind = (this.initialSessionKind ??= classifySessionKind(this.sessionKey));
     return renderPane(
-      this.sessionKey,
+      kind === "direct" || kind === "cron" || kind === "spawn-child",
       this.assistantName,
       fitSidebarLayout(this.sidebarLayout, width) ?? this.sidebarLayout,
       width,
+      this.chatMessageMaxWidth,
     );
   }
 }
@@ -109,7 +124,7 @@ if (!customElements.get("openclaw-startup-chat-pane")) {
 export function renderStartupChatSkeleton(
   sessionKey: string,
   assistantName: string,
-  settings: Pick<UiSettings, "chatSplitLayout" | "sidebarSessionLayouts">,
+  settings: Pick<UiSettings, "chatSplitLayout" | "sidebarSessionLayouts" | "chatMessageMaxWidth">,
 ) {
   const layout = settings.chatSplitLayout ?? {
     columns: [{ id: "startup", panes: [{ id: "startup", sessionKey }], paneWeights: [1] }],
@@ -134,6 +149,7 @@ export function renderStartupChatSkeleton(
                     <openclaw-startup-chat-pane
                       .sessionKey=${key}
                       .assistantName=${assistantName}
+                      .chatMessageMaxWidth=${settings.chatMessageMaxWidth}
                       .sidebarLayout=${normalizeSidebarLayout(settings.sidebarSessionLayouts?.[key])}
                     ></openclaw-startup-chat-pane>
                   </div>

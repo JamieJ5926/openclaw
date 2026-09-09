@@ -257,7 +257,10 @@ describeControlUiE2e("Control UI initial connection skeleton E2E", () => {
       expect(loginModuleRequests).toEqual([]);
       const connectedContent = embedded
         ? [page.locator(".native-embed-header .page-title")]
-        : [page.locator(".sidebar-brand"), page.locator(".agent-chat__composer-combobox textarea")];
+        : [
+            page.locator("openclaw-app-sidebar .sidebar-brand"),
+            page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea"),
+          ];
       await Promise.all(connectedContent.map((content) => content.waitFor()));
       await captureProof(page, "02-connected-content", page.locator(".shell"), connectedContent);
     },
@@ -303,11 +306,11 @@ describeControlUiE2e("Control UI initial connection skeleton E2E", () => {
 
       releaseChatModule();
       await waitForControlUiRoute(page, { routeId: "chat" });
-      await loadingState.waitFor({ state: "detached" });
+      await loadingState.waitFor({ state: "hidden" });
       await page.locator("openclaw-chat-page").waitFor();
       await captureProof(page, "04-loaded-chat-content", page.locator(".shell"), [
-        page.locator(".sidebar-brand"),
-        page.locator(".agent-chat__composer-combobox textarea"),
+        page.locator("openclaw-app-sidebar .sidebar-brand"),
+        page.locator("openclaw-chat-pane .agent-chat__composer-combobox textarea"),
       ]);
     } finally {
       releaseChatModule();

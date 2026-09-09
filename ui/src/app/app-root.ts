@@ -136,7 +136,10 @@ export class OpenClawApp extends OpenClawLightDomElement {
     this.resetLoginSensitivePresentation();
     this.runtime = bootstrapApplication();
     if (!this.runtime.warmBoot && !this.runtime.documentMode && !this.runtime.focusLocation) {
-      this.startupPresentation.start();
+      this.startupPresentation.start(
+        this.runtime.context.config.current.assistantIdentity.name,
+        this.runtime.context.navigation.snapshot.sidebarEntries,
+      );
     } else {
       this.startupPresentation.finish();
     }

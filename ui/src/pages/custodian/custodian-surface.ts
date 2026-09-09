@@ -55,6 +55,7 @@ class CustodianSurface extends OpenClawLightDomElement {
   @property({ attribute: false }) compact = false;
   @property({ attribute: false }) historyContent: TemplateResult | typeof nothing = nothing;
 
+  private initialPresentationManaged = false;
   private lastMessageId: number | null = null;
 
   constructor() {
@@ -83,6 +84,7 @@ class CustodianSurface extends OpenClawLightDomElement {
   }
 
   override willUpdate(): void {
+    this.initialPresentationManaged ||= this.startup.stage !== "ready";
     this.store.connect(this.context, sessionVariant(this.onboarding, this.newAgentIntent));
   }
 
@@ -93,13 +95,20 @@ class CustodianSurface extends OpenClawLightDomElement {
         (question, admission, display) => void store.send(question, display, false, admission),
       );
     }
-    const transcript = this.querySelector<HTMLElement>(".custodian__messages");
+    const transcript = this.querySelector<HTMLElement>(
+      ".custodian__messages:not(.custodian__startup)",
+    );
     const messageId = this.store.messages.at(-1)?.id ?? null;
     if (messageId !== this.lastMessageId) {
       this.lastMessageId = messageId;
-      const lastMessage = transcript?.lastElementChild;
-      if (lastMessage instanceof HTMLElement) {
-        lastMessage.scrollIntoView?.({ block: "nearest" });
+      if (transcript && this.startup.stage !== "ready") {
+        // Hidden messages cannot scrollIntoView; position the live scroller before reveal.
+        transcript.scrollTop = transcript.scrollHeight;
+      } else {
+        const lastMessage = transcript?.lastElementChild;
+        if (lastMessage instanceof HTMLElement) {
+          lastMessage.scrollIntoView?.({ block: "nearest" });
+        }
       }
     }
     if (this.startup.stage !== "ready") {
@@ -162,6 +171,7 @@ class CustodianSurface extends OpenClawLightDomElement {
           emptyError ? "custodian-surface--empty-error" : ""
         }"
       >
+        ${this.initialPresentationManaged ? html`<div class="custodian__messages custodian__startup" aria-hidden="true" inert>${renderChatTranscriptSkeleton()}</div>` : nothing}
         <div
           class="custodian__messages"
           ${markdownBlocks()}
@@ -171,7 +181,6 @@ class CustodianSurface extends OpenClawLightDomElement {
             handleMarkdownTableInteraction(event);
           }}
         >
-          ${this.startup.stage !== "ready" && store.messages.length === 0 ? renderChatTranscriptSkeleton() : nothing}
           ${alertCard}
           ${
             this.channelOnboardingError

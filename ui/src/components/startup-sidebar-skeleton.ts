@@ -1,9 +1,9 @@
 import { html } from "lit";
+import type { StartupPresentation } from "../app/startup-presentation.ts";
 
-export function renderStartupSidebarSkeleton(
-  sidebarEntries: readonly string[],
-  assistantName: string,
-) {
+export function renderStartupSidebarSkeleton(presentation: StartupPresentation | undefined) {
+  const sidebarEntries = presentation?.initialSidebarEntries ?? [];
+  const assistantName = presentation?.initialAssistantName ?? "";
   return html`
     <aside class="sidebar startup-sidebar-skeleton" aria-hidden="true" inert>
       <div class="sidebar-shell">
@@ -48,22 +48,36 @@ export function renderStartupSidebarSkeleton(
                 <span class="sidebar-recent-sessions__label-text skeleton">${"\u00a0"}</span>
               </div>
               <div class="sidebar-recent-sessions">
-                <div class="sidebar-recent-sessions__group">
-                  ${[0, 1, 2].map(
-                    () => html`
-                      <div class="sidebar-recent-session sidebar-recent-session--single-line">
-                        <div class="sidebar-recent-session__link">
-                          <span class="nav-item__icon skeleton"></span>
-                          <span class="sidebar-recent-session__text">
-                            <span class="sidebar-recent-session__title-row">
-                              <span class="sidebar-recent-session__name skeleton">${"\u00a0"}</span>
-                            </span>
-                          </span>
-                        </div>
+                ${[0, 1, 2].map(
+                  () => html`
+                    <div class="sidebar-recent-sessions__group">
+                      <div class="sidebar-recent-sessions__head">
+                        <span class="sidebar-session-group-toggle__lead skeleton"></span>
+                        <span class="sidebar-recent-sessions__label-text skeleton"
+                          >${"\u00a0"}</span
+                        >
                       </div>
-                    `,
-                  )}
-                </div>
+                      <div class="sidebar-recent-sessions__list">
+                        ${[0, 1, 2, 3].map(
+                          () => html`
+                            <div class="sidebar-recent-session sidebar-recent-session--single-line">
+                              <div class="sidebar-recent-session__link">
+                                <span class="nav-item__icon skeleton"></span>
+                                <span class="sidebar-recent-session__text">
+                                  <span class="sidebar-recent-session__title-row">
+                                    <span class="sidebar-recent-session__name skeleton"
+                                      >${"\u00a0"}</span
+                                    >
+                                  </span>
+                                </span>
+                              </div>
+                            </div>
+                          `,
+                        )}
+                      </div>
+                    </div>
+                  `,
+                )}
               </div>
             </section>
           </div>

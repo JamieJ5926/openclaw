@@ -123,14 +123,6 @@
   flex: 1 1 auto;
 }
 
-/* House separator treatment: an aria-hidden glyph tinted with --muted, spacing
-   from the row gap, no size or color of its own beyond matching the title. */
-.chat-pane__crumb-sep {
-  flex: 0 0 auto;
-  color: var(--muted);
-  font-size: 12px;
-}
-
 /* The title hugs its text so the segments after it stay adjacent (the trail's
    shared 8px gap provides the spacing); it may shrink with ellipsis
    when space runs out, and the action row pushes itself to the right edge. */

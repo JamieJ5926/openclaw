@@ -18,6 +18,7 @@ const suite = createControlUiE2eSuite({
 
 type PaintTrace = {
   reveals: number;
+  placeholderChanges: Array<{ at: number; region: string; before: string; after: string }>;
   seen: string[];
   lost: string[];
   skeleton: boolean;
@@ -48,6 +49,7 @@ async function traceStartupPaints(page: Page) {
   await page.addInitScript((text) => {
     const trace: PaintTrace = {
       reveals: 0,
+      placeholderChanges: [],
       seen: [],
       lost: [],
       skeleton: false,
@@ -126,7 +128,11 @@ async function traceStartupPaints(page: Page) {
       }
     }).observe({ type: "layout-shift", buffered: true });
     const onScreen = (element: Element | null): element is HTMLElement => {
-      if (!(element instanceof HTMLElement) || element.getBoundingClientRect().height === 0) {
+      if (!(element instanceof HTMLElement)) {
+        return false;
+      }
+      const bounds = element.getBoundingClientRect();
+      if (!bounds.width || !bounds.height || bounds.bottom <= 0 || bounds.top >= innerHeight) {
         return false;
       }
       for (let ancestor: Element | null = element; ancestor; ancestor = ancestor.parentElement) {
@@ -138,7 +144,88 @@ async function traceStartupPaints(page: Page) {
       return true;
     };
     const initialBounds = new Map<string, DOMRectReadOnly>();
+    const placeholderPaints = new Map<string, string>();
+    const maskOpacity = (element: Element) => {
+      if (!onScreen(element)) {
+        return 0;
+      }
+      const mask = getComputedStyle(element, "::after");
+      let opacity = Number(mask.opacity);
+      for (let parent: Element | null = element; parent; parent = parent.parentElement) {
+        opacity *= Number(getComputedStyle(parent).opacity);
+      }
+      return mask.content !== "none" && mask.visibility === "visible" ? opacity : 0;
+    };
+    const paintedMask = (element: Element) => maskOpacity(element) > 0.99;
+    const paintedContent = (element: Element) =>
+      onScreen(element) &&
+      !element.closest(".startup-chat-skeleton, .startup-sidebar-skeleton, .custodian__startup") &&
+      !element.classList.contains("skeleton") &&
+      getComputedStyle(element).visibility === "visible" &&
+      maskOpacity(element) < 1;
+    const paintedCandidate = (selector: string) => {
+      const candidates = [...document.querySelectorAll(selector)].filter(onScreen);
+      return candidates.find(paintedContent) ?? candidates.find(paintedMask) ?? null;
+    };
     const sample = () => {
+      let changedPlaceholder = false;
+      const rememberPaint = (region: string, paint: string) => {
+        const before = placeholderPaints.get(region);
+        if (before !== undefined && before !== paint) {
+          changedPlaceholder = true;
+          if (trace.placeholderChanges.length < 12) {
+            trace.placeholderChanges.push({ at: performance.now(), region, before, after: paint });
+          }
+        }
+        placeholderPaints.set(region, paint);
+      };
+      // Compare opaque painted boxes, not shimmer phase, color, or DOM ownership.
+      for (const [region, selector] of [
+        [
+          "sidebar",
+          ".shell-nav :is(.sidebar-agent-card__name-text,.nav-item__text,.sidebar-recent-session__name)",
+        ],
+        ["header", ".chat-pane__session-title-text"],
+        ["transcript", ".chat-thread .chat-bubble"],
+        ["assistantTranscript", ".assistant-panel .custodian__messages .chat-bubble"],
+      ] as const) {
+        const candidates = [...document.querySelectorAll(selector)];
+        const boxes = candidates.filter(paintedMask).map((element) => {
+          const r = element.getBoundingClientRect();
+          return [r.x, r.y, r.width, r.height].map((value) => Math.round(value * 10) / 10);
+        });
+        if (
+          boxes.length ||
+          (placeholderPaints.has(region) &&
+            !candidates.some((element) => maskOpacity(element) > 0 || paintedContent(element)))
+        ) {
+          rememberPaint(region, JSON.stringify(boxes));
+        }
+      }
+      const headerRevealing = [
+        ...document.querySelectorAll("openclaw-chat-pane .chat-pane__session-title-text"),
+      ].some(
+        (element) =>
+          element.getBoundingClientRect().height > 0 &&
+          getComputedStyle(element).visibility === "visible",
+      );
+      const header = paintedCandidate(".chat-pane__session-title-text");
+      if (!headerRevealing && header && paintedMask(header)) {
+        const composer =
+          paintedCandidate(
+            ".content .chat-pane-primary-column .agent-chat__composer-combobox textarea",
+          ) ??
+          [
+            ...document.querySelectorAll(
+              ".content .chat-pane-primary-column .agent-chat__composer-combobox textarea",
+            ),
+          ].find(
+            (element) => onScreen(element) && getComputedStyle(element).visibility === "visible",
+          );
+        if (composer) {
+          rememberPaint("composer", composer.getAttribute("placeholder") ?? "");
+        }
+      }
       if (
         initialBounds.size > 0 ||
         document.querySelector('.shell[data-startup-placeholder="true"]')
@@ -150,8 +237,10 @@ async function traceStartupPaints(page: Page) {
           ".agent-chat__composer-shell",
         ]) {
           const rect = [...document.querySelectorAll(selector)]
-            .map((element) => element.getBoundingClientRect())
-            .find((bounds) => bounds.width > 0 && bounds.height > 0);
+            .find(
+              (element) => onScreen(element) && getComputedStyle(element).visibility !== "hidden",
+            )
+            ?.getBoundingClientRect();
           if (!rect) {
             continue;
           }
@@ -169,17 +258,14 @@ async function traceStartupPaints(page: Page) {
         (p) => p.textContent === text,
       );
       const regions = [
-        ["identity", document.querySelector(".sidebar-agent-card__name-text")],
-        ["sessions", document.querySelector(".sidebar-recent-session__name")],
-        ["header", document.querySelector(".chat-pane__session-title-text")],
-        [
-          "transcript",
-          transcript?.closest(".chat-bubble") ?? document.querySelector(".chat-bubble"),
-        ],
-        ["assistantHeader", document.querySelector(".assistant-panel-title")],
+        ["identity", paintedCandidate(".sidebar-agent-card__name-text")],
+        ["sessions", paintedCandidate(".sidebar-recent-session__name")],
+        ["header", paintedCandidate(".chat-pane__session-title-text")],
+        ["transcript", transcript?.closest(".chat-bubble") ?? paintedCandidate(".chat-bubble")],
+        ["assistantHeader", paintedCandidate(".assistant-panel-title")],
         [
           "assistantTranscript",
-          document.querySelector(".assistant-panel .custodian__messages .chat-bubble"),
+          paintedCandidate(".assistant-panel .custodian__messages .chat-bubble"),
         ],
       ] as const;
       const visible: string[] = [];
@@ -189,7 +275,7 @@ async function traceStartupPaints(page: Page) {
         }
         const mask = getComputedStyle(element, "::after");
         const maskVisible =
-          mask.content !== "none" && mask.visibility === "visible" && Number(mask.opacity) > 0.05;
+          mask.content !== "none" && mask.visibility === "visible" && Number(mask.opacity) > 0.99;
         if (maskVisible) {
           trace.skeleton = true;
           trace.maskedAt[name] ??= performance.now();
@@ -201,7 +287,7 @@ async function traceStartupPaints(page: Page) {
           trace.revealedAt[name] ??= performance.now();
         }
       }
-      if (visible.some((name) => !trace.seen.includes(name))) {
+      if (changedPlaceholder || visible.some((name) => !trace.seen.includes(name))) {
         trace.reveals += 1;
       }
       for (const name of trace.seen) {
@@ -292,14 +378,17 @@ suite.define(() => {
     { staggered: false, restoredDock: false },
     { staggered: true, restoredDock: false },
     { staggered: true, restoredDock: true },
+    { staggered: true, restoredDock: false, global: true },
+    { staggered: true, restoredDock: false, literal: true },
   ])(
-    "reveals startup in at most two stages (staggered: $staggered, restored dock: $restoredDock)",
-    async ({ staggered, restoredDock }) => {
+    "reveals startup in at most two stages (staggered: $staggered, restored dock: $restoredDock, global: $global, literal: $literal)",
+    async ({ staggered, restoredDock, global, literal }) => {
       await suite.withPage(
         { viewport: { width: 1440, height: 900 }, colorScheme: "dark" },
         async ({ page }) => {
           const gateway = await installMockGateway(page, {
             communityInvite: false,
+            ...(global ? { sessionScope: "global" as const } : {}),
             ...(restoredDock
               ? {
                   featureMethods: [
@@ -317,6 +406,11 @@ suite.define(() => {
                           at: 2,
                         },
                         { role: "user", text: "Keep the workspace usable.", at: 3 },
+                        ...Array.from({ length: 16 }, (_, index) => ({
+                          role: index % 2 ? "assistant" : "user",
+                          text: `Restored Ask conversation entry ${index}.`,
+                          at: index + 4,
+                        })),
                       ],
                     },
                   },
@@ -354,6 +448,14 @@ suite.define(() => {
                 ]
               : [],
           });
+          if (global) {
+            await page.addInitScript(() => {
+              localStorage.setItem(
+                "openclaw.control.settings.v1",
+                JSON.stringify({ chatMessageMaxWidth: "82%" }),
+              );
+            });
+          }
           if (restoredDock) {
             await page.addInitScript(() => {
               localStorage.setItem(
@@ -362,12 +464,25 @@ suite.define(() => {
               );
             });
           }
+          if (literal) {
+            await page.route("**/__openclaw/control-ui-config.json", async (route) => {
+              const response = await route.fetch();
+              await route.fulfill({
+                response,
+                json: { ...(await response.json()), assistantName: "Configured Assistant" },
+              });
+            });
+          }
           await traceStartupPaints(page);
-          await page.goto(`${suite.server.baseUrl}chat/main`);
+          await page.goto(
+            `${suite.server.baseUrl}${literal ? "chat/main/~key/example" : "chat/main"}`,
+          );
           let pendingBounds: Awaited<ReturnType<typeof startupRegionBounds>> | undefined;
           if (staggered) {
             await gateway.waitForRequest("connect");
-            const pendingComposer = page.locator(".agent-chat__composer-combobox textarea").first();
+            const pendingComposer = page
+              .locator(".content .chat-pane-primary-column .agent-chat__composer-combobox textarea")
+              .first();
             await pendingComposer.waitFor();
             await page.locator('.shell[data-startup-placeholder="true"]').waitFor();
             expect(await pendingComposer.isDisabled()).toBe(true);
@@ -381,6 +496,17 @@ suite.define(() => {
             expect(await page.locator("openclaw-app-shell").getAttribute("aria-busy")).toBe("true");
             pendingBounds = await startupRegionBounds(page);
             expect(await page.locator(".connect-splash, .loading-indicator").count()).toBe(0);
+            if (literal) {
+              await page
+                .locator("openclaw-chat-pane .agent-chat__composer-combobox textarea")
+                .waitFor();
+              await page.evaluate(
+                () =>
+                  new Promise<void>((resolve) => {
+                    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+                  }),
+              );
+            }
             await gateway.resolveDeferred("connect");
             await gateway.waitForRequest("sessions.list");
             await gateway.resolveDeferred("sessions.list");
@@ -415,12 +541,21 @@ suite.define(() => {
             await expect
               .poll(() => page.evaluate(() => (window as TraceWindow).startupPaintTrace.skeleton))
               .toBe(true);
-            await gateway.resolveDeferred("chat.startup");
             if (restoredDock) {
               await gateway.waitForRequest("openclaw.chat.history");
               expect(await page.getByText(historyText, { exact: true }).isVisible()).toBe(false);
               await gateway.resolveDeferred("openclaw.chat.history");
+              await page
+                .getByText("The restored assistant transcript is ready.", { exact: true })
+                .waitFor({ state: "attached" });
+              await page.evaluate(
+                () =>
+                  new Promise<void>((resolve) => {
+                    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+                  }),
+              );
             }
+            await gateway.resolveDeferred("chat.startup");
           }
           await waitForControlUiRoute(page, { routeId: "chat" });
           if (restoredDock) {
@@ -440,6 +575,15 @@ suite.define(() => {
               .locator('openclaw-session-progress-hovercard-provider > [role="status"]')
               .textContent(),
           ).not.toContain("Loading");
+          if (restoredDock) {
+            await expect
+              .poll(() =>
+                page.evaluate(() =>
+                  (window as TraceWindow).startupPaintTrace.seen.includes("assistantTranscript"),
+                ),
+              )
+              .toBe(true);
+          }
           const trace = await page.evaluate(() => (window as TraceWindow).startupPaintTrace);
           expect(trace.seen).toEqual(
             expect.arrayContaining(["identity", "sessions", "header", "transcript"]),
@@ -452,8 +596,21 @@ suite.define(() => {
           if (restoredDock) {
             await gateway.waitForRequest("openclaw.chat");
             expect(trace.seen).toContain("assistantTranscript");
+            await expect
+              .poll(() =>
+                page
+                  .locator(".custodian__messages:not(.custodian__startup)")
+                  .evaluate(
+                    (element) => element.scrollHeight - element.clientHeight - element.scrollTop,
+                  ),
+              )
+              .toBeLessThanOrEqual(2);
           }
-          expect(trace.reveals).toBeLessThanOrEqual(2);
+          expect(
+            trace.placeholderChanges,
+            "painted placeholders and composer copy remain stable before reveal",
+          ).toEqual([]);
+          expect(trace.reveals, JSON.stringify(trace.revealedAt)).toBeLessThanOrEqual(2);
           expect(trace.lost).toEqual([]);
           if (staggered || trace.skeleton) {
             expect(Object.keys(trace.containerDrift)).toHaveLength(4);
@@ -532,15 +689,20 @@ suite.define(() => {
           await page.getByRole("button", { name: "Retry", exact: true }).waitFor();
         } else {
           await gateway.resolveDeferred("chat.startup");
-          await page.locator(".chat-thread").waitFor();
+          await page.locator("openclaw-chat-pane .chat-thread").waitFor();
         }
         await page.locator('.shell[data-startup-stage="ready"]').waitFor();
-        expect(await page.locator(".startup-transcript-skeleton, .chat-virtual-row").count()).toBe(
-          0,
-        );
-        expect(await page.locator(".agent-chat__composer-combobox textarea").isEnabled()).toBe(
-          true,
-        );
+        await page.locator(".startup-chat-skeleton").waitFor({ state: "hidden" });
+        expect(
+          await page
+            .locator("openclaw-chat-pane :is(.startup-transcript-skeleton, .chat-virtual-row)")
+            .count(),
+        ).toBe(0);
+        expect(
+          await page
+            .locator(".content > openclaw-router-outlet .agent-chat__composer-combobox textarea")
+            .isEnabled(),
+        ).toBe(true);
       });
     },
   );
@@ -702,7 +864,7 @@ suite.define(() => {
           await sidebarError.getByRole("button", { name: "Close", exact: true }).click();
           await page.locator(".lazy-view-error__action").waitFor({ state: "detached" });
           await page
-            .locator(".agent-chat__composer-combobox textarea")
+            .locator(".content > openclaw-router-outlet .agent-chat__composer-combobox textarea")
             .fill("Continue without the sidebar");
           expect(await page.locator(".lazy-view-error__action").count()).toBe(0);
         } finally {

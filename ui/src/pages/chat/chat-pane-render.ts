@@ -146,6 +146,9 @@ export class ChatPane extends ChatPaneLayoutRender {
     });
     const placementStartup = this.context.placementStartup.get(state.sessionKey);
     const sendHoldReason = chatSendHoldReason(state, state.sessionKey, placementStartup !== null);
+    const initialPending = initialPresentationManaged && startupPresentation.stage === "pending";
+    const initialConnectionRecovery =
+      initialPending && state.connected && state.client && !state.client.recoveryScopeReady;
     const placementStartupPending =
       placementStartup !== null && placementStartup.phase !== "failed";
     const sessionParticipationBlocked = this.sessionParticipationTracker.resolve({
@@ -347,7 +350,7 @@ export class ChatPane extends ChatPaneLayoutRender {
         (placementComposer.state.kind === "failed" && !placementComposer.state.recoveryAction
           ? placementComposer.failedUnavailableMessage
           : null) ??
-        (placementStartup ? null : sendHoldReason),
+        (placementStartup || initialConnectionRecovery ? null : sendHoldReason),
       disabledReasonTone:
         placementComposer.busyMessage || (sessionParticipationBlocked && !suggestionViewer)
           ? ("info" as const)
@@ -364,9 +367,7 @@ export class ChatPane extends ChatPaneLayoutRender {
       paneId: this.presentationId,
       sessionKey: state.sessionKey,
       announceTranscript: this.active && this.presented,
-      onSessionKeyChange: (next) => {
-        this.onPaneSessionChange?.(this.paneId, next);
-      },
+      onSessionKeyChange: (next) => this.onPaneSessionChange?.(this.paneId, next),
       thinkingLevel: state.chatThinkingLevel,
       autoExpandToolCalls: state.chatVerboseLevel === "full",
       showThinking: state.settings.chatShowThinking,
@@ -448,9 +449,10 @@ export class ChatPane extends ChatPaneLayoutRender {
       realtimeTalkVideoPending: state.realtimeTalkVideoPending,
       realtimeTalkCameraError: state.realtimeTalkCameraError,
       connected: state.connected,
-      initialMetadataPending: initialPresentationManaged && startupPresentation.stage === "pending",
+      initialMetadataPending: initialPending,
+      initialAssistantName: startupPresentation.initialAssistantName,
       initialPresentationManaged,
-      offline: gatewaySnapshot.offlineStable,
+      offline: !initialPending && gatewaySnapshot.offlineStable,
       gatewayClient: state.client,
       composerHoldToRecord: state.settings.composerHoldToRecord,
       realtimeTalkInputDeviceId: state.settings.realtimeTalkInputDeviceId,
@@ -656,12 +658,9 @@ export class ChatPane extends ChatPaneLayoutRender {
       agentsList: state.agentsList,
       currentAgentId,
       ...chatProps,
-      onAgentChange: (agentId) => {
-        this.onPaneSessionChange?.(this.paneId, buildAgentMainSessionKey({ agentId }));
-      },
-      onSessionSelect: (next) => {
-        this.onPaneSessionChange?.(this.paneId, next);
-      },
+      onAgentChange: (agentId) =>
+        this.onPaneSessionChange?.(this.paneId, buildAgentMainSessionKey({ agentId })),
+      onSessionSelect: (next) => this.onPaneSessionChange?.(this.paneId, next),
       canvasPluginSurfaceUrl: state.canvasPluginSurfaceUrl,
       boardProvider: board.provider,
       onOpenSidebar: state.handleOpenSidebar,

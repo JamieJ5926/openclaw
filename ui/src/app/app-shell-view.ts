@@ -129,6 +129,7 @@ export function renderApplicationShell(host: ShellViewHost) {
   const gatewaySnapshot = context.gateway.snapshot;
   const config = context.config.current;
   const assistantName = config.assistantIdentity.name;
+  const startupName = host.startupSnapshot?.initialAssistantName ?? assistantName;
   const gatewayConnected = gatewaySnapshot.phase === "connected";
   const operatorAccess = readGatewayOperatorAccess(gatewaySnapshot);
   const canUpdate = canCallGatewayMethod(gatewaySnapshot, "update.run", "operator.admin");
@@ -519,8 +520,8 @@ export function renderApplicationShell(host: ShellViewHost) {
               >
                 ${navigationContent}
                 ${
-                  host.startupSnapshot?.stage === "pending" && !settingsTakeover && !onboarding
-                    ? renderStartupSidebarSkeleton(navigationSnapshot.sidebarEntries, assistantName)
+                  host.startupPresentation?.started && !settingsTakeover && !onboarding
+                    ? renderStartupSidebarSkeleton(host.startupSnapshot)
                     : nothing
                 }
               </div>`
@@ -594,8 +595,8 @@ export function renderApplicationShell(host: ShellViewHost) {
         })}
         ${nativeEmbed ? navigationContent : nothing}
         ${
-          host.startupSnapshot?.stage === "pending" && chatLikeRoute
-            ? renderStartupChatSkeleton(presentationSessionKey, assistantName, uiSettings)
+          host.startupPresentation?.started && chatLikeRoute
+            ? renderStartupChatSkeleton(presentationSessionKey, startupName, uiSettings)
             : nothing
         }
         <openclaw-router-outlet

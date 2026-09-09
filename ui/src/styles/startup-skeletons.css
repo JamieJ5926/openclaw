@@ -1,4 +1,3 @@
-/* The shell owns timing; real leaf boxes own skeleton geometry. */
 @property --startup-shimmer {
   syntax: "<percentage>";
   inherits: true;
@@ -25,6 +24,8 @@ openclaw-app:has(.shell:not([data-startup-stage="ready"])) {
 }
 
 .startup-chat-skeleton {
+  z-index: 2;
+  pointer-events: none;
   padding: inherit;
   position: absolute;
   inset: 0;
@@ -35,13 +36,26 @@ openclaw-app:has(.shell:not([data-startup-stage="ready"])) {
 }
 
 .startup-sidebar-skeleton {
+  --startup-mask-opacity: 1;
   position: absolute;
   inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: var(--startup-mask-transition, opacity 160ms var(--ease-out));
 }
 
-.shell-nav:has(openclaw-app-sidebar .sidebar-brand) > .startup-sidebar-skeleton,
-.content:has(openclaw-chat-pane .chat-pane__header) > .startup-chat-skeleton {
-  display: none;
+.shell[data-startup-stage="pending"][data-startup-placeholder="true"] .startup-sidebar-skeleton {
+  opacity: 1;
+}
+
+.startup-sidebar-skeleton * {
+  --startup-mask-transition: none;
+  visibility: hidden;
+}
+
+.shell[data-startup-stage] :is(.startup-sidebar-skeleton, .startup-chat-skeleton) .skeleton::after {
+  animation: none;
+  transform: none;
 }
 
 .shell[data-startup-stage="pending"] .content > openclaw-router-outlet > .lazy-view-state {
@@ -101,10 +115,6 @@ openclaw-app:has(.shell:not([data-startup-stage="ready"])) {
   visibility: hidden;
 }
 
-.shell:not([data-startup-stage="ready"]) .custodian__thinking-row {
-  display: none;
-}
-
 /* Keep the cold pane's bounded virtual range measured. Re-enabling auto
    containment at reveal changes the masks' paint boxes during their fade. */
 .chat--startup-managed .chat-virtual-row {
@@ -131,30 +141,14 @@ openclaw-app:has(.shell:not([data-startup-stage="ready"])) {
     .sidebar-agent-card__avatar,
     .sidebar-agent-card__name-text,
     .assistant-panel-title,
-    .sidebar-agent-card__chevron,
-    .control-ui-environment-pill,
     .sidebar .nav-item__icon,
     .sidebar .nav-item__text,
     .sidebar-recent-sessions__label-text,
     .sidebar-recent-session__name,
-    .sidebar-recent-session__subtitle,
-    .sidebar-recent-session .session-glyph,
     .sidebar-session-group-toggle__lead,
-    .sidebar-online__person-name,
-    .sidebar-online__person-action,
-    .sidebar .viewer-avatar,
-    .sidebar-identity-card__name,
-    .sidebar-footer-branch__icon,
-    .sidebar-footer-branch__name,
-    .sidebar-issues-button__icon,
-    .sidebar-issues-button__count,
     .chat-pane__workspace-chip > span:not(.workspace-icon-fallback),
     .chat-pane__session-title-text,
-    .sidebar-brand__header-control,
-    .sidebar-session-toolbar__button,
-    .sidebar-footer-bar__home,
     .chat-pane__workspace-chip,
-    .chat-pane__header .chat-icon-btn,
     .assistant-panel-icon,
     .chat-bubble,
     .startup-transcript-lines > .skeleton-line,
@@ -165,24 +159,8 @@ openclaw-app:has(.shell:not([data-startup-stage="ready"])) {
     position: relative;
   }
 
-  &:not(
-      :where(
-        .sidebar-brand__header-control,
-        .sidebar-session-toolbar__button,
-        .sidebar-footer-bar__home,
-        .chat-pane__workspace-chip,
-        .chat-pane__header .chat-icon-btn,
-        .assistant-panel-icon
-      )
-    )::after,
-  &:where(
-      .sidebar-brand__header-control,
-      .sidebar-session-toolbar__button,
-      .sidebar-footer-bar__home,
-      .chat-pane__workspace-chip,
-      .chat-pane__header .chat-icon-btn,
-      .assistant-panel-icon
-    )::before {
+  &:not(:where(.chat-pane__workspace-chip, .assistant-panel-icon))::after,
+  &:where(.chat-pane__workspace-chip, .assistant-panel-icon)::before {
     position: absolute;
     inset: 0;
     z-index: 5;
@@ -205,30 +183,12 @@ openclaw-app:has(.shell:not([data-startup-stage="ready"])) {
 }
 
 /* These controls contain bare SVGs, so mask their icon box, not the button. */
-.shell[data-startup-stage]
-  :where(
-    .sidebar-brand__header-control,
-    .sidebar-session-toolbar__button,
-    .sidebar-footer-bar__home,
-    .chat-pane__workspace-chip,
-    .chat-pane__header .chat-icon-btn,
-    .assistant-panel-icon
-  )::before {
+.shell[data-startup-stage] :where(.chat-pane__workspace-chip, .assistant-panel-icon)::before {
   inset: 50% auto auto 50%;
   width: 16px;
   height: 16px;
   transform: translate(-50%, -50%);
   border-radius: var(--radius-sm);
-}
-
-.shell[data-startup-stage] .sidebar-session-toolbar__button::before {
-  width: 14px;
-  height: 14px;
-}
-
-.shell[data-startup-stage] .sidebar-brand__new-thread::before {
-  width: 20px;
-  height: 20px;
 }
 
 .shell[data-startup-stage] .chat-pane__workspace-chip::before {
@@ -326,4 +286,30 @@ openclaw-app:has(.shell:not([data-startup-stage="ready"])) {
   width: 65%;
   height: 14px;
   border-radius: var(--radius-sm);
+}
+
+.shell[data-startup-managed] openclaw-app-sidebar .sidebar,
+.shell[data-startup-managed] .content > openclaw-router-outlet .chat-pane__header,
+.shell[data-startup-managed] .content > openclaw-router-outlet .chat-thread {
+  --startup-mask-opacity: 0;
+  transition: var(--startup-mask-transition, opacity 160ms var(--ease-out));
+}
+
+.shell[data-startup-stage="pending"]
+  :is(openclaw-app-sidebar .sidebar, openclaw-chat-pane .chat-pane__header),
+.shell:not([data-startup-stage="ready"]) openclaw-chat-pane .chat-thread {
+  opacity: 0;
+}
+
+.content:has(openclaw-chat-pane .agent-chat__composer-shell)
+  > .startup-chat-skeleton
+  :is(.agent-chat__composer-shell, .sidebar-region__right-runtime) {
+  visibility: hidden;
+}
+
+.shell:not([data-startup-stage="pending"]) .startup-chat-skeleton .chat-pane__header,
+.shell[data-startup-stage="ready"] .startup-chat-skeleton {
+  opacity: 0;
+  visibility: hidden;
+  transition: var(--startup-mask-transition, opacity 160ms var(--ease-out), visibility 0s 160ms);
 }

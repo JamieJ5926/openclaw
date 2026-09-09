@@ -3,6 +3,8 @@ import { createContext } from "@lit/context";
 export type StartupPresentation = {
   stage: "pending" | "chrome" | "ready";
   placeholderVisible: boolean;
+  initialAssistantName?: string;
+  initialSidebarEntries?: readonly string[];
 };
 
 export const READY_STARTUP_PRESENTATION: StartupPresentation = {
@@ -24,13 +26,18 @@ export class StartupPresentationController {
 
   constructor(private readonly publish: (snapshot: StartupPresentation) => void) {}
 
-  start() {
+  start(initialAssistantName?: string, initialSidebarEntries?: readonly string[]) {
     this.dispose();
     this.started = true;
     this.chromeReady = false;
     this.contentReady = false;
     this.shownAt = undefined;
-    this.set({ stage: "pending", placeholderVisible: false });
+    this.set({
+      stage: "pending",
+      placeholderVisible: false,
+      initialAssistantName,
+      initialSidebarEntries: initialSidebarEntries?.slice(),
+    });
     this.showAfterDelay();
   }
 
@@ -52,7 +59,7 @@ export class StartupPresentationController {
 
   finish() {
     this.dispose();
-    this.set(READY_STARTUP_PRESENTATION);
+    this.set({ ...this.snapshot, ...READY_STARTUP_PRESENTATION });
   }
 
   dispose() {
@@ -85,6 +92,6 @@ export class StartupPresentationController {
     }
     // The transcript keeps the skeleton already painted with the chrome. Its
     // minimum dwell and pulse must not restart at this presentation boundary.
-    this.set({ stage: "chrome", placeholderVisible: this.snapshot.placeholderVisible });
+    this.set({ ...this.snapshot, stage: "chrome" });
   }
 }

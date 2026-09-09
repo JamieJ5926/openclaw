@@ -213,10 +213,6 @@ export abstract class ChatPaneBase extends OpenClawLightDomElement {
   protected initialPresentationManaged = false;
   private initialComposerMetadataSettled = false;
 
-  protected beginInitialComposerPreparation(): void {
-    this.initialPresentationManaged ||= this.startupPresentation.stage !== "ready";
-  }
-
   protected completeInitialComposerPreparation(): void {
     if (this.initialComposerMetadataSettled) {
       return;
