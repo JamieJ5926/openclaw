@@ -5,6 +5,7 @@ import {
   createGatewayRequestMock,
   createTestGatewayClient,
 } from "../../test-helpers/gateway-client.ts";
+import { nextFrame } from "../../test-helpers/modal-dialog.ts";
 import { ModelAccountUsage } from "./account-usage.ts";
 
 let element: ModelAccountUsage | undefined;
@@ -74,7 +75,9 @@ it("drops a pending response when the selected agent changes and shows the curre
   view.agentId = "other";
   await expect.poll(() => view.textContent).toContain("Account usage unavailable");
   stale.resolve();
+  await nextFrame();
   await view.updateComplete;
+  expect(view.textContent).toContain("Account usage unavailable");
   expect(view.textContent).not.toContain("12 credits");
   expect(request.mock.calls[0]?.[2]?.signal?.aborted).toBe(true);
   view.client = null;
