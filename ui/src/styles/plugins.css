@@ -1435,6 +1435,10 @@ h3.plugins-subheader {
 /* ---------- responsive ---------- */
 
 @media (max-width: 640px) {
+  .settings-page.oc-app-surface:has(> .plugins-settings-content) {
+    padding-top: 0;
+  }
+
   openclaw-skills-page .plugins-toolbar--fields {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
