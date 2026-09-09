@@ -4,7 +4,6 @@ import path from "node:path";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PROTOCOL_VERSION } from "../../../../packages/gateway-protocol/src/version.js";
-import type { PluginCatalogItem, PluginListResult } from "../../lib/plugins/index.ts";
 import {
   canRunPlaywrightChromium,
   installMockGateway,
@@ -14,7 +13,6 @@ import {
 } from "../../test-helpers/control-ui-e2e.ts";
 import {
   calendarInspection,
-  calendarPlugin,
   calendarSearchResponse,
   configSnapshot,
   discoveryCategories,
@@ -26,15 +24,10 @@ import {
   installResult,
   installedPluginsInventory,
   lobsterInspection,
-  lobsterPlugin,
   matrixDetail,
   matrixDiscoveryPlugin,
-  remoteIconPlugin,
   secondDiscoveryPageItems,
-  telegramPlugin,
   uninstallResult,
-  workboardDisabled,
-  workboardEnabled,
   workboardInspection,
 } from "../../test-helpers/plugins-e2e-fixtures.test-support.ts";
 const chromiumExecutablePath = resolvePlaywrightChromiumExecutablePath(chromium.executablePath());
@@ -57,10 +50,6 @@ const pluginMethods = [
 ];
 let browser: Browser;
 let server: ControlUiE2eServer;
-
-function inventory(plugins: PluginCatalogItem[]): PluginListResult {
-  return { plugins, diagnostics: [], mutationAllowed: true };
-}
 
 function readOnlyConnectResponse() {
   return {

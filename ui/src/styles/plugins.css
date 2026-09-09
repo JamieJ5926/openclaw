@@ -2055,29 +2055,8 @@ h3.plugins-subheader {
 }
 
 .plugin-catalog-detail__tabs {
-  display: flex;
   overflow-x: auto;
   border-bottom: 1px solid var(--border);
-}
-
-.plugin-catalog-detail__tabs button {
-  padding: var(--space-3) var(--space-4);
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  font: inherit;
-  white-space: nowrap;
-}
-
-.plugin-catalog-detail__tabs button:hover,
-.plugin-catalog-detail__tabs button.is-active {
-  color: var(--text-strong);
-}
-
-.plugin-catalog-detail__tabs button.is-active {
-  border-bottom-color: var(--accent);
 }
 
 .plugin-catalog-detail__panel {

@@ -1,5 +1,6 @@
 import { html, nothing, type TemplateResult } from "lit";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
+import { renderHubTabs } from "../../components/hub-tabs.ts";
 import { icons } from "../../components/icons.ts";
 import { toSanitizedMarkdownHtml } from "../../components/markdown.ts";
 import { renderSettingsLoadingSkeleton, renderSettingsPage } from "../../components/settings-ui.ts";
@@ -308,24 +309,21 @@ function renderDetail(result: PluginDiscoveryDetailResult, props: PluginCatalogD
         }
       </aside>
     </div>
-    <div
-      class="plugin-catalog-detail__tabs"
-      role="tablist"
-      aria-label=${t("pluginsPage.detailSections")}
+    ${renderHubTabs({
+      id: "plugin-catalog-detail",
+      active: props.tab,
+      tabs: tabs.map((tab) => ({ value: tab, label: tabLabel(tab) })),
+      ariaLabel: t("pluginsPage.detailSections"),
+      panelId: "plugin-catalog-detail-panel",
+      className: "plugin-catalog-detail__tabs",
+      onSelect: props.onTabChange,
+    })}
+    <section
+      id="plugin-catalog-detail-panel"
+      class="plugin-catalog-detail__panel"
+      role="tabpanel"
+      aria-labelledby=${`plugin-catalog-detail-tab-${props.tab}`}
     >
-      ${tabs.map(
-        (tab) => html`<button
-          type="button"
-          role="tab"
-          aria-selected=${props.tab === tab}
-          class=${props.tab === tab ? "is-active" : ""}
-          @click=${() => props.onTabChange(tab)}
-        >
-          ${tabLabel(tab)}
-        </button>`,
-      )}
-    </div>
-    <section class="plugin-catalog-detail__panel" role="tabpanel">
       ${renderTabPanel(result, props.tab)}
     </section>
   </section>`;

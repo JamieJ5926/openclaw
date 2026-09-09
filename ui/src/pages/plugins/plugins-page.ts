@@ -1,6 +1,6 @@
 import { consume } from "@lit/context";
 import { initialState, Task, TaskStatus } from "@lit/task";
-import { type PropertyValues } from "lit";
+import type { PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import {
@@ -581,7 +581,9 @@ export class PluginsPage extends OpenClawLightDomElement {
         },
         setInventorySearchOpen: (open) => {
           this.inventorySearchOpen = open;
-          if (!open) this.query = "";
+          if (!open) {
+            this.query = "";
+          }
         },
         setQuery: (query) => {
           this.query = query;
