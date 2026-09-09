@@ -644,6 +644,8 @@ export class ModelProvidersPage extends OpenClawLightDomElement {
     ]);
     const advertised = isGatewayMethodAdvertised(gatewaySnapshot, "models.probe");
     const body = renderModelProviders({
+      usageClient: this.canMutate() ? this.context.gateway.snapshot.client : null,
+      usageAgentId: this.selectedAgentId,
       connected: gatewaySnapshot.phase === "connected",
       loading: gatewaySnapshot.phase === "connected" && this.data === null && !rosterError,
       refreshing: this.loadClient !== null,

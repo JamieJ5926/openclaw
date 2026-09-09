@@ -1,5 +1,6 @@
 // Control UI view renders the Models settings page content.
 import { html, nothing } from "lit";
+import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import type { FastMode, ModelsProbeResult } from "../../api/types.ts";
 import { icons } from "../../components/icons.ts";
 import { renderProviderBrandIcon } from "../../components/provider-icon.ts";
@@ -41,6 +42,8 @@ export type ModelProviderRowMessage = {
 };
 
 type ModelProvidersViewProps = {
+  usageClient?: GatewayBrowserClient | null;
+  usageAgentId?: string;
   connected: boolean;
   loading: boolean;
   refreshing: boolean;
@@ -365,6 +368,8 @@ function renderProviderRow(card: ModelProviderCard, props: ModelProvidersViewPro
       ${
         card.profiles.length > 0 && props.canViewProfiles
           ? renderProviderProfiles(card, {
+              usageClient: props.usageClient,
+              usageAgentId: props.usageAgentId,
               busy: props.busy,
               canMutate: props.canMutate && !props.configBusy,
               mutationBlockedReason: props.mutationBlockedReason,
