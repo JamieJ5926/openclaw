@@ -71,22 +71,16 @@ openclaw-app:has(.shell:not([data-startup-stage="ready"])) {
   flex: 1;
 }
 
-.startup-sidebar-skeleton .sidebar-recent-session__name {
-  --startup-bar-height: 10px;
-}
-
 .startup-sidebar-skeleton .sidebar-recent-sessions__label-text {
   flex: 1;
-  --startup-bar-width: 30%;
-  --startup-bar-height: 9px;
 }
 
-.startup-sidebar-skeleton :is(.nav-item__icon, .sidebar-session-group-toggle__lead) {
+.startup-sidebar-skeleton :is(.nav-item__icon, .sidebar-issues-button__icon) {
   --startup-bar-width: 16px;
   --startup-bar-height: 16px;
 }
 
-.startup-sidebar-skeleton .sidebar-agent-card__avatar {
+.startup-sidebar-skeleton :is(.sidebar-agent-card__avatar, .viewer-avatar) {
   --startup-bar-height: 100%;
   --startup-bar-radius: var(--radius-full);
 }
@@ -199,11 +193,25 @@ openclaw-app:has(.shell:not([data-startup-stage="ready"])) {
   }
 }
 
+.startup-sidebar-skeleton .sidebar-session-toolbar__button {
+  --startup-bar-width: 14px;
+  --startup-bar-height: 14px;
+  --startup-bar-radius: var(--radius-full);
+}
+
+.startup-sidebar-skeleton :is(.sidebar-identity-card__name, .sidebar-online__person-name) {
+  flex: 1;
+}
+
+.startup-sidebar-skeleton .sidebar-session-indicator .skeleton {
+  border-radius: var(--radius-sm);
+}
+
 /* Paint text-sized bars without changing the canonical row boxes. */
 .shell[data-startup-stage] .startup-sidebar-skeleton .skeleton::after {
   inset: 50% auto auto 0;
   width: var(--startup-bar-width, 100%);
-  height: var(--startup-bar-height, 14px);
+  height: var(--startup-bar-height, 10px);
   border-radius: var(--startup-bar-radius, var(--radius-sm));
   background: var(--skeleton-base, var(--bg-muted));
   visibility: visible;
