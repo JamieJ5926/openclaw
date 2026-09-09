@@ -569,6 +569,7 @@ export function renderAgentFiles(params: {
                             ></textarea>
                           </label>
                           <openclaw-modal-dialog
+                            class="agent-file-preview"
                             manual
                             label=${activeEntry.name}
                             style="--openclaw-modal-width: min(1040px, calc(100vw - 32px));"
@@ -632,15 +633,14 @@ export function renderAgentFiles(params: {
                                         const modal = (e.currentTarget as HTMLElement).closest(
                                           "openclaw-modal-dialog",
                                         ) as OpenClawModalDialog | null;
+                                        const textarea = modal
+                                          ?.closest(".settings-group")
+                                          ?.querySelector<HTMLElement>(".agent-file-textarea");
+                                        modal?.setReturnFocusTarget(textarea ?? null);
                                         modal?.hide();
                                         if (modal) {
                                           resetAgentFilePreview(modal);
                                         }
-                                        const textarea =
-                                          document.querySelector<HTMLElement>(
-                                            ".agent-file-textarea",
-                                          );
-                                        textarea?.focus();
                                       }}
                                     >
                                       <span aria-hidden="true">${icons.edit}</span>
@@ -667,10 +667,13 @@ export function renderAgentFiles(params: {
                                 </div>
                               </div>
                               <div class="md-preview-dialog__meta">
-                                <div class="md-preview-dialog__chip ${previewStatusClass}">
+                                <div
+                                  class="md-preview-dialog__chip ${previewStatusClass}"
+                                  data-priority="essential"
+                                >
                                   <strong>${previewStatusLabel}</strong>
                                 </div>
-                                <div class="md-preview-dialog__chip">
+                                <div class="md-preview-dialog__chip" data-priority="essential">
                                   <strong>${estimateReadingTimeLabel(draftWordCount)}</strong>
                                   <span
                                     >${t("agents.files.words", {
@@ -678,11 +681,11 @@ export function renderAgentFiles(params: {
                                     })}</span
                                   >
                                 </div>
-                                <div class="md-preview-dialog__chip">
+                                <div class="md-preview-dialog__chip" data-priority="secondary">
                                   <strong>${draftLineCount}</strong>
                                   <span>${t("agents.files.lines")}</span>
                                 </div>
-                                <div class="md-preview-dialog__chip">
+                                <div class="md-preview-dialog__chip" data-priority="essential">
                                   <strong>${draftByteSize}</strong>
                                   <span>${previewUpdatedLabel}</span>
                                 </div>

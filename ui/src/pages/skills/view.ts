@@ -146,19 +146,11 @@ function skillStatusClass(skill: SkillStatusEntry): string {
 /** Dot+text availability status for a skill row. */
 function skillAvailabilityStatus(skill: SkillStatusEntry): TemplateResult {
   if (skill.disabled) {
-    return renderSettingsStatus({
-      kind: "muted",
-      label: t("skillsPage.tabs.disabled"),
-      carapace: true,
-    });
+    return renderSettingsStatus({ kind: "muted", label: t("skillsPage.tabs.disabled") });
   }
   return isSkillAvailable(skill)
-    ? renderSettingsStatus({ kind: "ok", label: t("skillsPage.tabs.ready"), carapace: true })
-    : renderSettingsStatus({
-        kind: "warn",
-        label: t("skillsPage.tabs.needsSetup"),
-        carapace: true,
-      });
+    ? renderSettingsStatus({ kind: "ok", label: t("skillsPage.tabs.ready") })
+    : renderSettingsStatus({ kind: "warn", label: t("skillsPage.tabs.needsSetup") });
 }
 
 function verdictForSkill(skill: SkillStatusEntry, verdicts: SkillsProps["clawhubVerdicts"]) {
@@ -286,9 +278,7 @@ export function renderSkills(props: SkillsProps) {
         }
         ${
           props.error
-            ? html`<div class="callout danger oc-banner oc-banner-error" role="alert">
-                ${props.error}
-              </div>`
+            ? html`<div class="callout danger" role="alert">${props.error}</div>`
             : nothing
         }
         ${renderClawHubSection(props)}
@@ -300,12 +290,11 @@ export function renderSkills(props: SkillsProps) {
                   !props.connected && !props.report
                     ? t("skillsPage.disconnected")
                     : t("skillsPage.empty"),
-                  { carapace: true },
                 )
               : groups.map((group) => renderSkillGroup(group, props))
         }
       `,
-      { wide: true, carapace: true },
+      { wide: true },
     )}
     ${detailSkill ? renderSkillDetail(detailSkill, props) : nothing}
     ${props.clawhubDetailRef ? renderClawHubDetailDialog(props) : nothing}
@@ -316,14 +305,14 @@ export function renderSkills(props: SkillsProps) {
  * shell so each group keeps the pre-migration expand/collapse interaction. */
 function renderSkillGroup(group: SkillGroup, props: SkillsProps) {
   return html`
-    <details class="settings-section skills-group oc-settings-section" open>
-      <summary class="settings-section__header skills-group__summary oc-settings-section-header">
-        <h2 class="settings-section__heading oc-settings-section-title">
+    <details class="settings-section skills-group" open>
+      <summary class="settings-section__header skills-group__summary">
+        <h2 class="settings-section__heading">
           ${group.label} <span class="settings-count">${group.skills.length}</span>
         </h2>
         <span class="skills-group__chevron" aria-hidden="true">${icons.chevronDown}</span>
       </summary>
-      <div class="settings-group oc-settings-group">
+      <div class="settings-group">
         ${repeat(
           group.skills,
           (skill) => skill.skillKey,
@@ -356,7 +345,6 @@ function renderSkillsToolbar(
             <span class="settings-count">${statusCounts[tab.id]}</span>`,
         })),
         onChange: (value) => props.onStatusFilterChange(value),
-        carapace: true,
       })}
       ${
         agents.length > 1
@@ -389,7 +377,7 @@ function renderSkillsToolbar(
       <label class="plugins-field skills-toolbar__search">
         <span>${t("common.search")}</span>
         <input
-          class="settings-input oc-input"
+          class="settings-input"
           .value=${props.filter}
           @input=${(e: Event) => props.onFilterChange((e.target as HTMLInputElement).value)}
           placeholder=${t("skillsPage.filterPlaceholder")}
@@ -402,7 +390,7 @@ function renderSkillsToolbar(
       </span>
       <button
         type="button"
-        class="btn oc-action oc-action-secondary"
+        class="btn"
         ?disabled=${skillControlsLocked(props) || !props.connected}
         @click=${props.onRefresh}
       >
@@ -417,12 +405,11 @@ function renderClawHubSection(props: SkillsProps) {
     {
       title: t("skillsPage.clawHub"),
       description: t("skillsPage.clawHubSubtitle"),
-      carapace: true,
     },
     html`
-      <div class="settings-row oc-settings-row oc-settings-row-stacked">
+      <div class="settings-row">
         <input
-          class="settings-input plugins-row-input oc-input"
+          class="settings-input plugins-row-input"
           .value=${props.clawhubQuery}
           @input=${(e: Event) => props.onClawHubQueryChange((e.target as HTMLInputElement).value)}
           placeholder=${t("skillsPage.searchClawHub")}
@@ -437,7 +424,7 @@ function renderClawHubSection(props: SkillsProps) {
       </div>
       ${
         props.clawhubSearchError
-          ? html`<div class="callout danger plugins-group-message oc-banner oc-banner-error">
+          ? html`<div class="callout danger plugins-group-message">
               ${props.clawhubSearchError}
             </div>`
           : nothing
@@ -447,11 +434,7 @@ function renderClawHubSection(props: SkillsProps) {
           ? html`<div
               class="callout ${
                 props.clawhubInstallMessage.kind === "error" ? "danger" : "success"
-              } plugins-group-message oc-banner ${
-                props.clawhubInstallMessage.kind === "error"
-                  ? "oc-banner-error"
-                  : "oc-banner-success"
-              }"
+              } plugins-group-message"
             >
               <div
                 style="max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;"
@@ -472,7 +455,7 @@ function renderClawHubResults(props: SkillsProps) {
     return nothing;
   }
   if (results.length === 0) {
-    return renderSettingsEmpty(t("skillsPage.noClawHubResults"), { carapace: true });
+    return renderSettingsEmpty(t("skillsPage.noClawHubResults"));
   }
   return html`
     ${results.map((r) => {
@@ -492,38 +475,30 @@ function renderClawHubResults(props: SkillsProps) {
             : nothing
         }
         <span class="clawhub-skill-result__copy">
-          <span class="settings-row__title oc-settings-row-title">${r.displayName}</span>
-          <span class="settings-row__desc oc-settings-row-description">
+          <span class="settings-row__title">${r.displayName}</span>
+          <span class="settings-row__desc">
             ${r.summary ? `${clampText(r.summary, 100)} · ${ref}` : ref}${trustSuffix}
           </span>
         </span>
       `;
       return html`
-        <div
-          class="settings-row plugins-item oc-settings-row ${
-            detailRef ? "plugins-item--clickable" : ""
-          }"
-        >
+        <div class="settings-row plugins-item ${detailRef ? "plugins-item--clickable" : ""}">
           ${
             detailRef
               ? html`<button
                   type="button"
-                  class="settings-row__text plugins-item__detail-button clawhub-skill-result__button oc-settings-row-content"
+                  class="settings-row__text plugins-item__detail-button clawhub-skill-result__button"
                   aria-label=${t("skillsPage.openDetails", { name: detailRef })}
                   @click=${() => props.onClawHubDetailOpen(detailRef)}
                 >
                   ${rowCopy}
                 </button>`
-              : html`<div
-                  class="settings-row__text clawhub-skill-result__button oc-settings-row-content"
-                >
-                  ${rowCopy}
-                </div>`
+              : html`<div class="settings-row__text clawhub-skill-result__button">${rowCopy}</div>`
           }
-          <div class="settings-row__control oc-settings-row-control">
+          <div class="settings-row__control">
             ${r.version ? renderSettingsValue(`v${r.version}`) : nothing}
             <button
-              class="btn btn--sm oc-action oc-action-secondary"
+              class="btn btn--sm"
               ?disabled=${installed || skillInstallLocked(props)}
               @click=${() => {
                 if (!installed) {
@@ -558,14 +533,8 @@ function renderClawHubDetailDialog(props: SkillsProps) {
       style="--openclaw-modal-width: min(1040px, calc(100vw - 32px));"
       @modal-cancel=${props.onClawHubDetailClose}
     >
-      <div
-        class="md-preview-dialog__panel oc-card ${
-          props.clawhubDetailError && !props.clawhubDetailLoading
-            ? "md-preview-dialog__panel--message-only"
-            : ""
-        }"
-      >
-        <div class="md-preview-dialog__header">
+      <div class="exec-approval-card skill-reader-dialog">
+        <div class="exec-approval-header">
           <div class="clawhub-skill-detail__identity">
             ${
               detailImageUrl
@@ -578,80 +547,96 @@ function renderClawHubDetailDialog(props: SkillsProps) {
                   />`
                 : nothing
             }
-            <div class="md-preview-dialog__title">
+            <div class="exec-approval-title">
               ${detail?.skill?.displayName ?? props.clawhubDetailRef}
             </div>
           </div>
           <button
-            class="btn btn--sm oc-action oc-action-ghost"
+            type="button"
+            class="btn btn--icon btn--ghost"
+            aria-label=${t("skillsPage.close")}
             @click=${props.onClawHubDetailClose}
           >
-            ${t("skillsPage.close")}
+            ${icons.x}
           </button>
         </div>
-        <div class="md-preview-dialog__body" style="display: grid; gap: 16px;">
+        <div class="skill-reader-dialog__body clawhub-skill-detail__body">
           ${
             props.clawhubDetailLoading
               ? html`<div class="muted">${t("common.loading")}</div>`
               : props.clawhubDetailError
-                ? html`<div class="callout danger oc-banner oc-banner-error">
-                    ${props.clawhubDetailError}
+                ? html`<div class="callout danger skill-reader-dialog__error" role="alert">
+                    <span aria-hidden="true">${icons.alertTriangle}</span>
+                    <span>${props.clawhubDetailError}</span>
                   </div>`
                 : detail?.skill
                   ? html`
-                      <div style="font-size: 14px; line-height: 1.5;">
-                        ${detail.skill.summary ?? ""}
-                      </div>
+                      <div>${detail.skill.summary ?? ""}</div>
                       ${
-                        detail.owner?.displayName
-                          ? html`<div class="muted" style="font-size: 13px;">
-                              ${t("skillsPage.by")}
-                              ${detail.owner.displayName}${
-                                detail.owner.handle ? html` (@${detail.owner.handle})` : nothing
+                        detail.owner?.displayName || detail.latestVersion
+                          ? html`<div
+                              class="clawhub-skill-detail__meta muted"
+                              style="letter-spacing: normal;"
+                            >
+                              ${
+                                detail.owner?.displayName
+                                  ? html`${t("skillsPage.by")}
+                                    ${detail.owner.displayName}${
+                                      detail.owner.handle
+                                        ? html` (@${detail.owner.handle})`
+                                        : nothing
+                                    }`
+                                  : nothing
+                              }
+                              ${detail.owner?.displayName && detail.latestVersion ? " · " : nothing}
+                              ${
+                                detail.latestVersion
+                                  ? t("skillsPage.latest", {
+                                      version: detail.latestVersion.version,
+                                    })
+                                  : nothing
                               }
                             </div>`
                           : nothing
                       }
                       ${
-                        detail.latestVersion
-                          ? html`<div class="muted" style="font-size: 13px;">
-                              ${t("skillsPage.latest", { version: detail.latestVersion.version })}
-                            </div>`
-                          : nothing
-                      }
-                      ${
                         detail.latestVersion?.changelog
-                          ? html`<div
-                              style="font-size: 13px; border-top: 1px solid var(--border); padding-top: 12px; white-space: pre-wrap;"
-                            >
-                              ${detail.latestVersion.changelog}
-                            </div>`
+                          ? html`<article class="clawhub-skill-detail__changelog sidebar-markdown">
+                              ${unsafeHTML(
+                                toSanitizedMarkdownHtml(detail.latestVersion.changelog, {
+                                  codeBlockChrome: "none",
+                                  mode: "document",
+                                }),
+                              )}
+                            </article>`
                           : nothing
                       }
                       ${
                         detail.metadata?.os
-                          ? html`<div class="muted" style="font-size: 12px;">
+                          ? html`<div class="clawhub-skill-detail__meta muted">
                               ${t("skillsPage.platforms", { platforms: detail.metadata.os.join(", ") })}
                             </div>`
                           : nothing
                       }
-                      <button
-                        class="btn primary oc-action oc-action-primary"
-                        ?disabled=${skillInstallLocked(props)}
-                        @click=${() => {
-                          if (props.clawhubDetailRef) {
-                            props.onClawHubInstall(props.clawhubDetailRef);
+                      <div class="exec-approval-actions" style="margin-top: 0;">
+                        <button
+                          class="btn primary"
+                          ?disabled=${skillInstallLocked(props)}
+                          @click=${() => {
+                            if (props.clawhubDetailRef) {
+                              props.onClawHubInstall(props.clawhubDetailRef);
+                            }
+                          }}
+                        >
+                          ${
+                            activeClawHubMutation(props, props.clawhubDetailRef ?? "")
+                              ? t("skillsPage.installing")
+                              : props.personalImport
+                                ? t("skillLibrary.import")
+                                : t("skillsPage.installNamed", { name: detail.skill.displayName })
                           }
-                        }}
-                      >
-                        ${
-                          activeClawHubMutation(props, props.clawhubDetailRef ?? "")
-                            ? t("skillsPage.installing")
-                            : props.personalImport
-                              ? t("skillLibrary.import")
-                              : t("skillsPage.installNamed", { name: detail.skill.displayName })
-                        }
-                      </button>
+                        </button>
+                      </div>
                     `
                   : html`<div class="muted">${t("skillsPage.notFound")}</div>`
           }
@@ -666,34 +651,25 @@ function renderSkill(skill: SkillStatusEntry, props: SkillsProps) {
   const verdict = verdictForSkill(skill, props.clawhubVerdicts);
 
   return html`
-    <div class="settings-row plugins-item plugins-item--clickable oc-settings-row">
+    <div class="settings-row plugins-item plugins-item--clickable">
       <button
         type="button"
-        class="settings-row__text plugins-item__detail-button oc-settings-row-content"
+        class="settings-row__text plugins-item__detail-button"
         aria-label=${t("skillsPage.openDetails", { name: skill.name })}
         @click=${() => props.onDetailOpen(skill.skillKey)}
       >
-        <span class="settings-row__title oc-settings-row-title">
+        <span class="settings-row__title">
           ${skill.emoji ? html`<span>${skill.emoji}</span> ` : nothing}${skill.name}
         </span>
-        <span class="settings-row__desc oc-settings-row-description"
-          >${clampText(skill.description, 140)}</span
-        >
+        <span class="settings-row__desc">${clampText(skill.description, 140)}</span>
       </button>
-      <div class="settings-row__control oc-settings-row-control">
+      <div class="settings-row__control">
         ${skillAvailabilityStatus(skill)}
         ${
           skill.clawhub?.status === "linked"
-            ? renderSettingsStatus({
-                ...verdictStatus(verdict, props.clawhubVerdictsLoading),
-                carapace: true,
-              })
+            ? renderSettingsStatus(verdictStatus(verdict, props.clawhubVerdictsLoading))
             : skill.clawhub?.status === "invalid"
-              ? renderSettingsStatus({
-                  kind: "warn",
-                  label: t("skillsPage.invalidLink"),
-                  carapace: true,
-                })
+              ? renderSettingsStatus({ kind: "warn", label: t("skillsPage.invalidLink") })
               : nothing
         }
         ${renderSettingsToggle({
@@ -718,7 +694,7 @@ function renderSkillDetail(skill: SkillStatusEntry, props: SkillsProps) {
   const installOption = skill.install.find((option) =>
     option.bins.some((bin) => missingBins.has(bin)),
   );
-  const showBundledBadge = Boolean(skill.bundled && skill.source !== "openclaw-bundled");
+  const showBundledBadge = skill.bundled && skill.source !== "openclaw-bundled";
   const missing = computeSkillMissing(skill);
   const reasons = computeSkillReasons(skill);
   const verdict = verdictForSkill(skill, props.clawhubVerdicts);
@@ -731,21 +707,23 @@ function renderSkillDetail(skill: SkillStatusEntry, props: SkillsProps) {
       style="--openclaw-modal-width: min(1040px, calc(100vw - 32px));"
       @modal-cancel=${props.onDetailClose}
     >
-      <div class="md-preview-dialog__panel oc-card">
-        <div class="md-preview-dialog__header">
-          <div
-            class="md-preview-dialog__title"
-            style="display: flex; align-items: center; gap: 8px;"
-          >
+      <div class="exec-approval-card skill-reader-dialog">
+        <div class="exec-approval-header">
+          <div class="exec-approval-title" style="display: flex; align-items: center; gap: 8px;">
             <span class="statusDot ${skillStatusClass(skill)}"></span>
             ${skill.emoji ? html`<span style="font-size: 18px;">${skill.emoji}</span>` : nothing}
             <span>${skill.name}</span>
           </div>
-          <button class="btn btn--sm oc-action oc-action-ghost" @click=${props.onDetailClose}>
-            ${t("skillsPage.close")}
+          <button
+            type="button"
+            class="btn btn--icon btn--ghost"
+            aria-label=${t("skillsPage.close")}
+            @click=${props.onDetailClose}
+          >
+            ${icons.x}
           </button>
         </div>
-        <div class="md-preview-dialog__body" style="display: grid; gap: 16px;">
+        <div class="skill-reader-dialog__body" style="display: grid; gap: var(--space-4);">
           <div>
             <div style="font-size: 14px; line-height: 1.5; color: var(--text);">
               ${skill.description}
@@ -768,7 +746,6 @@ function renderSkillDetail(skill: SkillStatusEntry, props: SkillsProps) {
                     ariaLabel: skill.name,
                     panelId: "skill-detail-panel",
                     variant: "sub",
-                    carapace: true,
                     onSelect: props.onDetailTabChange,
                   })}
                 `
@@ -791,7 +768,7 @@ function renderSkillDetail(skill: SkillStatusEntry, props: SkillsProps) {
             missing.length > 0
               ? html`
                   <div
-                    class="callout oc-banner oc-banner-warning"
+                    class="callout"
                     style="border-color: var(--warn-subtle); background: var(--warn-subtle); color: var(--warn);"
                   >
                     <div style="font-weight: 600; margin-bottom: 4px;">
@@ -825,7 +802,7 @@ function renderSkillDetail(skill: SkillStatusEntry, props: SkillsProps) {
             ${
               installOption
                 ? html`<button
-                    class="btn oc-action oc-action-secondary"
+                    class="btn"
                     ?disabled=${installLocked}
                     @click=${() =>
                       installOption &&
@@ -839,13 +816,7 @@ function renderSkillDetail(skill: SkillStatusEntry, props: SkillsProps) {
 
           ${
             message
-              ? html`<div
-                  class="callout ${
-                    message.kind === "error"
-                      ? "danger oc-banner-error"
-                      : "success oc-banner-success"
-                  } oc-banner"
-                >
+              ? html`<div class="callout ${message.kind === "error" ? "danger" : "success"}">
                   ${formatUiExternalText(message.message)}
                 </div>`
               : nothing
@@ -862,7 +833,6 @@ function renderSkillDetail(skill: SkillStatusEntry, props: SkillsProps) {
                         ></span
                       >
                       <input
-                        class="oc-input"
                         type="password"
                         required
                         ?disabled=${updateLocked}
@@ -883,7 +853,7 @@ function renderSkillDetail(skill: SkillStatusEntry, props: SkillsProps) {
                         : nothing;
                     })()}
                     <button
-                      class="btn primary oc-action oc-action-primary"
+                      class="btn primary"
                       ?disabled=${updateLocked || !editValue.trim()}
                       @click=${() => props.onSaveKey(skill.skillKey)}
                     >
@@ -928,7 +898,7 @@ function renderInstalledClawHubOverview(
     return nothing;
   }
   if (link.status === "invalid") {
-    return html`<div class="callout danger oc-banner oc-banner-error">
+    return html`<div class="callout danger">
       <div style="font-weight: 600; margin-bottom: 4px;">${t("skillsPage.invalidLink")}</div>
       <div>${formatUiExternalText(link.reason)}</div>
     </div>`;
@@ -941,7 +911,7 @@ function renderInstalledClawHubOverview(
   const installedRef = `${link.ownerHandle ? `@${link.ownerHandle}/` : ""}${link.slug}@${link.installedVersion}`;
   return html`
     <div
-      class="callout oc-banner"
+      class="callout"
       style="display: grid; gap: 8px; border-color: var(--border); background: var(--panel-strong);"
     >
       <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
@@ -982,7 +952,7 @@ function renderInstalledSkillCard(skill: SkillStatusEntry, props: SkillsProps) {
   if (content === undefined) {
     const error = props.skillCardErrors[skill.skillKey];
     if (error) {
-      return html`<div class="callout danger oc-banner oc-banner-error">${error}</div>`;
+      return html`<div class="callout danger">${error}</div>`;
     }
     return html`<div class="muted" style="font-size: 13px;">
       ${
