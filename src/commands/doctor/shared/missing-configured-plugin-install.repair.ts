@@ -9,9 +9,12 @@ import {
   resolveEffectiveEnableState,
 } from "../../../plugins/config-state.js";
 import { PLUGIN_INSTALL_ERROR_CODE } from "../../../plugins/install-types.js";
-import { writePersistedInstalledPluginIndexInstallRecords } from "../../../plugins/installed-plugin-index-records.js";
+import { writePersistedInstalledPluginIndexInstallRecordsWithLease } from "../../../plugins/installed-plugin-index-records.js";
 import { isPayloadMissing } from "../../../plugins/payload-verification.js";
-import { withPluginLifecycleLease } from "../../../plugins/plugin-lifecycle-lease.js";
+import {
+  withPluginLifecycleLease,
+  type PluginLifecycleLeaseContext,
+} from "../../../plugins/plugin-lifecycle-lease.js";
 import { updateNpmInstalledPlugins, type PluginUpdateOutcome } from "../../../plugins/update.js";
 import { resolveUserPath } from "../../../utils.js";
 import { resolveCompatibilityHostVersion } from "../../../version.js";
@@ -142,13 +145,14 @@ async function repairMissingPluginInstalls(params: {
   beforePersistentEffect?: () => void | Promise<void>;
 }): Promise<RepairMissingPluginInstallsResult> {
   // Baseline, awaited review, package publication, and the index write share one generation.
-  return await withPluginLifecycleLease({ env: params.env }, () =>
-    repairMissingPluginInstallsWithLease(params),
+  return await withPluginLifecycleLease({ env: params.env }, (lease) =>
+    repairMissingPluginInstallsWithLease(params, lease),
   );
 }
 
 async function repairMissingPluginInstallsWithLease(
   params: Parameters<typeof repairMissingPluginInstalls>[0],
+  lease: PluginLifecycleLeaseContext,
 ): Promise<RepairMissingPluginInstallsResult> {
   const env = params.env ?? process.env;
   const {
@@ -411,9 +415,13 @@ async function repairMissingPluginInstallsWithLease(
       ) {
         try {
           await params.beforePersistentEffect?.();
+          // Planning may yield; inherited executor and plugin authority must
+          // still hold at dispatch, with no intervening await.
+          lease.assertOwned();
           await rm(removalPath, { recursive: true, force: true });
         } catch (error) {
           await params.beforePersistentEffect?.();
+          lease.assertOwned();
           warnings.push(
             `Failed to remove broken installed plugin "${candidate.pluginId}" at ${removalPath}: ${String(error)}`,
           );
@@ -438,12 +446,16 @@ async function repairMissingPluginInstallsWithLease(
     }
   }
 
-  const persistedIndexOptions = { config: params.cfg, env };
+  const persistedIndexOptions = { config: params.cfg, env, filePath: lease.databasePath, lease };
   // An explicit baseline may include earlier unpersisted sync/npm changes;
   // commit it even when this repair made no further changes.
   if (nextRecords !== persistedRecords || params.baselineRecords) {
     await params.beforePersistentEffect?.();
-    await writePersistedInstalledPluginIndexInstallRecords(nextRecords, persistedIndexOptions);
+    lease.assertOwned();
+    await writePersistedInstalledPluginIndexInstallRecordsWithLease(
+      nextRecords,
+      persistedIndexOptions,
+    );
   }
   const pluginInventoryChanged = nextRecords !== persistedRecords || repairedPluginIds.size > 0;
   const outcomes = [...failedPlugins.values()].filter((outcome) => outcome !== undefined);

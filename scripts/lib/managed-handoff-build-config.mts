@@ -4,26 +4,28 @@ import type { UserConfig } from "tsdown";
 import { packageActivationRuntimeEntrypoint } from "../../src/infra/package-update-activation-runtime-assets.ts";
 import { managedHandoffRuntimeEntrypoint } from "../../src/infra/update-managed-service-handoff-runtime-assets.ts";
 
-/** The installed CLI and invocation compiler seal the same typed lease owner. */
-export function createManagedHandoffBuildConfig() {
-  return {
-    entry: Object.fromEntries(
-      [managedHandoffRuntimeEntrypoint, packageActivationRuntimeEntrypoint].map((entry) => [
-        entry.distWorkerPath.replace(/\.mjs$/u, ""),
-        fileURLToPath(new URL(`./${entry.sourceWorkerName}.ts`, entry.currentModuleUrl)),
-      ]),
-    ),
-    outDir: "dist",
-    format: "esm",
-    platform: "node",
-    target: "node22",
-    dts: false,
-    envPrefix: [],
-    define: { SEALED_RUNTIME_BUILD: "true" },
-    deps: { alwaysBundle: (id) => !isBuiltin(id), onlyBundle: false },
-    outExtensions: () => ({ js: ".mjs" }),
-    outputOptions: { codeSplitting: false },
-    shims: true,
-    sourcemap: false,
-  } satisfies UserConfig;
+/** Each recovery entry must survive removal of the package without shared chunks. */
+export function createManagedHandoffBuildConfigs() {
+  return [managedHandoffRuntimeEntrypoint, packageActivationRuntimeEntrypoint].map(
+    (entry) =>
+      ({
+        entry: {
+          [entry.distWorkerPath.replace(/\.mjs$/u, "")]: fileURLToPath(
+            new URL(`./${entry.sourceWorkerName}.ts`, entry.currentModuleUrl),
+          ),
+        },
+        outDir: "dist",
+        format: "esm",
+        platform: "node",
+        target: "node22",
+        dts: false,
+        envPrefix: [],
+        define: { SEALED_RUNTIME_BUILD: "true" },
+        deps: { alwaysBundle: (id) => !isBuiltin(id), onlyBundle: false },
+        outExtensions: () => ({ js: ".mjs" }),
+        outputOptions: { codeSplitting: false },
+        shims: true,
+        sourcemap: false,
+      }) satisfies UserConfig,
+  );
 }

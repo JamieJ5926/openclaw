@@ -3,11 +3,13 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
+import * as postCoreConvergence from "../../commands/doctor/shared/post-core-plugin-convergence.js";
 import * as config from "../../config/config.js";
 import { CONFIG_AUDIT_SCOPE } from "../../config/io.audit.js";
+import * as configFactory from "../../config/io.factory.js";
 import { createConfigIO } from "../../config/io.js";
 import { replaceConfigFile } from "../../config/mutate.js";
-import { withConfigWriteLock } from "../../config/write-lock.js";
+import { captureConfigWriteLockGuard, withConfigWriteLock } from "../../config/write-lock.js";
 import { executeSqliteQuerySync, getNodeSqliteKysely } from "../../infra/kysely-sync.js";
 import { openNodeSqliteDatabase } from "../../infra/node-sqlite.js";
 import * as temporaryState from "../../infra/tmp-openclaw-dir.js";
@@ -19,12 +21,20 @@ import {
   POST_CORE_UPDATE_STARTED_AT_ENV,
 } from "../../infra/update-post-core-context.js";
 import { createUpdateRun } from "../../infra/update-run-ledger.js";
+import { withPluginLifecycleLease } from "../../plugins/plugin-lifecycle-lease.js";
+import * as pluginRegistryRefresh from "../../plugins/registry-refresh.js";
+import * as updateCohort from "../../plugins/update-cohort.js";
 import { defaultRuntime } from "../../runtime.js";
 import { withExistingOpenClawStateDatabaseReadOnly } from "../../state/openclaw-state-db-readonly.js";
 import type { DB as OpenClawStateDatabase } from "../../state/openclaw-state-db.generated.js";
 import { closeOpenClawStateDatabaseForTest } from "../../state/openclaw-state-db.js";
 import { withEnvAsync } from "../../test-utils/env.js";
-import { preparePostCorePluginConfig } from "./update-command-config.js";
+import * as pluginBridges from "../plugins-location-bridges.js";
+import {
+  persistRequestedUpdateChannel,
+  persistValidatedDowngradeConfig,
+  preparePostCorePluginConfig,
+} from "./update-command-config.js";
 import { withUpdateCommandExecutor } from "./update-command-executor.js";
 import * as updatePlugins from "./update-command-plugins.js";
 import { resumePostCoreUpdate } from "./update-command-resume.js";
@@ -35,9 +45,13 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it.each([false, true])(
-  "preserves config observation state when post-core preparation loses its executor (suspicious=%s)",
-  async (suspicious) => {
+it.each(
+  (["prepare", "channel", "downgrade", "plugins"] as const).flatMap((flow) =>
+    [false, true].map((suspicious) => ({ flow, suspicious })),
+  ),
+)(
+  "preserves config observation state when $flow loses its executor during a read (suspicious=$suspicious)",
+  async ({ flow, suspicious }) => {
     const home = await fs.realpath(dirs.make("update-config-observation-fence-"));
     const stateDir = path.join(home, "state");
     const configPath = path.join(stateDir, "openclaw.json");
@@ -75,12 +89,21 @@ it.each([false, true])(
         await fs.writeFile(configPath, JSON.stringify(original));
         const io = createConfigIO({ env, configPath, pluginValidation: "skip" });
         expect((await io.readConfigFileSnapshot()).valid).toBe(true);
-        const candidate = JSON.stringify(
-          suspicious
+        const candidate = JSON.stringify({
+          ...(suspicious
             ? { update: { channel: "beta" } }
-            : { ...original, gateway: { ...original.gateway, port: 18791 } },
-        );
+            : { ...original, gateway: { ...original.gateway, port: 18791 } }),
+          ...(flow === "downgrade" ? { meta: { lastTouchedVersion: "9999.0.0" } } : {}),
+        });
         await fs.writeFile(configPath, candidate);
+        const prepared = await createConfigIO({
+          env,
+          configPath,
+          pluginValidation: "skip",
+          observe: false,
+          suppressFutureVersionWarning: true,
+        }).readConfigFileSnapshotForWrite();
+        expect(prepared.snapshot.valid).toBe(true);
         const observations = () =>
           withExistingOpenClawStateDatabaseReadOnly(
             ({ db }) => {
@@ -108,23 +131,92 @@ it.each([false, true])(
         const before = observations();
         expect(before?.health).toHaveLength(1);
         expect(before?.audit).toEqual([]);
-        const plugins = vi
-          .spyOn(updatePlugins, "updatePluginsAfterCoreUpdate")
-          .mockRejectedValue(new Error("Unexpected plugin convergence after ownership loss"));
+        const plugins =
+          flow === "prepare"
+            ? vi
+                .spyOn(updatePlugins, "updatePluginsAfterCoreUpdate")
+                .mockRejectedValue(new Error("Unexpected plugin convergence after ownership loss"))
+            : undefined;
+        const refresh = vi
+          .spyOn(pluginRegistryRefresh, "refreshPluginRegistryAfterConfigMutation")
+          .mockRejectedValue(new Error("Unexpected registry refresh after ownership loss"));
+        if (flow === "plugins") {
+          vi.spyOn(pluginBridges, "listPersistedBundledPluginLocationBridges").mockResolvedValue(
+            [],
+          );
+          vi.spyOn(updateCohort, "convergePluginReleaseCohort").mockImplementation(
+            async ({ config }) => ({
+              config,
+              changed: false,
+              npmChanged: false,
+              sync: {
+                config,
+                changed: false,
+                summary: {
+                  errors: [],
+                  warnings: [],
+                  switchedToBundled: [],
+                  switchedToClawHub: [],
+                  switchedToNpm: [],
+                },
+              },
+              missingPayloads: [],
+              remainingMissingPayloads: [],
+              repairedMissingPayloadIds: new Set<string>(),
+              repairOutcomes: [],
+              updateOutcomes: [],
+            }),
+          );
+          vi.spyOn(postCoreConvergence, "runPostCorePluginConvergence").mockResolvedValue({
+            changes: [],
+            warnings: [],
+            installRecords: {},
+            errored: false,
+            smokeFailures: [],
+          });
+        }
         vi.spyOn(defaultRuntime, "exit").mockImplementation(() => {
           throw new Error("Unexpected post-core completion after ownership loss");
         });
         let preparedBeforeRevocation = false;
-        const realCreateConfigIO = config.createConfigIO;
-        const factory = vi.spyOn(config, "createConfigIO").mockImplementation((options) =>
+        let mutationLockRejected = false;
+        let mutationActive = false;
+        const duringMutation = async <T>(operation: () => Promise<T>): Promise<T> => {
+          mutationActive = true;
+          try {
+            return await operation();
+          } finally {
+            mutationActive = false;
+          }
+        };
+        const mutate = config.mutateConfigFileWithRetry;
+        const replace = config.replaceConfigFile;
+        const mutationBoundary =
+          flow === "plugins"
+            ? vi
+                .spyOn(config, "replaceConfigFile")
+                .mockImplementation((params) => duringMutation(() => replace(params)))
+            : flow === "prepare"
+              ? undefined
+              : vi
+                  .spyOn(config, "mutateConfigFileWithRetry")
+                  .mockImplementation((params) => duringMutation(() => mutate(params)));
+        const factoryModule = flow === "prepare" ? config : configFactory;
+        const realCreateConfigIO = factoryModule.createConfigIO;
+        const factory = vi.spyOn(factoryModule, "createConfigIO").mockImplementation((options) =>
           realCreateConfigIO({
             ...options,
             // Keep the real reader and observer; revoke after snapshot preparation,
             // immediately before observation and the caller's next fence assertion.
             measure: async (name, operation) => {
               const result = await operation();
-              if (name === "config.snapshot.read.materialize" && !preparedBeforeRevocation) {
+              if (
+                name === "config.snapshot.read.materialize" &&
+                !preparedBeforeRevocation &&
+                (flow === "prepare" || mutationActive)
+              ) {
                 preparedBeforeRevocation = true;
+                const lockGuard = captureConfigWriteLockGuard(configPath);
                 const db = openNodeSqliteDatabase(
                   path.join(control, "managed-update-handoffs.sqlite"),
                 );
@@ -136,6 +228,11 @@ it.each([false, true])(
                 } finally {
                   db.close();
                 }
+                if (flow !== "prepare") {
+                  expect(lockGuard).toBeTypeOf("function");
+                  expect(lockGuard).toThrow(/executor|ownership/i);
+                  mutationLockRejected = true;
+                }
               }
               return result;
             },
@@ -144,23 +241,65 @@ it.each([false, true])(
         await expect(
           withUpdateCommandExecutor(run.runId, async (executor) => {
             const executorFence = await executor.enter(root);
-            await resumePostCoreUpdate({
-              root,
-              channel: "stable",
-              opts: { json: true, run: { runId: run.runId, env, executorFence } },
-              timeoutMs: 1_000,
-            });
+            if (flow === "prepare") {
+              await resumePostCoreUpdate({
+                root,
+                channel: "stable",
+                opts: { json: true, run: { runId: run.runId, env, executorFence } },
+                timeoutMs: 1_000,
+              });
+            } else if (flow === "channel") {
+              await persistRequestedUpdateChannel({
+                configSnapshot: prepared.snapshot,
+                requestedChannel: suspicious ? "stable" : "beta",
+                assertCurrent: executorFence.assertCurrent,
+              });
+            } else if (flow === "downgrade") {
+              await persistValidatedDowngradeConfig(prepared.snapshot, executorFence.assertCurrent);
+            } else {
+              await withPluginLifecycleLease({ assertCurrent: executorFence.assertCurrent }, () =>
+                updatePlugins.updatePluginsAfterCoreUpdate({
+                  root,
+                  channel: "stable",
+                  configSnapshot: prepared.snapshot,
+                  configWriteOptions: prepared.writeOptions,
+                  configChanged: true,
+                  pluginInstallRecords: {},
+                  json: true,
+                  timeoutMs: 1_000,
+                  assertCurrent: executorFence.assertCurrent,
+                }),
+              );
+            }
           }),
         ).rejects.toThrow(/executor|ownership|release/i);
         expect(preparedBeforeRevocation).toBe(true);
-        expect(plugins).not.toHaveBeenCalled();
+        if (flow !== "prepare") {
+          expect(mutationLockRejected).toBe(true);
+        }
+        if (plugins) {
+          expect(plugins).not.toHaveBeenCalled();
+        }
+        expect(refresh).not.toHaveBeenCalled();
         expect(observations()).toEqual(before);
         expect(await fs.readFile(configPath, "utf8")).toBe(candidate);
 
         // The update-only fence policy must not disable ordinary config observation.
         factory.mockRestore();
-        const prepared = await preparePostCorePluginConfig({ requestedChannel: null });
-        expect(prepared.configSnapshot.valid).toBe(true);
+        mutationBoundary?.mockRestore();
+        if (flow === "prepare") {
+          const ordinary = await preparePostCorePluginConfig({ requestedChannel: null });
+          expect(ordinary.configSnapshot.valid).toBe(true);
+        } else {
+          const stopAfterRead = new Error("Stop ordinary mutation after its observed read");
+          await expect(
+            config.mutateConfigFileWithRetry({
+              mutate: () => {
+                throw stopAfterRead;
+              },
+            }),
+          ).rejects.toBe(stopAfterRead);
+        }
         const observed = observations();
         expect(observed?.health).not.toEqual(before?.health);
         if (suspicious) {

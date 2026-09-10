@@ -27,6 +27,25 @@ import { VERSION } from "../../version.js";
 
 const PRE_UPDATE_CONFIG_SNAPSHOT_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
+/** Preserve captured path ownership while adding the update's original executor. */
+export function withUpdateConfigWriteAuthority(
+  writeOptions: ConfigWriteOptions,
+  assertCurrent?: () => void,
+): ConfigWriteOptions {
+  if (!assertCurrent) {
+    return writeOptions;
+  }
+  const assertOwner = writeOptions.assertCurrent;
+  return {
+    ...writeOptions,
+    observe: false,
+    assertCurrent: () => {
+      assertOwner?.();
+      assertCurrent();
+    },
+  };
+}
+
 export function normalizePluginInstallRecordMap(
   value: unknown,
 ): Record<string, PluginInstallRecord> {
@@ -250,7 +269,10 @@ export async function persistValidatedDowngradeConfig(
       assertCurrent?.();
       await mutateConfigFileWithRetry({
         mutate: () => undefined,
-        writeOptions: { beforeCommit: assertCurrent },
+        writeOptions: withUpdateConfigWriteAuthority(
+          { beforeCommit: assertCurrent },
+          assertCurrent,
+        ),
       });
     });
   }
@@ -271,7 +293,10 @@ export async function persistRequestedUpdateChannel(params: {
   const requestedChannel = params.requestedChannel;
 
   const mutation = await mutateConfigFileWithRetry({
-    writeOptions: { skipPluginValidation: true, beforeCommit: params.assertCurrent },
+    writeOptions: withUpdateConfigWriteAuthority(
+      { skipPluginValidation: true, beforeCommit: params.assertCurrent },
+      params.assertCurrent,
+    ),
     mutate: (draft) => {
       draft.update = {
         ...draft.update,
@@ -309,10 +334,13 @@ export async function preparePostCorePluginConfig(params: {
   const restored = restoreDroppedPreUpdateChannels(prepared.snapshot, params.preUpdateConfig);
   return {
     configSnapshot: restored.snapshot,
-    configWriteOptions: {
-      ...prepared.writeOptions,
-      ...(params.assertCurrent ? { beforeCommit: params.assertCurrent } : {}),
-    },
+    configWriteOptions: withUpdateConfigWriteAuthority(
+      {
+        ...prepared.writeOptions,
+        ...(params.assertCurrent ? { beforeCommit: params.assertCurrent } : {}),
+      },
+      params.assertCurrent,
+    ),
     configChanged: restored.changed,
     restoredAuthoredChannels: restored.authoredChannels,
   };

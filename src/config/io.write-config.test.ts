@@ -5,8 +5,13 @@ import path from "node:path";
 import chokidar from "chokidar";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { createModelVisibilityPolicy } from "../agents/model-visibility-policy.js";
+import { withUpdateCommandExecutor } from "../cli/update-cli/update-command-executor.js";
 import { startGatewayConfigReloader } from "../gateway/config-reload.js";
 import { executeSqliteQueryTakeFirstSync, getNodeSqliteKysely } from "../infra/kysely-sync.js";
+import {
+  captureManagedUpdateLeaseDatabaseIdentity,
+  createManagedHandoffLeaseDatabase,
+} from "../infra/update-managed-service-handoff-database.js";
 import type { PluginManifestRegistry } from "../plugins/manifest-registry.js";
 import { readConfigMachineState } from "../state/config-machine-state.js";
 import type { DB as OpenClawStateKyselyDatabase } from "../state/openclaw-state-db.generated.js";
@@ -37,6 +42,7 @@ import { ConfigMutationConflictError } from "./mutation-conflict.js";
 import { createProviderConfigFixture } from "./runtime-snapshot.test-fixtures.js";
 import type { AgentModelEntryConfig, AgentModelPolicyConfig } from "./types.agent-defaults.js";
 import type { ConfigFileSnapshot, OpenClawConfig } from "./types.openclaw.js";
+import { withConfigWriteLock } from "./write-lock.js";
 
 const CONFIG_CLOBBER_SNAPSHOT_LIMIT = 32;
 type ConfigHealthDatabase = Pick<OpenClawStateKyselyDatabase, "config_health_entries">;
@@ -3700,9 +3706,18 @@ describe("config io write", () => {
     });
   }
 
-  for (const guarded of [false, true]) {
+  for (const publication of [
+    "ordinary",
+    "prepared-direct",
+    "prepared-runtime",
+    "prepared-mutation",
+    "guarded",
+    "executor-explicit",
+    "executor-ambient",
+  ] as const) {
+    const guarded = publication === "guarded" || publication.startsWith("executor-");
     itWithHome(
-      `${guarded ? "rejects" : "preserves"} copy fallback for ${guarded ? "guarded" : "ordinary"} publication`,
+      `${guarded ? "rejects" : "preserves"} copy fallback for ${publication} publication`,
       async (home) => {
         const { configPath, raw } = await writeConfigFixture(home, {
           gateway: { mode: "local", port: 18789 },
@@ -3721,18 +3736,99 @@ describe("config io write", () => {
           },
         });
         const beforeCommit = vi.fn();
-        const write = io.writeConfigFile(
-          { gateway: { mode: "local", port: 19001 } },
-          guarded ? { beforeCommit } : {},
-        );
-        if (guarded) {
-          await expect(write).rejects.toBe(denied);
+        const prepared =
+          publication !== "ordinary" && publication !== "guarded"
+            ? await io.readConfigFileSnapshotForWrite()
+            : undefined;
+        const assertWriteOutcome = async (assertCurrent?: () => void) => {
+          const options: ConfigWriteOptions = {
+            ...(prepared ? { ...prepared.writeOptions, baseSnapshot: prepared.snapshot } : {}),
+            ...(publication === "guarded" ? { beforeCommit } : {}),
+            ...(assertCurrent ? { assertCurrent } : {}),
+            observe: false,
+            skipPluginValidation: true,
+            skipRuntimeSnapshotRefresh: true,
+          };
+          const nextConfig = { gateway: { mode: "local" as const, port: 19001 } };
+          const write =
+            publication === "prepared-runtime"
+              ? writeConfigFile(nextConfig, options)
+              : publication === "prepared-mutation"
+                ? replaceConfigFile({
+                    snapshot: prepared?.snapshot,
+                    nextConfig,
+                    writeOptions: options,
+                  })
+                : io.writeConfigFile(nextConfig, options);
+          if (guarded) {
+            await expect(write).rejects.toBe(denied);
+            expect(await fs.readFile(configPath, "utf8")).toBe(raw);
+          } else {
+            await write;
+            expect(await readPersistedConfig(configPath)).toMatchObject({
+              gateway: { port: 19001 },
+            });
+            expect(
+              listConfigAuditRecordsForTests({ env: io.env, homedir: () => home }),
+            ).toContainEqual(
+              expect.objectContaining({
+                event: "config.write",
+                configPath,
+                result: "copy-fallback",
+              }),
+            );
+          }
+        };
+        const rename =
+          publication === "prepared-runtime" || publication === "prepared-mutation"
+            ? vi.spyOn(fsNode.promises, "rename").mockRejectedValue(denied)
+            : undefined;
+        try {
+          await withEnvAsync(
+            {
+              OPENCLAW_CONFIG_PATH: configPath,
+              OPENCLAW_STATE_DIR: path.dirname(configPath),
+              OPENCLAW_TEST_FAST: "1",
+            },
+            async () => {
+              if (publication.startsWith("executor-")) {
+                const root = path.join(await fs.realpath(home), "package");
+                await fs.mkdir(root);
+                const databasePath = path.join(home, "control", "managed-update-handoffs.sqlite");
+                createManagedHandoffLeaseDatabase(databasePath)(true, () => undefined);
+                const existingAuthority = {
+                  ...captureManagedUpdateLeaseDatabaseIdentity(databasePath),
+                  installKey: root,
+                };
+                await withUpdateCommandExecutor(
+                  "config-write-fallback",
+                  async (executor) => {
+                    const fence = await executor.enter(root);
+                    if (publication === "executor-explicit") {
+                      await assertWriteOutcome(fence.assertCurrent);
+                    } else {
+                      await withConfigWriteLock(
+                        configPath,
+                        () => assertWriteOutcome(),
+                        io.env,
+                        fence.assertCurrent,
+                      );
+                    }
+                  },
+                  { existingAuthority },
+                );
+              } else {
+                await assertWriteOutcome();
+              }
+            },
+          );
+        } finally {
+          rename?.mockRestore();
+        }
+        if (publication === "guarded") {
           expect(beforeCommit).toHaveBeenCalledOnce();
-          expect(await fs.readFile(configPath, "utf8")).toBe(raw);
         } else {
-          await write;
           expect(beforeCommit).not.toHaveBeenCalled();
-          expect(await readPersistedConfig(configPath)).toMatchObject({ gateway: { port: 19001 } });
         }
       },
     );
