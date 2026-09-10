@@ -79,6 +79,31 @@ function fixture(mode: "merge" | "replace" = "merge") {
 }
 
 describe("prepared catalog source composition", () => {
+  it.each(["merge", "replace"] as const)(
+    "materializes duplicate current declarations once in %s mode",
+    (mode) => {
+      const { facts, generation, configured } = fixture(mode);
+      configured.models = [
+        {
+          ...model("shared"),
+          name: "First current",
+          cost: { input: 7, output: 9, cacheRead: 1, cacheWrite: 2 },
+        },
+        { ...model("shared"), name: "Later duplicate", input: ["text", "image"] },
+      ];
+      const result = prepareConfiguredRuntimeFactsBatch({
+        agentFacts: [facts],
+        pluginGeneration: generation,
+      }).catalogs.get(facts.input)!;
+      const rows = result.templateModelRegistry.getAll().filter((entry) => entry.id === "shared");
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        name: "First current",
+        input: ["text"],
+        cost: { input: 7, output: 9, cacheRead: 1, cacheWrite: 2 },
+      });
+    },
+  );
   it("does not restore noncurrent runtime fallbacks after replace publication", async () => {
     const { facts, generation, modelsJsonContents } = fixture("replace");
     facts.configuredRuntimeModels = [

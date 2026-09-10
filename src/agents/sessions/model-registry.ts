@@ -37,6 +37,7 @@ import {
   normalizeProviderMapKeys,
   type ProviderModelCatalog,
 } from "../models-config.merge.js";
+import { materializeConfiguredProviderCatalogModels } from "../models-config.providers.normalize.js";
 import {
   filterGeneratedPluginModelCatalogProviders,
   isGeneratedPluginModelCatalog,
@@ -538,11 +539,17 @@ export class ModelRegistry {
       customResult.providers,
     );
     const sourceFields = buildSourceModelFields(
-      this.config && projectConfigOntoRuntimeSourceSnapshot(this.config).models?.providers,
-      this.pluginMetadataSnapshot,
+      materializeConfiguredProviderCatalogModels(
+        this.config && projectConfigOntoRuntimeSourceSnapshot(this.config).models?.providers,
+        { manifestPlugins: this.pluginMetadataSnapshot },
+      ),
     );
     for (const [providerId, configured] of Object.entries(
-      normalizeProviderMapKeys(this.config?.models?.providers),
+      normalizeProviderMapKeys(
+        materializeConfiguredProviderCatalogModels(this.config?.models?.providers, {
+          manifestPlugins: this.pluginMetadataSnapshot,
+        }),
+      ),
     )) {
       const inherited = providers[providerId];
       const accepted = new Map(inherited?.models?.map((model) => [model.id, model]));
@@ -562,7 +569,6 @@ export class ModelRegistry {
             providerId,
             modelIdMatching: "exact",
             sourceModelFields: sourceFields,
-            manifestPlugins: this.pluginMetadataSnapshot,
           })
         : current;
       this.providerRequestConfigs.delete(providerId);
@@ -599,7 +605,6 @@ export class ModelRegistry {
           ? mergeProviderModels(existing, provider, {
               providerId,
               modelIdMatching: "exact",
-              manifestPlugins: this.pluginMetadataSnapshot,
             })
           : provider;
       }

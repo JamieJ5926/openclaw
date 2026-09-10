@@ -17,6 +17,7 @@ import {
 } from "./models-config.merge.js";
 import {
   enforceSourceManagedProviderSecrets,
+  materializeConfiguredProviderCatalogModels,
   normalizeProviderCatalogModelsForConfig,
   normalizeProviders,
   resolveImplicitProviders,
@@ -113,12 +114,15 @@ async function resolveProvidersForModelsJson(params: {
 }): Promise<Record<string, ProviderConfig>> {
   const { context } = params;
   const { agentDir, env } = context;
-  const explicitProviders = stripBlankProviderBaseUrls(context.cfg.models?.providers ?? {});
+  const explicitProviders = stripBlankProviderBaseUrls(
+    materializeConfiguredProviderCatalogModels(context.cfg.models?.providers, {
+      manifestPlugins: context.pluginMetadataSnapshot,
+    }) ?? {},
+  );
   const cfg = context.cfg.models?.providers
     ? { ...context.cfg, models: { ...context.cfg.models, providers: explicitProviders } }
     : context.cfg;
-  const manifestPlugins = context.pluginMetadataSnapshot;
-  const sourceModelFields = buildSourceModelFields(context.cfg.models?.providers, manifestPlugins);
+  const sourceModelFields = buildSourceModelFields(explicitProviders);
   // When models.mode is "replace" the user opts out of provider discovery, so
   // skip the (potentially slow) implicit-provider resolver entirely and return
   // only the explicit providers. See openclaw#66957.
@@ -159,7 +163,6 @@ async function resolveProvidersForModelsJson(params: {
     implicit: implicitProviders,
     explicit: explicitProviders,
     sourceModelFields,
-    manifestPlugins,
   });
 }
 
@@ -279,7 +282,6 @@ export async function planOpenClawModelsJson(params: {
 
   const mode = cfg.models?.mode ?? "merge";
   const secretRefManagedProviders = new Set<string>();
-  const manifestPlugins = context.pluginMetadataSnapshot;
   const providerPolicyManifestRegistry =
     context.pluginMetadataSnapshot?.pluginIds === undefined
       ? context.pluginMetadataSnapshot?.manifestRegistry
@@ -292,7 +294,6 @@ export async function planOpenClawModelsJson(params: {
       secretDefaults: cfg.secrets?.defaults,
       sourceConfigForSecrets: context.sourceConfigForSecrets,
       secretRefManagedProviders,
-      manifestPlugins,
       ...(providerPolicyManifestRegistry
         ? { manifestRegistry: providerPolicyManifestRegistry }
         : {}),
@@ -309,9 +310,7 @@ export async function planOpenClawModelsJson(params: {
     secretRefManagedProviders,
   });
   const normalizedMergedProviders =
-    normalizeProviderCatalogModelsForConfig(mergedProviders, {
-      manifestPlugins,
-    }) ?? mergedProviders;
+    normalizeProviderCatalogModelsForConfig(mergedProviders) ?? mergedProviders;
   const secretEnforcedProviders =
     enforceSourceManagedProviderSecrets({
       providers: normalizedMergedProviders,
@@ -332,9 +331,7 @@ export async function planOpenClawModelsJson(params: {
     secretRefManagedProviders,
   });
   const normalizedRootProviders =
-    normalizeProviderCatalogModelsForConfig(rootProviders, {
-      manifestPlugins,
-    }) ?? rootProviders;
+    normalizeProviderCatalogModelsForConfig(rootProviders) ?? rootProviders;
   const rootWithManagedSecrets =
     enforceSourceManagedProviderSecrets({
       providers: normalizedRootProviders,
