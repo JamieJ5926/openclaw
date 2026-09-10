@@ -249,17 +249,12 @@ export default defineSingleProviderPluginEntry({
         });
         return apiKey ? { token: apiKey } : null;
       },
-      fetchUsageSnapshot: async (ctx) => {
-        if (ctx.isAuthProfileCurrent?.() === false) {
-          return null;
-        }
-        return await fetchClawRouterUsage({
+      fetchUsageSnapshot: async (ctx) =>
+        await fetchClawRouterUsage({
           token: ctx.token,
           baseUrl: configuredBaseUrl(ctx.config),
           timeoutMs: ctx.timeoutMs,
-          isAuthProfileCurrent: ctx.isAuthProfileCurrent,
-        });
-      },
+        }),
     };
   },
 });

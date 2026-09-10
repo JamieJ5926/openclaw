@@ -20,7 +20,7 @@ Adds ClawRouter model provider support to OpenClaw.
 ## Surface
 
 - Providers: `clawrouter`
-- Contracts: `accountUsageProviders`, `usageProviders`
+- Contracts: `usageProviders`
 
 ## Related docs
 

@@ -85,8 +85,7 @@
     "musicGenerationProviders": ["openrouter"],
     "videoGenerationProviders": ["openrouter"],
     "speechProviders": ["openrouter"],
-    "usageProviders": ["openrouter"],
-    "accountUsageProviders": ["openrouter"]
+    "usageProviders": ["openrouter"]
   },
   "mediaUnderstandingProviderMetadata": {
     "openrouter": {

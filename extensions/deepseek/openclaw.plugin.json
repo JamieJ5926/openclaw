@@ -7,8 +7,7 @@
   "providerCatalogEntry": "./provider-discovery.ts",
   "providers": ["deepseek"],
   "contracts": {
-    "usageProviders": ["deepseek"],
-    "accountUsageProviders": ["deepseek"]
+    "usageProviders": ["deepseek"]
   },
   "providerEndpoints": [
     {

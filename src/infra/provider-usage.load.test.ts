@@ -1,7 +1,6 @@
 // Covers provider usage summary loading across auth and plugin paths.
 import { createServer } from "node:http";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AuthProfileStore } from "../agents/auth-profiles.js";
 import { AsyncWorkScope } from "../shared/async-work-scope.js";
 import { createDeferredCore } from "../shared/deferred.js";
 import { createProviderUsageFetch, makeResponse } from "../test-utils/provider-usage-fetch.js";
@@ -118,111 +117,41 @@ describe("provider-usage.load", () => {
     expect(summary).toEqual({ updatedAt: usageNow, providers: [] });
   });
 
-  it.each(["async", "sync"])(
-    "pins login-issued API keys through %s candidate resolution",
-    async (helper) => {
-      const authStore: AuthProfileStore = {
+  it("respects selected Codex token expiry", async () => {
+    resolveProviderUsageAuthWithPluginMock.mockImplementation(
+      async ({ context }) => (await context.resolveOAuthToken()) ?? { handled: true },
+    );
+    const fetchMock = createProviderUsageFetch(async () => makeResponse(200, "{}"));
+    resolveProviderUsageSnapshotWithPluginMock.mockImplementation(async ({ context }) => {
+      await context.fetchFn("https://usage.example.invalid", {
+        headers: { Authorization: `Bearer ${context.token}` },
+      });
+      return { provider: "openai", displayName: "OpenAI", windows: [] };
+    });
+    const options = {
+      authProfile: { provider: "openai", profileId: "openai:saved" },
+      authStore: {
         version: 1,
-        order: { openrouter: ["openrouter:login", "openrouter:other", "openrouter:billing"] },
         profiles: {
-          "openrouter:login": {
-            type: "api_key",
-            provider: "openrouter",
-            key: "synthetic-login-key",
-            metadata: { authFlow: "oauth-pkce" },
-          },
-          "openrouter:other": {
-            type: "api_key",
-            provider: "openrouter",
-            key: "synthetic-other-key",
-          },
-          "openrouter:billing": {
-            type: "api_key",
-            provider: "openrouter",
-            key: "synthetic-billing-key",
+          "openai:saved": {
+            type: "token",
+            provider: "openai",
+            token: "synthetic-expired-token",
+            expires: Date.now() - 60_000,
           },
         },
-      };
-      resolveProviderUsageAuthWithPluginMock.mockImplementation(async ({ context }) => {
-        const token =
-          helper === "async"
-            ? (await context.resolveApiKeyCandidatesFromConfigAndStore?.())?.[0]
-            : context.resolveApiKeyFromConfigAndStore();
-        return token ? { token } : undefined;
-      });
-      resolveProviderUsageSnapshotWithPluginMock.mockImplementation(async ({ context }) => ({
-        provider: "openrouter",
-        displayName: "OpenRouter",
-        windows: [{ label: context.token, usedPercent: 10 }],
-      }));
-      const options = {
-        authStore,
-        config: {
-          models: {
-            providers: {
-              openrouter: {
-                apiKey: "openrouter:login",
-                baseUrl: "https://openrouter.ai/api/v1",
-                models: [],
-              },
-            },
-          },
-        },
-        env: {},
-      };
-      const account = await loadProviderUsageSummary({
-        ...options,
-        authProfile: { provider: "openrouter", profileId: "openrouter:login" },
-      });
-      expect(account.providers[0]?.windows).toEqual([
-        { label: "synthetic-login-key", usedPercent: 10 },
-      ]);
-      expect(authStore.profiles["openrouter:login"]).toBeDefined();
-    },
-  );
-
-  it.each(["sync", "async"])(
-    "respects selected-profile token expiry through the %s usage helper",
-    async (helper) => {
-      resolveProviderUsageAuthWithPluginMock.mockImplementation(async ({ context }) => {
-        const token =
-          helper === "sync"
-            ? context.resolveApiKeyFromConfigAndStore()
-            : (await context.resolveApiKeyCandidatesFromConfigAndStore?.())?.[0];
-        return token ? { token } : { handled: true };
-      });
-      const fetchMock = createProviderUsageFetch(async () => makeResponse(200, "{}"));
-      resolveProviderUsageSnapshotWithPluginMock.mockImplementation(async ({ context }) => {
-        await context.fetchFn("https://usage.example.invalid", {
-          headers: { Authorization: `Bearer ${context.token}` },
-        });
-        return { provider: "zai", displayName: "Z.AI", windows: [] };
-      });
-      const options = {
-        authProfile: { provider: "zai", profileId: "zai:saved" },
-        authStore: {
-          version: 1,
-          profiles: {
-            "zai:saved": {
-              type: "token",
-              provider: "zai",
-              token: "synthetic-expired-token",
-              expires: Date.now() - 60_000,
-            },
-          },
-        },
-        config: {},
-        env: {},
-        fetch: fetchMock,
-      } satisfies Parameters<typeof loadProviderUsageSummary>[0];
-      const summary = await loadProviderUsageSummary(options);
-      expect(fetchMock).not.toHaveBeenCalled();
-      expect(summary.providers).toEqual([]);
-      options.authStore.profiles["zai:saved"].expires = Date.now() + 60_000;
-      await loadProviderUsageSummary(options);
-      expect(fetchMock).toHaveBeenCalledOnce();
-    },
-  );
+      },
+      config: {},
+      env: {},
+      fetch: fetchMock,
+    } satisfies Parameters<typeof loadProviderUsageSummary>[0];
+    const summary = await loadProviderUsageSummary(options);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(summary.providers).toEqual([]);
+    options.authStore.profiles["openai:saved"].expires = Date.now() + 60_000;
+    await loadProviderUsageSummary(options);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
 
   it("keeps legacy hooks provider-wide and never invokes them for a selected account", async () => {
     const legacy = [{ provider: "anthropic", displayName: "Claude" }];
@@ -274,16 +203,21 @@ describe("provider-usage.load", () => {
     );
     const summary = await loadProviderUsageSummary({
       now: usageNow,
-      authProfile: { provider: "openrouter", profileId: "openrouter:account" },
-      authStore: { version: 1, profiles: {} },
+      authProfile: { provider: "openai", profileId: "openai:account" },
+      authStore: {
+        version: 1,
+        profiles: {
+          "openai:account": { type: "token", provider: "openai", token: "synthetic-token" },
+        },
+      },
       config: {},
       env: {},
     });
 
     expect(summary.providers).toEqual([
       {
-        provider: "openrouter",
-        displayName: "OpenRouter",
+        provider: "openai",
+        displayName: "OpenAI",
         windows: [],
         error: "Saved account secret is unavailable",
       },
@@ -497,7 +431,12 @@ describe("provider-usage.load", () => {
         const pending = profileIds.map((profileId) =>
           loadProviderUsageSummary({
             authProfile: { provider: "openai", profileId },
-            authStore: { version: 1, profiles: {} },
+            authStore: {
+              version: 1,
+              profiles: {
+                [profileId]: { type: "token", provider: "openai", token: "synthetic-token" },
+              },
+            },
             config: {},
             env: {},
             timeoutMs: 50,
@@ -539,7 +478,12 @@ describe("provider-usage.load", () => {
       const pending = Array.from({ length: 4 }, (_, index) =>
         loadProviderUsageSummary({
           authProfile: { provider: "openai", profileId: `openai:${index}` },
-          authStore: { version: 1, profiles: {} },
+          authStore: {
+            version: 1,
+            profiles: {
+              [`openai:${index}`]: { type: "token", provider: "openai", token: "synthetic-token" },
+            },
+          },
           config: {},
           env: {},
           timeoutMs: 50,

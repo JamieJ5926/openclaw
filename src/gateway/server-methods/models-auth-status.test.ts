@@ -3039,7 +3039,7 @@ describe("models.authUsage", () => {
     });
     mocks.listProviderUsagePluginDescriptors.mockReturnValue([
       { provider: "openai", displayName: "OpenAI", supportsAccountUsage: true },
-      { provider: "anthropic", displayName: "Claude", supportsAccountUsage: true },
+      { provider: "anthropic", displayName: "Claude" },
     ]);
     mocks.loadProviderUsageSummary.mockResolvedValue(usage);
   });
@@ -3075,7 +3075,7 @@ describe("models.authUsage", () => {
   });
 
   it.each(["claude-cli", "openai"])(
-    "routes an external %s account through its usage owner",
+    "loads external Codex accounts and leaves other providers unsupported (%s)",
     async (provider) => {
       const id = `${provider}:external`;
       setPreparedAuthStore({
@@ -3091,11 +3091,16 @@ describe("models.authUsage", () => {
         },
         runtimeExternalProfileIds: [id],
       });
-      await readUsage({ profileId: id });
+      const result = await readUsage({ profileId: id });
+      if (provider === "claude-cli") {
+        expect(result.providers).toEqual([]);
+        expect(mocks.loadProviderUsageSummary).not.toHaveBeenCalled();
+        return;
+      }
       expect(mocks.loadProviderUsageSummary).toHaveBeenCalledWith(
         expect.objectContaining({
           authProfile: {
-            provider: provider === "claude-cli" ? "anthropic" : provider,
+            provider,
             profileId: id,
           },
         }),

@@ -259,7 +259,6 @@ export function describeAnthropicProviderRuntimeContract(
       ).resolves.toEqual({
         provider: "anthropic",
         displayName: "Claude",
-        usageScope: "account",
         windows: [
           { label: "5h", usedPercent: 20, resetAt: Date.parse("2026-01-07T01:00:00Z") },
           { label: "Week", usedPercent: 35, resetAt: Date.parse("2026-01-09T01:00:00Z") },

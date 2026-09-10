@@ -234,13 +234,6 @@ async function fetchAnthropicAdminUsage(params: {
 export async function resolveAnthropicUsageAuth(
   ctx: ProviderResolveUsageAuthContext,
 ): Promise<ProviderResolvedUsageAuth> {
-  if (ctx.authProfileId) {
-    return (
-      (await ctx.resolveOAuthToken({ excludeProfileIds: [CLAUDE_CLI_PROFILE_ID] })) ?? {
-        handled: true,
-      }
-    );
-  }
   const explicitAdminKey =
     cleanProviderUsageCredential(ctx.env.ANTHROPIC_ADMIN_KEY) ??
     cleanProviderUsageCredential(ctx.env.ANTHROPIC_ADMIN_API_KEY);
@@ -303,17 +296,13 @@ export async function fetchAnthropicUsage(
 ): Promise<ProviderUsageSnapshot> {
   const adminKey = decodeAdminToken(ctx.token);
   if (adminKey) {
-    const snapshot = await fetchAnthropicAdminUsage({
+    return await fetchAnthropicAdminUsage({
       apiKey: adminKey,
       timeoutMs: ctx.timeoutMs,
       fetchFn: ctx.fetchFn,
     });
-    return { ...snapshot, usageScope: "provider" };
   }
-  const snapshot = await fetchClaudeUsage(ctx.token, ctx.timeoutMs, ctx.fetchFn, {
-    authProfileId: ctx.authProfileId,
-  });
-  snapshot.usageScope = "account";
+  const snapshot = await fetchClaudeUsage(ctx.token, ctx.timeoutMs, ctx.fetchFn);
   if (snapshot.error) {
     return snapshot;
   }

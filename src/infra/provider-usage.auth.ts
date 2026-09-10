@@ -6,7 +6,6 @@ import {
   ensureAuthProfileStoreWithoutExternalProfiles,
   hasAnyAuthProfileStoreSource,
   resolveApiKeyForProfile,
-  resolveAuthProfileEligibility,
   resolveAuthProfileOrder,
   type AuthProfileStore,
   type AuthProfileCredential,
@@ -16,7 +15,6 @@ import { isNonSecretApiKeyMarker } from "../agents/model-auth-markers.js";
 import { resolveUsableCustomProviderApiKey } from "../agents/model-auth.js";
 import { normalizeProviderId } from "../agents/model-selection.js";
 import { getRuntimeConfig, type OpenClawConfig } from "../config/config.js";
-import { hasConfiguredSecretInput, type SecretInput } from "../config/types.secrets.js";
 import { normalizePluginsConfig } from "../plugins/config-state.js";
 import { loadManifestMetadataSnapshot } from "../plugins/manifest-contract-eligibility.js";
 import {
@@ -44,23 +42,6 @@ export type ProviderAuth = {
 };
 
 type AuthStore = ReturnType<typeof ensureAuthProfileStore>;
-
-function getRequestAuth(cfg: OpenClawConfig, provider: string): SecretInput | undefined {
-  const request = cfg.models?.providers?.[provider]?.request;
-  const auth = request?.auth;
-  const defaults = cfg.secrets?.defaults;
-  // Discovery records configured credentials without validating request secret values.
-  if (auth?.mode === "header" && hasConfiguredSecretInput(auth.value, defaults)) {
-    return auth.value;
-  }
-  if (auth?.mode === "authorization-bearer" && hasConfiguredSecretInput(auth.token, defaults)) {
-    return auth.token;
-  }
-  return Object.entries(request?.headers ?? {}).find(
-    ([name, value]) =>
-      name.toLowerCase() === "authorization" && hasConfiguredSecretInput(value, defaults),
-  )?.[1];
-}
 
 type UsageAuthState = {
   cfg: OpenClawConfig;
@@ -160,7 +141,6 @@ function resolveProviderApiKeyFromConfigAndStore(params: {
   state: UsageAuthState;
   providerIds: string[];
   envDirect?: Array<string | undefined>;
-  profileIds?: readonly string[];
 }): string | undefined {
   return resolveProviderApiKeyCandidatesFromConfigAndStoreSync(params)[0];
 }
@@ -169,10 +149,9 @@ function resolveProviderApiKeyCandidatesFromConfigAndStoreSync(params: {
   state: UsageAuthState;
   providerIds: string[];
   envDirect?: Array<string | undefined>;
-  profileIds?: readonly string[];
 }): string[] {
   const candidates: string[] = [];
-  const configKey = params.profileIds ? undefined : resolveProviderApiKeyFromConfig(params);
+  const configKey = resolveProviderApiKeyFromConfig(params);
   if (configKey) {
     candidates.push(configKey);
   }
@@ -180,32 +159,24 @@ function resolveProviderApiKeyCandidatesFromConfigAndStoreSync(params: {
     return candidates;
   }
 
-  const normalizedProviderIds = normalizeUniqueStringEntries(
-    params.providerIds.map((providerId) => normalizeProviderId(providerId)),
+  const normalizedProviderIds = new Set(
+    normalizeUniqueStringEntries(
+      params.providerIds.map((providerId) => normalizeProviderId(providerId)),
+    ),
   );
   const store = resolveUsageAuthStore(params.state);
-  const profileIds = params.profileIds
-    ? dedupeProfileIds([...params.profileIds])
-    : normalizedProviderIds.flatMap((provider) =>
-        resolveAuthProfileOrder({ cfg: params.state.cfg, store, provider }),
-      );
-  for (const profileId of profileIds) {
-    const credential = store.profiles[profileId];
-    if (!credential || (credential.type !== "api_key" && credential.type !== "token")) {
-      continue;
-    }
-    // Pinning skips account ordering, not credential eligibility. Otherwise a
-    // saved token's expiry or configured auth mode could be bypassed by usage.
-    if (
-      params.profileIds &&
-      !normalizedProviderIds.some(
-        (provider) =>
-          resolveAuthProfileEligibility({ cfg: params.state.cfg, store, provider, profileId })
-            .eligible,
-      )
-    ) {
-      continue;
-    }
+  const credentials = [...normalizedProviderIds]
+    .flatMap((provider) => resolveAuthProfileOrder({ cfg: params.state.cfg, store, provider }))
+    .map((id) => store.profiles[id])
+    .filter(
+      (
+        profile,
+      ): profile is
+        | { type: "api_key"; provider: string; key: string }
+        | { type: "token"; provider: string; token: string } =>
+        profile?.type === "api_key" || profile?.type === "token",
+    );
+  for (const credential of credentials) {
     const value = normalizeSecretInput(
       credential.type === "api_key" ? credential.key : credential.token,
     );
@@ -220,10 +191,9 @@ async function resolveProviderApiKeyCandidatesFromConfigAndStore(params: {
   state: UsageAuthState;
   providerIds: string[];
   envDirect?: Array<string | undefined>;
-  profileIds?: readonly string[];
 }): Promise<string[]> {
   const candidates: string[] = [];
-  const configKey = params.profileIds ? undefined : resolveProviderApiKeyFromConfig(params);
+  const configKey = resolveProviderApiKeyFromConfig(params);
   if (configKey) {
     candidates.push(configKey);
   }
@@ -232,13 +202,11 @@ async function resolveProviderApiKeyCandidatesFromConfigAndStore(params: {
   }
 
   const store = resolveUsageAuthStore(params.state);
-  const profileIds = params.profileIds
-    ? dedupeProfileIds([...params.profileIds])
-    : dedupeProfileIds(
-        normalizeProviderIds(params.providerIds).flatMap((provider) =>
-          resolveAuthProfileOrder({ cfg: params.state.cfg, store, provider }),
-        ),
-      );
+  const profileIds = dedupeProfileIds(
+    normalizeProviderIds(params.providerIds).flatMap((provider) =>
+      resolveAuthProfileOrder({ cfg: params.state.cfg, store, provider }),
+    ),
+  );
   for (const profileId of profileIds) {
     const credential = store.profiles[profileId];
     if (!credential || (credential.type !== "api_key" && credential.type !== "token")) {
@@ -254,12 +222,8 @@ async function resolveProviderApiKeyCandidatesFromConfigAndStore(params: {
         profileId,
         agentDir: params.state.agentDir,
       });
-    } catch (error) {
-      // Unscoped discovery can try another credential. A pinned account must
-      // report its own failure instead of completing with no usage or diagnostic.
-      if (params.profileIds) {
-        throw error;
-      }
+    } catch {
+      // Preserve the remaining credential candidates when one SecretRef fails.
       continue;
     }
     const value = normalizeSecretInput(resolved?.apiKey);
@@ -419,6 +383,10 @@ export async function resolveProviderProfileUsageAuth(params: {
   env?: NodeJS.ProcessEnv;
   onResolvedCredential?: UsageAuthState["onResolvedCredential"];
 }): Promise<ProviderAuth | null> {
+  const credential = params.store.profiles[params.profileId];
+  if (!credential || (credential.type !== "oauth" && credential.type !== "token")) {
+    return null;
+  }
   const state: UsageAuthState = {
     cfg: params.config,
     env: params.env ?? process.env,
@@ -465,19 +433,21 @@ async function resolveProviderUsageAuthViaPlugin(params: {
       // Provider-owned hooks may route API keys to a different billing endpoint
       // even when generic fallback for this usage provider remains OAuth-only.
       resolveApiKeyFromConfigAndStore: (options) =>
-        resolveProviderApiKeyFromConfigAndStore({
-          state: params.state,
-          providerIds: options?.providerIds ?? [params.provider],
-          envDirect: params.authProfileId ? undefined : options?.envDirect,
-          ...(params.authProfileId ? { profileIds: [params.authProfileId] } : {}),
-        }),
+        params.authProfileId
+          ? undefined
+          : resolveProviderApiKeyFromConfigAndStore({
+              state: params.state,
+              providerIds: options?.providerIds ?? [params.provider],
+              envDirect: options?.envDirect,
+            }),
       resolveApiKeyCandidatesFromConfigAndStore: (options) =>
-        resolveProviderApiKeyCandidatesFromConfigAndStore({
-          state: params.state,
-          providerIds: options?.providerIds ?? [params.provider],
-          envDirect: params.authProfileId ? undefined : options?.envDirect,
-          ...(params.authProfileId ? { profileIds: [params.authProfileId] } : {}),
-        }),
+        params.authProfileId
+          ? Promise.resolve([])
+          : resolveProviderApiKeyCandidatesFromConfigAndStore({
+              state: params.state,
+              providerIds: options?.providerIds ?? [params.provider],
+              envDirect: options?.envDirect,
+            }),
       resolveOAuthToken: async (options) => {
         const auth = await resolveOAuthToken({
           state: params.state,
@@ -631,7 +601,6 @@ export async function resolveProviderAuths(params: {
         provider,
       });
       const hasDirectCredentialSource =
-        Boolean(getRequestAuth(stateBase.cfg, provider)) ||
         Boolean(
           resolveProviderApiKeyFromConfig({
             state: directCredentialState,

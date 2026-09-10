@@ -20,7 +20,7 @@ Adds xAI model provider support to OpenClaw.
 ## Surface
 
 - Providers: `xai`
-- Contracts: `accountUsageProviders`, `imageGenerationProviders`, `mediaUnderstandingProviders`, `realtimeTranscriptionProviders`, `realtimeVoiceProviders`, `speechProviders`, `tools`, `usageProviders`, `videoGenerationProviders`, `webSearchProviders`
+- Contracts: `imageGenerationProviders`, `mediaUnderstandingProviders`, `realtimeTranscriptionProviders`, `realtimeVoiceProviders`, `speechProviders`, `tools`, `usageProviders`, `videoGenerationProviders`, `webSearchProviders`
 
 ## Related docs
 

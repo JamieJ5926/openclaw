@@ -20,7 +20,7 @@ Adds GitHub Copilot model provider support to OpenClaw.
 ## Surface
 
 - Providers: `github-copilot`
-- Contracts: `accountUsageProviders`, `embeddingProviders`, `usageProviders`
+- Contracts: `embeddingProviders`, `usageProviders`
 
 ## Related docs
 

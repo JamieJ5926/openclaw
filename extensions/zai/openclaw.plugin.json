@@ -232,8 +232,7 @@
   ],
   "contracts": {
     "mediaUnderstandingProviders": ["zai"],
-    "usageProviders": ["zai"],
-    "accountUsageProviders": ["zai"]
+    "usageProviders": ["zai"]
   },
   "mediaUnderstandingProviderMetadata": {
     "zai": {

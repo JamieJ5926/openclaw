@@ -19,12 +19,7 @@ const resolveApiKeyForProfileMock = vi.fn(
   async (..._args: unknown[]): Promise<{ apiKey: string; provider: string } | null> => null,
 );
 
-vi.mock("../agents/auth-profiles.js", async () => ({
-  resolveAuthProfileEligibility: (
-    await vi.importActual<typeof import("../agents/auth-profiles/order.js")>(
-      "../agents/auth-profiles/order.js",
-    )
-  ).resolveAuthProfileEligibility,
+vi.mock("../agents/auth-profiles.js", () => ({
   dedupeProfileIds: (profileIds: string[]) => [...new Set(profileIds)],
   ensureAuthProfileStore: () => ensureAuthProfileStoreMock(),
   ensureAuthProfileStoreWithoutExternalProfiles: () =>
@@ -164,72 +159,47 @@ describe("resolveProviderAuths plugin boundary", () => {
     expect(ensureAuthProfileStoreMock).not.toHaveBeenCalled();
   });
 
-  it("does not substitute an ambient key for account-scoped plugin usage", async () => {
-    const profileId = "openrouter:account";
-    const store = {
-      profiles: {
-        [profileId]: {
-          type: "api_key",
-          provider: "openrouter",
-          key: "saved-account-key",
-        },
-      },
-    };
-    resolveProviderUsageAuthWithPluginMock.mockImplementationOnce(async (rawParams) => {
-      const params = rawParams as {
-        context: {
-          env: NodeJS.ProcessEnv;
-          resolveApiKeyFromConfigAndStore: (options: {
-            envDirect: Array<string | undefined>;
-          }) => string | undefined;
-        };
-      };
-      const token = params.context.resolveApiKeyFromConfigAndStore({
-        envDirect: [params.context.env.OPENROUTER_API_KEY],
-      });
-      return token ? { token } : null;
-    });
-
+  it("does not invoke account usage hooks for inference API keys", async () => {
     await expect(
       resolveProviderProfileUsageAuth({
-        provider: "openrouter",
-        profileId,
-        store: store as never,
+        provider: "openai",
+        profileId: "openai:key",
+        store: {
+          version: 1,
+          profiles: {
+            "openai:key": { type: "api_key", provider: "openai", key: "synthetic-api-key" },
+          },
+        },
         config: {},
-        env: { OPENROUTER_API_KEY: "ambient-provider-key" },
       }),
-    ).resolves.toEqual({
-      provider: "openrouter",
-      token: "saved-account-key",
-      authProfileId: profileId,
-    });
+    ).resolves.toBeNull();
+    expect(resolveProviderUsageAuthWithPluginMock).not.toHaveBeenCalled();
   });
 
   it("preserves an unavailable secret error for an exact account", async () => {
-    const profileId = "openrouter:account";
+    const profileId = "openai:account";
     const secretError = new Error("Saved account secret is unavailable");
     resolveApiKeyForProfileMock.mockRejectedValueOnce(secretError);
     resolveProviderUsageAuthWithPluginMock.mockImplementationOnce(async (rawParams) => {
       const { context } = rawParams as {
         context: {
-          resolveApiKeyCandidatesFromConfigAndStore: () => Promise<string[]>;
+          resolveOAuthToken: () => Promise<{ token: string } | null>;
         };
       };
-      const [token] = await context.resolveApiKeyCandidatesFromConfigAndStore();
-      return token ? { token } : null;
+      return context.resolveOAuthToken();
     });
 
     await expect(
       resolveProviderProfileUsageAuth({
-        provider: "openrouter",
+        provider: "openai",
         profileId,
         store: {
           version: 1,
           profiles: {
             [profileId]: {
-              type: "api_key",
-              provider: "openrouter",
-              keyRef: { source: "env", provider: "default", id: "ACCOUNT_KEY" },
+              type: "token",
+              provider: "openai",
+              tokenRef: { source: "env", provider: "default", id: "ACCOUNT_KEY" },
             },
           },
         },

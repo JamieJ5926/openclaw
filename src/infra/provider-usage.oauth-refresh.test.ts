@@ -20,7 +20,7 @@ vi.mock("../plugins/provider-runtime.js", async (importOriginal) => {
   return {
     ...actual,
     listProviderUsagePluginDescriptors: () =>
-      ["anthropic", "openrouter"].map((provider) => ({
+      ["openai"].map((provider) => ({
         provider,
         displayName: provider,
         supportsAccountUsage: true,
@@ -29,10 +29,6 @@ vi.mock("../plugins/provider-runtime.js", async (importOriginal) => {
       context,
     }: Parameters<typeof actual.resolveProviderUsageAuthWithPlugin>[0]) => {
       await hooks.auth?.();
-      if (context.provider === "openrouter") {
-        const token = context.resolveApiKeyFromConfigAndStore();
-        return token ? { token } : undefined;
-      }
       return context.resolveOAuthToken();
     },
     resolveProviderOAuthRefreshCapabilityWithPlugin: async () => ({ status: "available" }),
@@ -139,34 +135,30 @@ it.each(["refresh", "config", "replaced", "removed", "bookkeeping", "sibling-ref
       }
       vi.stubGlobal("fetch", transport);
       const agentDir = state.agentDir("default");
-      const provider = change === "refresh" || change === "config" ? "anthropic" : "openrouter";
+      const provider = "openai";
       const profileId = `${provider}:account`;
       const config = {};
       const store =
-        provider === "anthropic"
+        change === "refresh"
           ? createExpiredOauthStore({ profileId, provider })
           : {
               version: 1,
               profiles: {
-                [profileId]: { type: "api_key" as const, provider, key: "synthetic-original" },
+                [profileId]: { type: "token" as const, provider, token: "synthetic-original" },
               },
             };
-      if (change === "config") {
-        store.profiles[profileId] = { type: "token", provider, token: "synthetic-original" };
-      }
       if (change === "refresh") {
-        store.profiles["anthropic:other"] = {
+        store.profiles["openai:other"] = {
           type: "token",
           provider,
           token: "synthetic-other-account",
         };
-        store.order = { anthropic: ["anthropic:other", profileId] };
+        store.order = { openai: ["openai:other", profileId] };
       }
       if (change === "sibling-refresh") {
         Object.assign(
           store.profiles,
-          createExpiredOauthStore({ profileId: "anthropic:sibling", provider: "anthropic" })
-            .profiles,
+          createExpiredOauthStore({ profileId: "openai:sibling", provider: "openai" }).profiles,
         );
       }
       saveAuthProfileStore(store, agentDir);
@@ -215,14 +207,14 @@ it.each(["refresh", "config", "replaced", "removed", "bookkeeping", "sibling-ref
         await started.promise;
         if (change === "sibling-refresh") {
           const revision = getRuntimeAuthProfileStoreCredentialsRevision();
-          const sibling = await read("anthropic:sibling");
+          const sibling = await read("openai:sibling");
           expect(sibling?.[0]).toBe(true);
-          expect(
-            loadPersistedAuthProfileStore(agentDir)?.profiles["anthropic:sibling"],
-          ).toMatchObject({
-            access: "refreshed-access",
-            refresh: "rotated-refresh",
-          });
+          expect(loadPersistedAuthProfileStore(agentDir)?.profiles["openai:sibling"]).toMatchObject(
+            {
+              access: "refreshed-access",
+              refresh: "rotated-refresh",
+            },
+          );
           expect(getRuntimeAuthProfileStoreCredentialsRevision()).toBeGreaterThan(revision);
           expect(loadPersistedAuthProfileStore(agentDir)?.profiles[profileId]).toEqual(
             store.profiles[profileId],
@@ -244,9 +236,9 @@ it.each(["refresh", "config", "replaced", "removed", "bookkeeping", "sibling-ref
             }
             if (change === "replaced") {
               entry.store.profiles[profileId] = {
-                type: "api_key",
+                type: "token",
                 provider,
-                key: "synthetic-replacement",
+                token: "synthetic-replacement",
               };
             }
             entry.store.usageStats = { [profileId]: { lastUsed: Date.now() } };
