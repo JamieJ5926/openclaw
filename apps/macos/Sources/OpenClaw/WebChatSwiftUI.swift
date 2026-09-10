@@ -365,29 +365,28 @@ struct MacGatewayChatTransport: OpenClawChatGatewayTransport {
         return try OpenClawChatGatewayPayloadCodec.decodeAgentsList(data)
     }
 
-    func listSessionGroups(agentID: String?) async throws -> OpenClawChatSessionGroupsResponse? {
-        let data = try await connection.request(OpenClawChatGatewayRequests.sessionGroupsList(agentID: agentID))
+    func listSessionGroups() async throws -> OpenClawChatSessionGroupsResponse? {
+        let data = try await connection.request(OpenClawChatGatewayRequests.sessionGroupsList())
         return try JSONDecoder().decode(OpenClawChatSessionGroupsResponse.self, from: data)
     }
 
-    func putSessionGroups(names: [String], agentID: String?) async throws -> OpenClawChatSessionGroupsMutationResponse {
-        let request = OpenClawChatGatewayRequests.sessionGroupsPut(names: names, agentID: agentID)
+    func putSessionGroups(names: [String]) async throws -> OpenClawChatSessionGroupsMutationResponse {
+        let request = OpenClawChatGatewayRequests.sessionGroupsPut(names: names)
         let data = try await connection.request(request)
         return try JSONDecoder().decode(OpenClawChatSessionGroupsMutationResponse.self, from: data)
     }
 
     func renameSessionGroup(
         name: String,
-        to: String,
-        agentID: String?) async throws -> OpenClawChatSessionGroupsMutationResponse
+        to: String) async throws -> OpenClawChatSessionGroupsMutationResponse
     {
-        let request = OpenClawChatGatewayRequests.sessionGroupsRename(name: name, to: to, agentID: agentID)
+        let request = OpenClawChatGatewayRequests.sessionGroupsRename(name: name, to: to)
         let data = try await connection.request(request)
         return try JSONDecoder().decode(OpenClawChatSessionGroupsMutationResponse.self, from: data)
     }
 
-    func deleteSessionGroup(name: String, agentID: String?) async throws -> OpenClawChatSessionGroupsMutationResponse {
-        let request = OpenClawChatGatewayRequests.sessionGroupsDelete(name: name, agentID: agentID)
+    func deleteSessionGroup(name: String) async throws -> OpenClawChatSessionGroupsMutationResponse {
+        let request = OpenClawChatGatewayRequests.sessionGroupsDelete(name: name)
         let data = try await connection.request(request)
         return try JSONDecoder().decode(OpenClawChatSessionGroupsMutationResponse.self, from: data)
     }

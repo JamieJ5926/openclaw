@@ -445,7 +445,6 @@ public struct OpenClawChatSessionGroup: Codable, Identifiable, Sendable, Hashabl
 }
 
 public struct OpenClawChatSessionGroupsResponse: Codable, Sendable, Equatable {
-    public let agentId: String?
     public let groups: [OpenClawChatSessionGroup]
 }
 
@@ -476,12 +475,10 @@ public struct OpenClawChatAgentChoice: Codable, Identifiable, Sendable, Hashable
 public struct OpenClawChatAgentsListResponse: Codable, Sendable, Equatable {
     public let defaultId: String
     public let agents: [OpenClawChatAgentChoice]
-    public let selectionRequired: Bool?
 
-    public init(defaultId: String, agents: [OpenClawChatAgentChoice], selectionRequired: Bool? = nil) {
+    public init(defaultId: String, agents: [OpenClawChatAgentChoice]) {
         self.defaultId = defaultId
         self.agents = agents
-        self.selectionRequired = selectionRequired
     }
 }
 

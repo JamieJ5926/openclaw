@@ -462,16 +462,13 @@ struct ChatGatewayRequestTests {
     }
 
     @Test func `session group requests encode exact gateway contracts`() {
-        let list = OpenClawChatGatewayRequests.sessionGroupsList(agentID: "research")
-        let put = OpenClawChatGatewayRequests.sessionGroupsPut(names: ["Work", "Personal"], agentID: "research")
-        let rename = OpenClawChatGatewayRequests.sessionGroupsRename(name: "Work", to: "Projects", agentID: "research")
-        let delete = OpenClawChatGatewayRequests.sessionGroupsDelete(name: "Personal", agentID: "research")
+        let list = OpenClawChatGatewayRequests.sessionGroupsList()
+        let put = OpenClawChatGatewayRequests.sessionGroupsPut(names: ["Work", "Personal"])
+        let rename = OpenClawChatGatewayRequests.sessionGroupsRename(name: "Work", to: "Projects")
+        let delete = OpenClawChatGatewayRequests.sessionGroupsDelete(name: "Personal")
 
         #expect(list.method == "sessions.groups.list")
-        #expect(list.params["agentId"]?.value as? String == "research")
-        #expect(put.params["agentId"]?.value as? String == "research")
-        #expect(rename.params["agentId"]?.value as? String == "research")
-        #expect(delete.params["agentId"]?.value as? String == "research")
+        #expect(list.params.isEmpty)
         #expect(put.method == "sessions.groups.put")
         #expect(put.params["names"]?.value as? [String] == ["Work", "Personal"])
         #expect(rename.method == "sessions.groups.rename")

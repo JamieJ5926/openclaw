@@ -223,9 +223,7 @@ function snapshot(cfg: OpenClawConfig, env: NodeJS.ProcessEnv): Plan {
       ].join("\n"),
     );
   }
-  const sources = discovery.targets
-    .map(({ agentId, path: storePath }) => ({ agentId, path: storePath }))
-    .toSorted((a, b) => a.path.localeCompare(b.path));
+  const sources = discovery.targets.toSorted((a, b) => a.path.localeCompare(b.path));
   const members: Plan["members"] = [];
   const entries = new Map<string, { agentId: string; key: string; category: string }>();
   // Non-category section order belongs to every known agent, even without a custom group.
@@ -296,9 +294,7 @@ function snapshot(cfg: OpenClawConfig, env: NodeJS.ProcessEnv): Plan {
   members.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
   const append = (agentId: string, group: Group) => {
     const rows = destinations.get(agentId) ?? [];
-    if (!rows.some((r) => r.name === group.name)) {
-      rows.push(group);
-    }
+    rows.push(group);
     destinations.set(agentId, rows);
   };
   for (const group of groups) {

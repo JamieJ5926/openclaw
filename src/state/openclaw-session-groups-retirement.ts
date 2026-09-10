@@ -8,11 +8,11 @@ import {
 import { StartupMaintenanceRequiredError } from "../infra/startup-maintenance-required.js";
 import { tableExists } from "./openclaw-state-db-schema-helpers.js";
 import { readStateSchemaContentVersion } from "./openclaw-state-db-schema-version.js";
-import type { DB } from "./openclaw-state-db.generated.js";
 import {
   assertNoRetiredStateTableDependencies,
   assertRetainedVirtualTablesUsable,
-} from "./sqlite-retirement-dependencies.js";
+} from "./openclaw-state-db-table-retirements.js";
+import type { DB } from "./openclaw-state-db.generated.js";
 
 // Pin the historical source contract independently of future agent catalog changes.
 const LEGACY_SESSION_GROUPS_SCHEMA_SQL = `

@@ -10,30 +10,34 @@ import {
   submitInputDialog,
 } from "./session-management.test-support.ts";
 
+const agentsList = {
+  agents: [
+    { id: "main", name: "Main" },
+    { id: "research", name: "Research" },
+  ],
+  defaultId: "main",
+  mainKey: "main",
+  scope: "per-sender",
+};
+const agentMethodResponses = {
+  "agents.list": agentsList,
+  "chat.startup": {
+    agentsList,
+    messages: [],
+    metadata: { models: [] },
+    sessionId: "main-session",
+    thinkingLevel: null,
+  },
+};
+
 export function defineAgentGroupTests(suite: ReturnType<typeof createSessionManagementE2eSuite>) {
   it("retires a rename dialog after selecting another agent and returning", async () => {
     const context = await suite.browser.newContext(createControlUiE2eContextOptions());
     const page = await context.newPage();
-    const agentsList = {
-      agents: [
-        { id: "main", name: "Main" },
-        { id: "research", name: "Research" },
-      ],
-      defaultId: "main",
-      mainKey: "main",
-      scope: "per-sender",
-    };
     const gateway = await installMockGateway(page, {
       sessionGroupsByAgent: { main: ["Shared"], research: ["Shared"] },
       methodResponses: {
-        "agents.list": agentsList,
-        "chat.startup": {
-          agentsList,
-          messages: [],
-          metadata: { models: [] },
-          sessionId: "main-session",
-          thinkingLevel: null,
-        },
+        ...agentMethodResponses,
         "sessions.list": sessionsListResponse([]),
       },
     });
@@ -72,15 +76,6 @@ export function defineAgentGroupTests(suite: ReturnType<typeof createSessionMana
       viewport: { width, height: 900 },
     });
     const page = await context.newPage();
-    const agentsList = {
-      agents: [
-        { id: "main", name: "Main" },
-        { id: "research", name: "Research" },
-      ],
-      defaultId: "main",
-      mainKey: "main",
-      scope: "per-sender",
-    };
     const gateway = await installMockGateway(page, {
       assistantName: "Main",
       sessionGroupsByAgent: {
@@ -93,7 +88,7 @@ export function defineAgentGroupTests(suite: ReturnType<typeof createSessionMana
       },
       workspace: "/workspace",
       methodResponses: {
-        "agents.list": agentsList,
+        ...agentMethodResponses,
         "agent.identity.get": {
           cases: [
             {
@@ -105,13 +100,6 @@ export function defineAgentGroupTests(suite: ReturnType<typeof createSessionMana
               response: { agentId: "research", name: "Research", avatar: "", emoji: "🔬" },
             },
           ],
-        },
-        "chat.startup": {
-          agentsList,
-          messages: [],
-          metadata: { models: [] },
-          sessionId: "main-session",
-          thinkingLevel: null,
         },
         "sessions.list": {
           cases: [
@@ -155,7 +143,6 @@ export function defineAgentGroupTests(suite: ReturnType<typeof createSessionMana
         );
       });
       await captureUiProof(suite, page, `groups-per-agent-main-${width}.png`);
-      // The native sidebar switch menu is the real selection control.
       await sidebar.getByRole("button", { name: /Switch agent/ }).click();
       await sidebar
         .locator("wa-dropdown.sidebar-agent-menu")

@@ -175,7 +175,6 @@ public struct ChatSessionsSheet: View {
             }
             .sheet(isPresented: self.$isPresentingGroups) {
                 ChatSessionGroupsSheet(viewModel: self.viewModel)
-                    .id(self.viewModel.sessionGroupsAgentID)
             }
             .sheet(item: self.$inspectedSession) { session in
                 ChatSessionInspectorSheet(viewModel: self.viewModel, session: session)

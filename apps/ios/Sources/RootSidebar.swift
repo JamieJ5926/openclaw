@@ -575,11 +575,13 @@ struct RootSidebar: View {
     }
 
     private var sessionCategories: [String] {
-        self.sessionGroups.map(\.name)
+        CommandSessionGrouping.categories(from: self.model.sessions, knownGroups: SessionGroupStore.load())
     }
 
     private var sessionGroups: [OpenClawChatSessionGroup] {
-        self.model.sessionGroups(appModel: self.appModel)
+        self.sessionCategories.enumerated().map { offset, name in
+            OpenClawChatSessionGroup(name: name, position: offset)
+        }
     }
 
     private static func flattened(_ nodes: [ChatSessionSidebarModel.Node]) -> [ChatSessionSidebarModel.Node] {

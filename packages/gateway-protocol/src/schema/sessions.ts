@@ -588,7 +588,7 @@ export const SessionsGroupsDefaultsResultSchema = closedObject({
   defaults: Type.Array(SessionGroupDefaultsSchema),
 });
 
-/** Replaces one agent's ordered catalog and clears categories for removed groups. */
+/** Replaces one agent's ordered catalog; rejects removing groups with members. */
 export const SessionsGroupsPutParamsSchema = closedObject({
   agentId: Type.Optional(NonEmptyString),
   names: Type.Array(SessionLabelString),

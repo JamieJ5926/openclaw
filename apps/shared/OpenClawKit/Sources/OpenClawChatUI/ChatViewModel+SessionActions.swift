@@ -149,23 +149,13 @@ extension OpenClawChatViewModel {
         return routeLease
     }
 
-    var sessionGroupsAgentID: String? {
-        self.activeAgentId
-            ?? OpenClawChatSessionKey.agentID(from: self.sessionKey)
-            ?? OpenClawChatSessionRoutingContract.parse(self.sessionRoutingContract)?.defaultAgentID
-    }
-
     public func fetchSessionGroups() async throws -> [OpenClawChatSessionGroup] {
         let routeLease = try await self.sessionGroupsRouteLease()
         return try await self.fetchSessionGroups(using: routeLease)
     }
 
     func sessionGroupsRouteLease() async throws -> OpenClawChatSessionGroupsRouteLease {
-        try await self.sessionGroupsRouteLease(agentID: self.sessionGroupsAgentID)
-    }
-
-    func sessionGroupsRouteLease(agentID: String?) async throws -> OpenClawChatSessionGroupsRouteLease {
-        guard let routeLease = await self.transport.acquireSessionGroupsRouteLease(agentID: agentID) else {
+        guard let routeLease = await self.transport.acquireSessionGroupsRouteLease() else {
             throw OpenClawChatTransportSendError.notDispatched
         }
         return routeLease
