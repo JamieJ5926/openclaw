@@ -43,15 +43,19 @@ import {
   resolveGlobalManager,
   resolveNodeRunner,
   resolveTargetVersion,
-  tryResolveInvocationCwd,
   type UpdateCommandOptions,
 } from "./shared.js";
 import { readUpdateChannelConfig } from "./update-command-config.js";
 import { printUpdateDryRun } from "./update-command-dry-run.js";
 import type { UpdateCommandExecutor } from "./update-command-executor.js";
-import { withUpdateCommandExecutor } from "./update-command-executor.js";
-import { withOwnedManagedUpdateEnv } from "./update-command-managed-context.js";
 import {
+  captureUpdateCommandExecutorAuthority,
+  withUpdateCommandExecutor,
+} from "./update-command-executor.js";
+import { withOwnedManagedUpdateEnv } from "./update-command-managed-context.js";
+import { runUpdateCommandWithPostCoreExecutor } from "./update-command-post-core-executor.js";
+import {
+  assertUpdatePackageActivationAdmission,
   reportPreMutationUpdateFailure,
   UpdateCommandFailure,
   withUpdateAdmissionReporting,
@@ -79,26 +83,19 @@ import { withUpdateCommandRecoveryUnwind } from "./update-command-unwind.js";
 const DEFAULT_UPDATE_STEP_TIMEOUT_MS = 30 * 60_000;
 
 export async function updateCommand(inputOpts: UpdateCommandOptions): Promise<void> {
-  const invocationCwd = tryResolveInvocationCwd();
+  return withUpdateAdmissionReporting(inputOpts, () =>
+    runUpdateCommandWithPostCoreExecutor(inputOpts, executeUpdateCommand),
+  );
+}
+
+async function executeUpdateCommand(
+  inputOpts: UpdateCommandOptions,
+  prepared: Awaited<ReturnType<typeof prepareUpdateCommand>>,
+  invocationCwd: string | undefined,
+): Promise<void> {
   const recoveryState: UpdateCommandRecoveryState = {
     triageTarget: { env: resolveServiceRefreshEnv(process.env, invocationCwd) },
   };
-  // Rejected arguments and handoffs must not open or recover persistent state.
-  const prepared = await withUpdateAdmissionReporting(inputOpts, () =>
-    withUpdateInProgressEnv(invocationCwd, () => prepareUpdateCommand(inputOpts)),
-  );
-  // Post-core children report phase results; the outer updater owns the run ledger.
-  if (prepared.postCoreUpdateResume) {
-    return await withUpdateInProgressEnv(invocationCwd, async () => {
-      const { resumePostCoreUpdate } = await import("./update-execution.runtime.js");
-      await resumePostCoreUpdate({
-        root: prepared.discoveredRoot,
-        channel: prepared.postCoreUpdateChannel,
-        opts: inputOpts,
-        timeoutMs: prepared.timeoutMs ?? DEFAULT_UPDATE_STEP_TIMEOUT_MS,
-      });
-    });
-  }
   const admission = {
     opts: inputOpts,
     root: prepared.servicePlan?.rootRedirect?.root ?? prepared.discoveredRoot,
@@ -308,8 +305,12 @@ async function updateCommandInternal(
   // Read-only native/root admission is complete. Own interruption settlement
   // before metadata can block, but defer mutable housekeeping until target admission.
   if (updateInstallKind === "package" && !opts.dryRun) {
+    assertUpdatePackageActivationAdmission(root);
     run.executorFence = await executor.enter(root, { preflight: true });
     run.executorFence.assertCurrent();
+    assertUpdatePackageActivationAdmission(
+      captureUpdateCommandExecutorAuthority(run.executorFence).installKey,
+    );
   }
 
   if (updateInstallKind !== "git") {
@@ -600,12 +601,16 @@ async function updateCommandInternal(
   > = {};
   let mutableUpdatePrepared = false;
   const prepareMutableUpdate = async (env?: NodeJS.ProcessEnv) => {
+    if (!mutableUpdatePrepared) {
+      assertUpdatePackageActivationAdmission(root);
+    }
     const fence = await executor.enter(root);
     run.executorFence = fence;
     fence.assertCurrent();
     if (mutableUpdatePrepared) {
       return;
     }
+    assertUpdatePackageActivationAdmission(captureUpdateCommandExecutorAuthority(fence).installKey);
     // Cleanup, state-write admission and updater autostart belong after complete target admission.
     await withOwnedManagedUpdateEnv(env, async () => {
       await cleanupStaleManagedServiceUpdateHandoffs().catch(() => undefined);

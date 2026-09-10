@@ -8,6 +8,7 @@ import {
 } from "../../infra/error-diagnostics.js";
 import { collectNestedErrorCandidates } from "../../infra/error-graph-internal.js";
 import { formatErrorMessage, formatUncaughtError } from "../../infra/errors.js";
+import { assertNoPendingPackageActivation } from "../../infra/package-update-activation.js";
 import type { PackageUpdateTransaction } from "../../infra/package-update-steps.js";
 import { isSqliteLockError } from "../../infra/sqlite-transaction.js";
 import type { readUpdateStateSchemaVersions } from "../../infra/update-candidate-state.js";
@@ -18,6 +19,7 @@ import {
   type ControlPlaneUpdateSentinelMetaFile,
 } from "../../infra/update-control-plane-sentinel.js";
 import { verifyPackageUpdateRecovery } from "../../infra/update-global.js";
+import { resolveUpdateInstallRoot } from "../../infra/update-install-root.js";
 import { getUpdateRun, recordUpdateRunPhase } from "../../infra/update-run-ledger.js";
 import { readCurrentGitUpdateRecovery } from "../../infra/update-runner-git-recovery.js";
 import type { UpdateRunResult } from "../../infra/update-runner.js";
@@ -71,6 +73,9 @@ export async function withUpdateAdmissionReporting<T>(
   try {
     return await admit();
   } catch (error) {
+    if (error instanceof UpdateCommandPendingRecoveryFailure) {
+      return reportUpdateCommandPendingRecovery(error, opts);
+    }
     if (!(error instanceof GatewayServiceUpdateOwnershipError)) {
       throw error;
     }
@@ -124,6 +129,43 @@ export class UpdateCommandPendingRecoveryFailure extends UpdateCommandFailure {
     );
     this.name = "UpdateCommandPendingRecoveryFailure";
   }
+}
+
+/** Package admission must not open history or launch diagnostics on a retained operation. */
+export function assertUpdatePackageActivationAdmission(
+  root: string,
+  options?: Parameters<typeof assertNoPendingPackageActivation>[1],
+): void {
+  try {
+    assertNoPendingPackageActivation(resolveUpdateInstallRoot(root), options);
+  } catch (cause) {
+    throw new UpdateCommandPendingRecoveryFailure(
+      {
+        status: "error",
+        mode: "unknown",
+        root,
+        reason: "update-recovery-pending",
+        steps: [],
+        durationMs: 0,
+      },
+      formatErrorMessage(cause),
+      { cause },
+    );
+  }
+}
+
+export function reportUpdateCommandPendingRecovery(
+  error: UpdateCommandPendingRecoveryFailure,
+  opts: Pick<UpdateCommandOptions, "json">,
+): never {
+  // printResult resolves history, which may be part of the retained evidence.
+  if (opts.json) {
+    defaultRuntime.writeJson(error.result);
+  }
+  defaultRuntime.error(
+    `Update recovery remains pending (${error.result.reason ?? "update-failed"}). Retained state and artifacts were left for the owning updater to reconcile; automatic restart and repair were not attempted.${error.detail ? `\n${error.detail}` : ""}`,
+  );
+  return exitCliAfterOutput(defaultRuntime, error.exitCode);
 }
 
 /** Reporting-only marker: the durable finalizer already committed and printed the outcome. */

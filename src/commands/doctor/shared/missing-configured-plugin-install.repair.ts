@@ -76,6 +76,7 @@ export async function repairMissingConfiguredPluginInstalls(params: {
   cfg: OpenClawConfig;
   env?: NodeJS.ProcessEnv;
   onCapabilityConsent?: PluginCapabilityConsentHandler;
+  beforePersistentEffect?: () => void | Promise<void>;
   /**
    * Optional pre-seeded records. When provided, this map is used instead of
    * the disk-loaded install-record snapshot. Pass the in-memory records
@@ -92,6 +93,7 @@ export async function repairMissingConfiguredPluginInstalls(params: {
     channelIds: collectConfiguredChannelIds(params.cfg, params.env),
     blockedPluginIds: collectBlockedPluginIds(params.cfg),
     ...(params.onCapabilityConsent ? { onCapabilityConsent: params.onCapabilityConsent } : {}),
+    beforePersistentEffect: params.beforePersistentEffect,
     ...(params.baselineRecords ? { baselineRecords: params.baselineRecords } : {}),
   });
 }
@@ -408,8 +410,10 @@ async function repairMissingPluginInstallsWithLease(
           !installPathsEqual(resolveUserPath(installedRecord.installPath, env), removalPath))
       ) {
         try {
+          await params.beforePersistentEffect?.();
           await rm(removalPath, { recursive: true, force: true });
         } catch (error) {
+          await params.beforePersistentEffect?.();
           warnings.push(
             `Failed to remove broken installed plugin "${candidate.pluginId}" at ${removalPath}: ${String(error)}`,
           );
