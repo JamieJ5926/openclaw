@@ -67,9 +67,9 @@ export function createEmbeddedRunLaneController<TParams extends LaneParams>(opti
   ]);
   let laneTaskProgressAtMs = Date.now();
   let laneTaskDeadline: CommandQueueTaskDeadline | undefined;
-  let notifyLaneTaskDeadline:
-    | ((deadline: CommandQueueTaskDeadline | undefined) => void)
-    | undefined;
+  const laneTaskDeadlineSubscribers = new Set<
+    (deadline: CommandQueueTaskDeadline | undefined) => void
+  >();
   const setLaneTaskDeadline = (deadline: CommandQueueTaskDeadline | undefined) => {
     laneTaskDeadline =
       deadline?.kind === "bounded"
@@ -78,7 +78,9 @@ export function createEmbeddedRunLaneController<TParams extends LaneParams>(opti
             deadlineAtMs: deadline.deadlineAtMs + EMBEDDED_RUN_LANE_TIMEOUT_GRACE_MS,
           }
         : deadline;
-    notifyLaneTaskDeadline?.(laneTaskDeadline);
+    for (const notifyDeadline of laneTaskDeadlineSubscribers) {
+      notifyDeadline(laneTaskDeadline);
+    }
   };
   let pendingGlobalLaneAdmissions = 0;
   let releaseQueuedRunContext: ReturnType<typeof retainQueuedAgentRunContext>;
@@ -224,13 +226,9 @@ export function createEmbeddedRunLaneController<TParams extends LaneParams>(opti
             ? Date.now()
             : laneTaskProgressAtMs,
         taskTimeoutSubscribe: (onDeadline) => {
-          notifyLaneTaskDeadline = onDeadline;
+          laneTaskDeadlineSubscribers.add(onDeadline);
           onDeadline(laneTaskDeadline);
-          return () => {
-            if (notifyLaneTaskDeadline === onDeadline) {
-              notifyLaneTaskDeadline = undefined;
-            }
-          };
+          return () => laneTaskDeadlineSubscribers.delete(onDeadline);
         },
         taskTimeoutAbortSignal: abortSignal,
         taskTimeoutAbortGraceMs: EMBEDDED_RUN_LANE_TIMEOUT_GRACE_MS,
