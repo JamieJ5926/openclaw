@@ -192,6 +192,9 @@ export function adoptStartedChatRun(
       requestUpdate: false,
     });
     host.chatRunError = null;
+    if (host.providerPolicyNotice?.runId !== runId) {
+      host.providerPolicyNotice = null;
+    }
   }
   host.chatRunId = runId;
   setChatRunOwner(host, runId);
