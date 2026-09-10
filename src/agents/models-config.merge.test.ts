@@ -125,10 +125,12 @@ describe("models-config merge helpers", () => {
         explicit: { example: explicit },
       });
       const provider = merged.example;
-      const selected = provider.models.find((model) => model.id === implicit.models[0].id);
+      const selected = provider?.models.find(
+        (model) => model.id === (overlap ? "config-model" : "catalog-only"),
+      );
       expect(selected).toBeDefined();
-      expect(selected?.api ?? provider.api).toBe(explicit.api);
-      expect(selected?.baseUrl ?? provider.baseUrl).toBe(explicit.baseUrl);
+      expect(selected?.api ?? provider?.api).toBe(explicit.api);
+      expect(selected?.baseUrl ?? provider?.baseUrl).toBe(explicit.baseUrl);
     },
   );
 
