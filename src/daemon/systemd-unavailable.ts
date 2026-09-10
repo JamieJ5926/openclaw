@@ -1,4 +1,5 @@
 /** Classifies systemd/systemctl unavailable errors into user-facing categories. */
+import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 import type { ExecResult } from "./exec-file.js";
 
 export type SystemdUnavailableKind =
