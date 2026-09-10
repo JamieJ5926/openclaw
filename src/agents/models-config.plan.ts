@@ -3,7 +3,6 @@
  * this module to merge implicit provider discovery, explicit config, and
  * preserved secrets before touching models.json.
  */
-import { mergeModelCost } from "../config/model-cost.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { PluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot.js";
 import type { ProviderCatalogOutcome } from "../plugins/provider-catalog.types.js";
@@ -11,14 +10,9 @@ import type { PreparedProviderStaticCatalog } from "../plugins/provider-discover
 import { isRecord } from "../utils.js";
 import type { AuthProfileStore } from "./auth-profiles/types.js";
 import {
-  modelKey,
-  createConfiguredProviderCatalogModelIdNormalizer,
-  type ModelManifestNormalizationContext,
-} from "./model-ref-shared.js";
-import {
+  buildSourceModelFields,
   mergeProviders,
   mergeWithExistingProviderSecrets,
-  normalizeProviderMapKeys,
   type ExistingProviderConfig,
   type SourceModelFields,
 } from "./models-config.merge.js";
@@ -130,29 +124,6 @@ function buildPluginCatalogWrites(
       `${JSON.stringify({ generatedBy: PLUGIN_MODEL_CATALOG_GENERATED_BY, providers }, null, 2)}\n`,
     ]),
   );
-}
-
-function buildSourceModelFields(
-  sourceProviders: Record<string, ProviderConfig> | undefined,
-  manifestPlugins: ModelManifestNormalizationContext["manifestPlugins"],
-): SourceModelFields {
-  const normalizeModelId = createConfiguredProviderCatalogModelIdNormalizer({ manifestPlugins });
-  const fields = new Map<
-    string,
-    { inputOmitted: boolean; cost: ReturnType<typeof mergeModelCost> }
-  >();
-  for (const [providerId, provider] of Object.entries(normalizeProviderMapKeys(sourceProviders))) {
-    for (const model of provider.models ?? []) {
-      const key = modelKey(providerId, normalizeModelId(providerId, model.id));
-      const existing = fields.get(key);
-      fields.set(key, {
-        inputOmitted: existing?.inputOmitted || !Object.hasOwn(model, "input"),
-        // Duplicate source rows keep the same first-authored priority as publication.
-        cost: mergeModelCost(model.cost, existing?.cost),
-      });
-    }
-  }
-  return fields;
 }
 
 /** Resolves providers for models.json with injectable implicit-provider discovery. */

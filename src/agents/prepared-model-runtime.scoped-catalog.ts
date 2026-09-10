@@ -47,17 +47,13 @@ async function prepareScopedReadOnlyModelCatalogWithMode(
     false,
     catalogMode === "live" ? { providerDiscoveryProviderIds } : {},
   );
-  const { modelCatalog, configuredRuntimeModels } = await prepareFullCatalogFacts(
+  const { modelCatalog } = await prepareFullCatalogFacts(
     agentFactsForInput,
     pluginGeneration,
     catalogMode,
     catalogSource,
   );
-  return materializePreparedModelCatalog(
-    modelCatalog,
-    agentFactsForInput.runtimeCapabilityModels,
-    configuredRuntimeModels,
-  );
+  return materializePreparedModelCatalog(modelCatalog, agentFactsForInput.runtimeCapabilityModels);
 }
 
 /** Builds a request-scoped read-only catalog without executing live provider discovery. */
