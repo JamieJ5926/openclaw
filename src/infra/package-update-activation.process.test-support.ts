@@ -518,8 +518,19 @@ export function startActivationHelper(
 
 async function runOriginalActivation(value: ActivationFixture, mode: string) {
   if (mode === "admission") {
-    const { assertNoPendingPackageActivation } = await import("./package-update-activation.js");
-    assertNoPendingPackageActivation(value.packageRoot);
+    const { runCliWithExitFinalization } = await import("../cli/one-shot-exit.js");
+    const { assertUpdatePackageActivationAdmission, withUpdateAdmissionReporting } =
+      await import("../cli/update-cli/update-command-result.js");
+    // Exercise the operator diagnostic, not Node's uncaught-error source excerpt.
+    await runCliWithExitFinalization({
+      run: () =>
+        withUpdateAdmissionReporting({}, async () => {
+          assertUpdatePackageActivationAdmission(value.packageRoot);
+        }),
+      onError(error) {
+        throw error;
+      },
+    });
     return;
   }
   const { withUpdateCommandExecutor } =
