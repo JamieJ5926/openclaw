@@ -611,7 +611,9 @@ describe("provider-usage.load", () => {
 
   it("loads provider usage through guarded HTTP with the default fetch", async () => {
     const server = createServer((_request, response) => response.end("42"));
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
     try {
       const address = server.address();
       if (!address || typeof address === "string") {
@@ -646,9 +648,9 @@ describe("provider-usage.load", () => {
         },
       ]);
     } finally {
-      await new Promise<void>((resolve, reject) =>
-        server.close((error) => (error ? reject(error) : resolve())),
-      );
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
     }
   });
 });
