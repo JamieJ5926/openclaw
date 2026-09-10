@@ -35,7 +35,7 @@ export function isSystemdUserBusUnavailableDetail(detail?: string): boolean {
   );
 }
 /** True when busctl itself rejected the invocation, e.g. systemd < 240 has no --json flag. */
-export function isBusctlJsonUnsupportedDetail(detail?: string): boolean {
+function isBusctlJsonUnsupportedDetail(detail?: string): boolean {
   const normalized = normalizeDetail(detail);
   return normalized.includes("unrecognized option") && normalized.includes("--json");
 }
