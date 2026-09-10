@@ -17,11 +17,11 @@ import {
   type ServiceDefinitionMutationCapability,
 } from "./service-types.js";
 import {
-  BUSCTL_JSON_UNSUPPORTED_CODE,
   readSystemdServiceExecStart,
   resolveSystemdEnvironmentFilePath,
   resolveSystemdUnitPath,
 } from "./systemd-service-files.js";
+import { BUSCTL_JSON_UNSUPPORTED_CODE } from "./systemd-unavailable.js";
 import { assertNoSystemSystemdOwnership, isSystemSystemdOwnershipError } from "./systemd-system.js";
 
 type Snapshot = { contents: Buffer; mode: number } | null;

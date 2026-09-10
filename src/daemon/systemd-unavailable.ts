@@ -38,6 +38,16 @@ export function isBusctlJsonUnsupportedDetail(detail?: string): boolean {
   const normalized = normalizeDetail(detail);
   return normalized.includes("unrecognized option") && normalized.includes("--json");
 }
+/** errno-style marker: busctl rejected --json, so no JSON inspection is possible on this host. */
+export const BUSCTL_JSON_UNSUPPORTED_CODE = "BUSCTL_JSON_UNSUPPORTED";
+/** Stable domain error other modules match with hasErrnoCode; native stderr never leaves the boundary. */
+export function busctlJsonUnsupportedError(): NodeJS.ErrnoException {
+  const error: NodeJS.ErrnoException = new Error(
+    "busctl does not support --json output on this host.",
+  );
+  error.code = BUSCTL_JSON_UNSUPPORTED_CODE;
+  return error;
+}
 
 export function classifySystemdUnavailableDetail(detail?: string): SystemdUnavailableKind | null {
   const normalized = normalizeDetail(detail);
