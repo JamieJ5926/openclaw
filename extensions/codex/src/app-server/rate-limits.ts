@@ -238,9 +238,9 @@ export function buildCodexAppServerUsageSnapshot(
       if (extra === snapshot) {
         continue;
       }
-      const entries = readWindowEntries(extra);
-      for (const entry of entries) {
-        const window = readProviderUsageWindow(entry, entries);
+      const extraEntries = readWindowEntries(extra);
+      for (const entry of extraEntries) {
+        const window = readProviderUsageWindow(entry, extraEntries);
         if (window) {
           windows.push({ ...window, groupLabel: formatLimitLabel(extra) });
         }
