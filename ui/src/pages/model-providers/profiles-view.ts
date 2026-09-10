@@ -496,11 +496,15 @@ export function renderProviderProfiles(card: ModelProviderCard, props: ProviderP
                   <strong>${identity}</strong>
                   ${meta ? html`<span>${meta}</span>` : nothing}
                 </span>
-                <openclaw-model-account-usage
-                  .client=${props.usageClient ?? null}
-                  .agentId=${props.usageAgentId ?? ""}
-                  .profileId=${profile.profileId}
-                ></openclaw-model-account-usage>
+                ${
+                  provider === "openai" && profile.type !== "api_key"
+                    ? html`<openclaw-model-account-usage
+                        .client=${props.usageClient ?? null}
+                        .agentId=${props.usageAgentId ?? ""}
+                        .profileId=${profile.profileId}
+                      ></openclaw-model-account-usage>`
+                    : nothing
+                }
                 <span class="model-providers__profile-status">${profileStatus(profile)}</span>
                 <span class="model-providers__profile-actions">
                   ${

@@ -30,11 +30,26 @@ describe("ModelProvidersPage usage convergence", () => {
     };
     const original = request.getMockImplementation()!;
     let usedPercent = 10;
-    request.mockImplementation(async (method) => {
+    const accountRequests: unknown[] = [];
+    request.mockImplementation(async (method, params?: unknown) => {
       if (method === "models.authStatus") {
-        return createAuthStatus();
+        return createAuthStatus([
+          {
+            profiles: [
+              { profileId: "openai:one", type: "oauth", status: "ok" },
+              { profileId: "openai:two", type: "token", status: "static" },
+              { profileId: "openai:key", type: "api_key", status: "static" },
+            ],
+          },
+          {
+            provider: "anthropic",
+            displayName: "Anthropic",
+            profiles: [{ profileId: "anthropic:one", type: "oauth", status: "ok" }],
+          },
+        ]);
       }
       if (method === "models.authUsage") {
+        accountRequests.push(params);
         return {
           updatedAt: 1,
           providers: [
@@ -46,6 +61,16 @@ describe("ModelProvidersPage usage convergence", () => {
     });
     const page = appendPage(context);
     await vi.waitFor(() => expect(page.textContent).toContain("90% left"));
+    expect(accountRequests).toEqual([
+      { agentId: "main", profileId: "openai:one", refresh: false },
+      { agentId: "main", profileId: "openai:two", refresh: false },
+    ]);
+    expect(
+      page.querySelector('[data-profile-id="anthropic:one"] openclaw-model-account-usage'),
+    ).toBeNull();
+    expect(
+      page.querySelector('[data-profile-id="openai:key"] openclaw-model-account-usage'),
+    ).toBeNull();
     runtimeConfig.state.configSaving = true;
     notifyRuntimeConfig();
     await page.updateComplete;
