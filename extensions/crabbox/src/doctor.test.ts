@@ -115,6 +115,10 @@ describe("Crabbox worker doctor", () => {
                 provider: "crabbox",
                 settings: { binary: process.execPath, target: "macos" },
               },
+              windowsNative: {
+                provider: "crabbox",
+                settings: { binary: process.execPath, target: "windows/normal" },
+              },
             },
           },
         },
@@ -140,6 +144,15 @@ describe("Crabbox worker doctor", () => {
                 requirement: expect.stringContaining("0.53.1"),
                 fixHint: expect.stringContaining("0.53.1"),
               }),
+              expect.objectContaining({
+                target: "windowsNative",
+                severity: "warning",
+                message: expect.stringContaining(
+                  "Windows cloud workers require Crabbox 0.53.1 or newer",
+                ),
+                requirement: expect.stringContaining("0.53.1"),
+                fixHint: expect.stringContaining("0.53.1"),
+              }),
             ]
           : [],
       );
@@ -152,6 +165,7 @@ describe("Crabbox worker doctor", () => {
   it.each([
     { target: "linux", severity: "info", minimum: "0.41.1" },
     { target: "windows/wsl2", severity: "warning", minimum: "0.53.1" },
+    { target: "windows/normal", severity: "warning", minimum: "0.53.1" },
     { target: "macos", severity: "warning", minimum: "0.53.1" },
   ])("reports an indeterminate version for $target", async ({ target, severity, minimum }) => {
     const probe = vi.spyOn(doctorRuntime, "probeCrabboxVersion").mockResolvedValue({
@@ -250,14 +264,17 @@ describe("Crabbox warm-image doctor", () => {
       const store = openCrabboxWarmImageStore(env);
       const now = Date.now();
       const record: WarmProfileRecord = {
-        version: 2,
+        version: 3,
         allocations: {},
         image: {
           checkpointId: "chk_last_good",
           kind: "native",
           state: "available",
           createdAtMs: now,
-          lastUsedAtMs: now,
+          preparationKey: null,
+          cacheKey: null,
+          purpose: null,
+          lastDemandAtMs: now,
         },
         ...(operation
           ? {
