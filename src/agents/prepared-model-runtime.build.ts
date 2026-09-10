@@ -53,6 +53,10 @@ import {
   preparedModelRuntimeWorkspaceFactsKey,
 } from "./prepared-model-runtime.inbound-registry.js";
 import { createCatalogAttemptReporter } from "./prepared-model-runtime.publication-events.js";
+import {
+  PreparedModelRuntimeBuildResources,
+  retainPreparedModelRuntimeGenerationResources,
+} from "./prepared-model-runtime.resources.js";
 import { prepareAgentCatalogSource } from "./prepared-model-runtime.scoped-catalog.js";
 import { scopeSyntheticAuthProviderRefs } from "./prepared-model-runtime.synthetic-auth.js";
 import type {
@@ -61,6 +65,7 @@ import type {
   PreparedModelRuntimeInput,
   PreparedModelRuntimeOwner,
   PreparedModelRuntimePluginGeneration,
+  PreparedModelRuntimeResourceClaim,
   PreparedModelRuntimeSnapshot,
 } from "./prepared-model-runtime.types.js";
 
@@ -78,11 +83,13 @@ export type PreparedModelRuntimeBuildCandidate = Readonly<{
   isBuildCurrent?: () => boolean;
   /** Shared publication guards run before workspace preparation; registration guards do not. */
   isPreparationCurrent?: () => boolean;
+  ownsEphemeralRegistries?: boolean;
 }>;
 
 export type PreparedModelRuntimeBuildResult = Readonly<{
   snapshot: PreparedModelRuntimeSnapshot;
   pluginGeneration: PreparedModelRuntimePluginGeneration;
+  resourceClaim?: PreparedModelRuntimeResourceClaim;
 }>;
 
 function runSerializedPreparedModelRuntimeTask<T>(params: {
@@ -251,6 +258,7 @@ function createFullModelCatalogAccess(params: {
       if (pendingAuth?.key === cacheKey) {
         return pendingAuth.promise;
       }
+      const resourceClaim = retainPreparedModelRuntimeGenerationResources(params.pluginGeneration);
       const promise = worker
         .loadAuth({ providerIds, ...(profileIds?.length ? { profileIds } : {}) })
         .then((refreshed) => {
@@ -267,6 +275,7 @@ function createFullModelCatalogAccess(params: {
           return { authStore: refreshed.authStore, authModes: Object.freeze(authModes) };
         })
         .finally(() => {
+          resourceClaim?.release();
           if (pendingAuth?.promise === promise) {
             pendingAuth = undefined;
           }
@@ -290,6 +299,9 @@ function createFullModelCatalogAccess(params: {
         return await loadFullModelCatalog(options);
       }
       if (!pending) {
+        const resourceClaim = retainPreparedModelRuntimeGenerationResources(
+          params.pluginGeneration,
+        );
         const retainedCatalog = !options?.refresh ? inventory?.catalog : undefined;
         const build = runSerializedPreparedModelRuntimeTask({
           agentDir: params.agentFacts.input.agentDir,
@@ -347,6 +359,7 @@ function createFullModelCatalogAccess(params: {
           })
           .catch(attempt.failed)
           .finally(() => {
+            resourceClaim?.release();
             pending = undefined;
           });
         pending = { source: retainedCatalog ? "inventory" : "worker", promise };
@@ -364,6 +377,7 @@ async function buildSnapshotBatch(
   onBuildStats?: (stats: PreparedModelRuntimeBuildStats) => void,
   includeCredentialProviders = catalogMode === "live",
   onStage?: (stage: string) => void,
+  registryResources?: PreparedModelRuntimeBuildResources,
 ): Promise<PreparedModelRuntimeBuildResult[]> {
   const generations = groupBuildCandidates(candidates, (candidate) => candidate.pluginGeneration);
   const fresh = generations.get(undefined) ?? [];
@@ -374,6 +388,9 @@ async function buildSnapshotBatch(
     [
       ...groupBuildCandidates(generationCandidates, (candidate) => {
         const workspace = preparedModelRuntimeWorkspaceFactsKey(candidate.input);
+        if (candidate.ownsEphemeralRegistries) {
+          return `ephemeral\0${workspace}`;
+        }
         const kind = candidate.prepareInboundPluginRegistry ? "configured" : "dynamic";
         return pluginGeneration ? workspace : `${kind}\0${workspace}`;
       }).values(),
@@ -432,6 +449,9 @@ async function buildSnapshotBatch(
         includeCredentialProviders,
         getConfiguredHarnessRuntimes,
         onStage,
+        ...(groupCandidates.some((candidate) => candidate.ownsEphemeralRegistries)
+          ? { registryResources }
+          : {}),
       },
       prepareInboundPluginRegistry ? loadInboundPluginRegistry : undefined,
       pluginGeneration,
@@ -621,26 +641,61 @@ export function startSerializedSnapshotBuildBatch(
   // Lifecycle events may overlap. The timeout covers queueing plus this build, while completion
   // follows the real work so a timed-out generation can never overlap a replacement.
   const startBuild = (async () => {
-    if (previousBuildCompletions.length > 0) {
-      await Promise.all(previousBuildCompletions);
-      // Queued publications register while the prior build settles. Recheck them here so a
-      // retired owner cannot start expensive workspace preparation ahead of its replacement.
-      assertPreparedModelRuntimeCandidatesCurrent(candidates);
+    const registryResources = new PreparedModelRuntimeBuildResources();
+    try {
+      if (previousBuildCompletions.length > 0) {
+        await Promise.all(previousBuildCompletions);
+        // Queued publications register while the prior build settles. Recheck them here so a
+        // retired owner cannot start expensive workspace preparation ahead of its replacement.
+        assertPreparedModelRuntimeCandidatesCurrent(candidates);
+      }
+      const results = await buildSnapshotBatch(
+        candidates,
+        catalogMode,
+        agentBuildCompletions,
+        pluginMetadataSnapshot,
+        onBuildStats,
+        includeCredentialProviders,
+        (nextStage) => {
+          stage = nextStage;
+        },
+        registryResources,
+      );
+      const claims: PreparedModelRuntimeResourceClaim[] = [];
+      try {
+        return results.map((result) => {
+          const resourceClaim = retainPreparedModelRuntimeGenerationResources(
+            result.pluginGeneration,
+          );
+          if (resourceClaim) {
+            claims.push(resourceClaim);
+          }
+          return resourceClaim ? Object.assign({}, result, { resourceClaim }) : result;
+        });
+      } catch (error) {
+        for (const claim of claims) {
+          claim.release();
+        }
+        throw error;
+      }
+    } finally {
+      registryResources.release();
     }
-    return await buildSnapshotBatch(
-      candidates,
-      catalogMode,
-      agentBuildCompletions,
-      pluginMetadataSnapshot,
-      onBuildStats,
-      includeCredentialProviders,
-      (nextStage) => {
-        stage = nextStage;
-      },
-    );
   })();
+  let abandoned = false;
+  let completedResults: PreparedModelRuntimeBuildResult[] | undefined;
+  const releaseAbandonedResults = () => {
+    for (const result of completedResults ?? []) {
+      result.resourceClaim?.release();
+    }
+  };
   const completion = startBuild.then(
-    () => undefined,
+    (results) => {
+      completedResults = results;
+      if (abandoned) {
+        releaseAbandonedResults();
+      }
+    },
     () => undefined,
   );
   for (const agentDir of agentDirs) {
@@ -656,7 +711,11 @@ export function startSerializedSnapshotBuildBatch(
       () => startBuild,
       buildTimeoutMs,
       () => `prepared model runtime publication (${stage})`,
-    ),
+    ).catch((error: unknown) => {
+      abandoned = true;
+      releaseAbandonedResults();
+      throw error;
+    }),
     completion,
   };
 }
