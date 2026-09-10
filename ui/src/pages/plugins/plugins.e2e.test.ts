@@ -8,6 +8,7 @@ import type { PluginCatalogItem, PluginListResult } from "../../lib/plugins/inde
 import {
   canRunPlaywrightChromium,
   installMockGateway,
+  reconnectMockGateway,
   resolvePlaywrightChromiumExecutablePath,
   startControlUiE2eServer,
   type ControlUiE2eServer,
@@ -535,8 +536,7 @@ describeControlUiE2e("Control UI Plugins mocked Gateway E2E", () => {
       });
       expect(cancel).toBe(true);
       expect(await wizard.count()).toBe(1);
-      await gateway.setOnline(false);
-      await gateway.setOnline(true);
+      await reconnectMockGateway(page, gateway, "plugins-install-configuring");
 
       await expect
         .poll(() => wizard.locator(".plugin-install-wizard").getAttribute("data-stage"), {
@@ -552,8 +552,7 @@ describeControlUiE2e("Control UI Plugins mocked Gateway E2E", () => {
       await expect
         .poll(async () => (await gateway.getRequests("gateway.restart.request")).length)
         .toBe(2);
-      await gateway.setOnline(false);
-      await gateway.setOnline(true);
+      await reconnectMockGateway(page, gateway, "plugins-install-enabled");
       await wizard.getByText("Plugin ready", { exact: true }).waitFor();
       expect(await wizard.textContent()).toContain("Matrix is installed and enabled.");
     } finally {
@@ -602,8 +601,7 @@ describeControlUiE2e("Control UI Plugins mocked Gateway E2E", () => {
         pluginId: "local-calendar",
       });
 
-      await gateway.setOnline(false);
-      await gateway.setOnline(true);
+      await reconnectMockGateway(page, gateway, "plugins-local-installed");
       await gateway.waitForRequest("plugins.setEnabled");
       await wizard.getByText("Plugin ready", { exact: true }).waitFor();
       expect(await wizard.textContent()).not.toContain("Complete the required settings");
@@ -1034,8 +1032,7 @@ describeControlUiE2e("Control UI Plugins mocked Gateway E2E", () => {
         ],
       });
 
-      await gateway.setOnline(false);
-      await gateway.setOnline(true);
+      await reconnectMockGateway(page, gateway);
       await gateway.waitForRequest("plugins.catalog.browse", { after: requestsBeforeReconnect });
       await page.locator(".plugin-catalog-result", { hasText: "Memory Reconnected" }).waitFor();
     } finally {
