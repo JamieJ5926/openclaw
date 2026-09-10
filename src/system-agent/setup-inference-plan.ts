@@ -32,6 +32,7 @@ import {
 import { resolveProviderInstallCatalogEntry } from "../plugins/provider-install-catalog.js";
 import { resolvePluginProvidersCore } from "../plugins/providers.runtime.js";
 import type { ProviderAuthResult } from "../plugins/types.js";
+import { runWithAsyncWorkResources } from "../shared/async-work-resources.js";
 import { createPluginCapabilityConsentPrompter } from "../wizard/plugin-capability-consent.js";
 import { resolveSystemAgentConfiguredRouteFromConfig } from "./inference-route.js";
 import { createQuickstartNotePrompter } from "./setup-apply.js";
@@ -120,11 +121,15 @@ export async function withSetupInferencePlan<T>(
   },
   run: (plan: SetupInferenceTestPlan, scope: SetupInferencePlanScope) => Promise<T>,
 ): Promise<T | Extract<ActivateSetupInferenceResult, { ok: false }>> {
-  const tempDir = await (
-    params.deps.createTempDir ??
-    (() => fs.mkdtemp(path.join(os.tmpdir(), "openclaw-setup-inference-")))
-  )();
-  try {
+  return await runWithAsyncWorkResources(async (onAcquired) => {
+    const tempDir = await (
+      params.deps.createTempDir ??
+      (() => fs.mkdtemp(path.join(os.tmpdir(), "openclaw-setup-inference-")))
+    )();
+    onAcquired({
+      release: () =>
+        cleanupSetupInferenceTempDir({ tempDir, deps: params.deps, runtime: params.runtime }),
+    });
     const testAgentDir = path.join(tempDir, "agent");
     const prepared = {
       ...params,
@@ -153,9 +158,7 @@ export async function withSetupInferencePlan<T>(
       async (_selection, selection) =>
         await consumePlan(await buildExistingSetupInferencePlan(prepared, selection), selection),
     );
-  } finally {
-    await cleanupSetupInferenceTempDir({ tempDir, deps: params.deps, runtime: params.runtime });
-  }
+  });
 }
 
 async function buildExistingSetupInferencePlan(

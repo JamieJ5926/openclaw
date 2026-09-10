@@ -6,6 +6,7 @@ import { prepareEmbeddedAttemptBootstrap } from "../agents/embedded-agent-runner
 import { createAttemptSetupFixture } from "../agents/embedded-agent-runner/run/attempt-setup.test-support.js";
 import type { EmbeddedRunAttemptParams } from "../agents/embedded-agent-runner/run/types.js";
 import type { AgentExecutionAuthBinding } from "../agents/execution-auth-binding.js";
+import { AsyncWorkScope } from "../shared/async-work-scope.js";
 import { createSuiteTempRootTracker } from "../test-helpers/temp-dir.js";
 import type { ActivateSetupInferenceDeps } from "./setup-inference-core.js";
 import type { SetupInferenceTestPlan } from "./setup-inference-plan-helpers.js";
@@ -88,16 +89,23 @@ async function probe(
   const tempDir = await tempRoots.make("case");
   const selectedPlan = input?.plan ?? plan(input?.managed, input?.supportsTools);
   selectedPlan.agentDir = path.join(tempDir, "agent");
-  return await runSetupInferenceTest({
-    plan: selectedPlan,
-    tempDir,
-    deps: { runEmbeddedAgent: run },
-    authProfileStateMode: "read-only",
-    requireExecutionOwner: true,
-    verifyAgentTools: input?.verifyAgentTools ?? true,
-    ...(input?.prompt ? { prompt: input.prompt } : {}),
-    ...(input?.signal ? { signal: input.signal } : {}),
-  });
+  const work = new AsyncWorkScope();
+  try {
+    return await work.track(() =>
+      runSetupInferenceTest({
+        plan: selectedPlan,
+        tempDir,
+        deps: { runEmbeddedAgent: run },
+        authProfileStateMode: "read-only",
+        requireExecutionOwner: true,
+        verifyAgentTools: input?.verifyAgentTools ?? true,
+        ...(input?.prompt ? { prompt: input.prompt } : {}),
+        ...(input?.signal ? { signal: input.signal } : {}),
+      }),
+    );
+  } finally {
+    await work.drain();
+  }
 }
 
 describe("managed local model setup verification", () => {

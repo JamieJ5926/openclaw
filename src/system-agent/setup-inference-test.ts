@@ -13,6 +13,7 @@ import type { AgentExecutionAuthBinding } from "../agents/execution-auth-binding
 import { describeFailoverError } from "../agents/failover-error.js";
 import { supportsModelTools } from "../agents/model-tool-support.js";
 import { SessionManager } from "../agents/sessions/index.js";
+import { runWithAsyncWorkResources } from "../shared/async-work-resources.js";
 import {
   type ActivateSetupInferenceDeps,
   SETUP_INFERENCE_TEST_PROMPT,
@@ -73,73 +74,79 @@ export async function runSetupInferenceTest(
     return connection;
   }
 
-  const workspace = await fs.realpath(await fs.mkdtemp(path.join(params.tempDir, "agent-check-")));
-  let acceptingResults = true;
-  try {
-    const nonce = randomUUID();
-    const fixture = path.join(workspace, "verification.txt");
-    await fs.writeFile(fixture, nonce, { mode: 0o600 });
-    let observedRead = false;
-    const verified = await runSetupInferenceProbe(
-      {
-        ...params,
-        tempDir: workspace,
-        plan: {
-          ...params.plan,
-          ...(connection.auth.authProfileId
-            ? { authProfileId: connection.auth.authProfileId }
-            : {}),
-        },
-        // The answer exists only in a read-only fixture outside the temporary auth store.
-        prompt: `Read ${JSON.stringify(fixture)} using the available tools. Reply with the complete file contents. Do not modify files or perform any other task.`,
-      },
-      {
-        onAgentToolResult: ({ toolName, result, isError }) => {
-          if (
-            !acceptingResults ||
-            toolName !== "read" ||
-            isError ||
-            !isRecord(result) ||
-            !Array.isArray(result.content)
-          ) {
-            return;
-          }
-          observedRead ||= result.content.some(
-            (item) =>
-              isRecord(item) &&
-              item.type === "text" &&
-              typeof item.text === "string" &&
-              item.text.includes(nonce),
-          );
-        },
-      },
-    );
-    if (!verified.ok) {
-      return verified;
-    }
-    if (!observedRead || !verified.text.includes(nonce)) {
-      return {
-        ok: false,
-        status: "format",
-        error:
-          "The local model answered a simple prompt but could not read and return a file through an OpenClaw tool. Choose another model or review its tool support, then retry setup. No default model was changed.",
-      };
-    }
-    if (!isDeepStrictEqual(connection.auth, verified.auth)) {
-      return {
-        ok: false,
-        status: "auth",
-        error:
-          "The local model's execution owner changed during tool verification. Retry setup before selecting it as the default.",
-      };
-    }
-    return { ...verified, latencyMs: connection.latencyMs + verified.latencyMs };
-  } finally {
-    acceptingResults = false;
-    await fs.rm(workspace, { recursive: true, force: true }).catch(() => {
-      setupInferenceLog.warn("Could not remove the temporary local model verification file.");
+  return await runWithAsyncWorkResources(async (onAcquired) => {
+    const tempWorkspace = await fs.mkdtemp(path.join(params.tempDir, "agent-check-"));
+    onAcquired({
+      release: () =>
+        fs.rm(tempWorkspace, { recursive: true, force: true }).catch(() => {
+          setupInferenceLog.warn("Could not remove the temporary local model verification file.");
+        }),
     });
-  }
+    const workspace = await fs.realpath(tempWorkspace);
+    let acceptingResults = true;
+    try {
+      const nonce = randomUUID();
+      const fixture = path.join(workspace, "verification.txt");
+      await fs.writeFile(fixture, nonce, { mode: 0o600 });
+      let observedRead = false;
+      const verified = await runSetupInferenceProbe(
+        {
+          ...params,
+          tempDir: workspace,
+          plan: {
+            ...params.plan,
+            ...(connection.auth.authProfileId
+              ? { authProfileId: connection.auth.authProfileId }
+              : {}),
+          },
+          // The answer exists only in a read-only fixture outside the temporary auth store.
+          prompt: `Read ${JSON.stringify(fixture)} using the available tools. Reply with the complete file contents. Do not modify files or perform any other task.`,
+        },
+        {
+          onAgentToolResult: ({ toolName, result, isError }) => {
+            if (
+              !acceptingResults ||
+              toolName !== "read" ||
+              isError ||
+              !isRecord(result) ||
+              !Array.isArray(result.content)
+            ) {
+              return;
+            }
+            observedRead ||= result.content.some(
+              (item) =>
+                isRecord(item) &&
+                item.type === "text" &&
+                typeof item.text === "string" &&
+                item.text.includes(nonce),
+            );
+          },
+        },
+      );
+      if (!verified.ok) {
+        return verified;
+      }
+      if (!observedRead || !verified.text.includes(nonce)) {
+        return {
+          ok: false,
+          status: "format",
+          error:
+            "The local model answered a simple prompt but could not read and return a file through an OpenClaw tool. Choose another model or review its tool support, then retry setup. No default model was changed.",
+        };
+      }
+      if (!isDeepStrictEqual(connection.auth, verified.auth)) {
+        return {
+          ok: false,
+          status: "auth",
+          error:
+            "The local model's execution owner changed during tool verification. Retry setup before selecting it as the default.",
+        };
+      }
+      return { ...verified, latencyMs: connection.latencyMs + verified.latencyMs };
+    } finally {
+      acceptingResults = false;
+    }
+  });
 }
 
 async function runSetupInferenceProbe(

@@ -55,6 +55,7 @@ import {
   withPluginRuntimeGatewayRequestScope,
 } from "../plugins/runtime/gateway-request-scope.js";
 import type { ProviderPlugin } from "../plugins/types.js";
+import { AsyncWorkScope } from "../shared/async-work-scope.js";
 import { createDeferredCore } from "../shared/deferred.js";
 import {
   closeOpenClawAgentDatabasesForTest,
@@ -2036,18 +2037,26 @@ describe("activateSetupInference", () => {
       await fs.rm(dir, { recursive: true, force: true });
     });
 
-    const result = await activateGroqSetup({
-      apiKey: "temporary-plaintext-key",
-      useRealAuthProfileStore: true,
-      deps: {
-        runEmbeddedAgent: vi.fn(async () => {
-          throw new Error("401 invalid_api_key");
-        }) as never,
-        disposeOpenClawAgentDatabaseByPath: disposeDatabase,
-        createTempDir: async () => tempDir,
-        removeTempDir,
-      },
-    });
+    const work = new AsyncWorkScope();
+    let result: Awaited<ReturnType<typeof activateGroqSetup>>;
+    try {
+      result = await work.track(() =>
+        activateGroqSetup({
+          apiKey: "temporary-plaintext-key",
+          useRealAuthProfileStore: true,
+          deps: {
+            runEmbeddedAgent: vi.fn(async () => {
+              throw new Error("401 invalid_api_key");
+            }) as never,
+            disposeOpenClawAgentDatabaseByPath: disposeDatabase,
+            createTempDir: async () => tempDir,
+            removeTempDir,
+          },
+        }),
+      );
+    } finally {
+      await work.drain();
+    }
 
     expect(result).toMatchObject({ ok: false, status: "auth" });
     expect(disposeDatabase).toHaveBeenCalledOnce();
@@ -5619,27 +5628,30 @@ describe("activateSetupInference", () => {
       const transformConfig = vi.fn();
       const settled = vi.fn();
       let tempDir: string | undefined;
-      const activation = activateCodexSetup({
-        workspace: "/tmp/openclaw-workspace",
-        deps: {
-          readConfigFileSnapshot: mockConfigSnapshot({}, { includeMetadata: true }),
-          ensureCodexRuntimePlugin: mockCodexRuntimeInstall(installRecord),
-          runEmbeddedAgent: vi.fn(async () => {
-            throw new Error("401 invalid_api_key");
-          }) as never,
-          transformConfigWithPendingPluginInstalls: transformConfig as never,
-          markRetainedManagedNpmInstall: markRetainedInstall,
-          clearLoadInstalledPluginIndexInstallRecordsCache: vi.fn(),
-          clearPluginMetadataLifecycleCaches: vi.fn(),
-          invalidatePluginRuntimeDiscoveryAfterConfigMutation: vi.fn(async () => {}) as never,
-          refreshPluginRegistryAfterConfigMutation: refreshPluginRegistry as never,
-          refreshPluginRegistryForPreparedConfig: refreshPluginRegistry as never,
-          createTempDir: async () => {
-            tempDir = await suiteTempRootTracker.make("case");
-            return tempDir;
+      const work = new AsyncWorkScope();
+      const activation = work.track(() =>
+        activateCodexSetup({
+          workspace: "/tmp/openclaw-workspace",
+          deps: {
+            readConfigFileSnapshot: mockConfigSnapshot({}, { includeMetadata: true }),
+            ensureCodexRuntimePlugin: mockCodexRuntimeInstall(installRecord),
+            runEmbeddedAgent: vi.fn(async () => {
+              throw new Error("401 invalid_api_key");
+            }) as never,
+            transformConfigWithPendingPluginInstalls: transformConfig as never,
+            markRetainedManagedNpmInstall: markRetainedInstall,
+            clearLoadInstalledPluginIndexInstallRecordsCache: vi.fn(),
+            clearPluginMetadataLifecycleCaches: vi.fn(),
+            invalidatePluginRuntimeDiscoveryAfterConfigMutation: vi.fn(async () => {}) as never,
+            refreshPluginRegistryAfterConfigMutation: refreshPluginRegistry as never,
+            refreshPluginRegistryForPreparedConfig: refreshPluginRegistry as never,
+            createTempDir: async () => {
+              tempDir = await suiteTempRootTracker.make("case");
+              return tempDir;
+            },
           },
-        },
-      });
+        }),
+      );
       const observed = activation.then(settled, settled);
       try {
         await finalRetentionStarted.promise;
@@ -5648,6 +5660,7 @@ describe("activateSetupInference", () => {
       } finally {
         finalRetention.resolve(retained);
         await observed;
+        await work.drain();
       }
 
       const result = settled.mock.calls[0]?.[0];
