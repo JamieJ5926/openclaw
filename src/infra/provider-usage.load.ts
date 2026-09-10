@@ -11,6 +11,7 @@ import { trackAsyncWork } from "../shared/async-work-scope.js";
 import { formatErrorMessage } from "./errors.js";
 import { resolveFetch } from "./fetch.js";
 import { resolveProxyFetchFromEnv } from "./net/proxy-fetch.js";
+import { fetchWithRuntimeDispatcherOrMockedGlobal } from "./net/runtime-fetch.js";
 import {
   type ProviderAuth,
   resolveProviderAuths,
@@ -125,7 +126,7 @@ export async function loadProviderUsageSummary(
   const env = opts.env ?? process.env;
   const fetchFn = opts.fetch
     ? resolveFetch(opts.fetch)
-    : (resolveProxyFetchFromEnv(env) ?? resolveFetch());
+    : (resolveProxyFetchFromEnv(env) ?? resolveFetch(fetchWithRuntimeDispatcherOrMockedGlobal));
   if (!fetchFn) {
     throw new Error("fetch is not available");
   }
