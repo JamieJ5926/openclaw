@@ -1,5 +1,5 @@
 ---
-summary: "Daily update requests, Cloudflare-derived request geography, optional feature statistics, and privacy controls"
+summary: "Daily update requests, approximate location, optional anonymous feature statistics, and privacy controls"
 title: "Usage telemetry and update checks"
 read_when:
   - Checking what OpenClaw sends and what the receiver stores
@@ -11,18 +11,18 @@ read_when:
 **Automatic update checks send a daily request by default.** It asks whether a
 newer version exists and includes the OpenClaw version, operating system, Node.js
 version, CPU architecture, and request surface. A planned receiver rollout will
-add Cloudflare-derived request-origin geography to the hosted telemetry service.
-Feature statistics are opt-in.
+add approximate location information to the hosted telemetry service.
+Anonymous feature statistics are opt-in.
 This page describes update-check telemetry, not requests made by configured
 providers, channels, or other services.
 
-Feature statistics describe configured channels and providers, plugin
+Anonymous feature statistics describe configured channels and providers, plugin
 inventory, and a retained session-creation count. They are **off by default**.
 When you enable them, they ride along with that same daily update check instead
 of adding a second request.
 
 These reports help inform maintenance priorities. They do not measure individual
-plugin invocations, messages, model requests, or active users. Public aggregates
+plugin invocations, messages, model requests, or active users. Anonymous usage aggregates
 are available at
 [telemetry.openclaw.ai](https://telemetry.openclaw.ai).
 
@@ -48,8 +48,8 @@ feature statistics are disabled, it shows the update-only request
 and its `User-Agent` header instead. When automation or update-check policy
 disables all requests, it shows `Request: none` with the reason (`request: null`
 in JSON).
-The preview describes the client request only. It cannot show geography derived
-by Cloudflare at the receiver.
+The preview describes the client request only. It cannot show server-derived
+location information.
 
 ## Daily update check
 
@@ -79,43 +79,36 @@ For testing or self-hosting, set `OPENCLAW_TELEMETRY_ENDPOINT` to your complete
 replacement endpoint URL. The public server source is available at
 [openclaw/telemetry](https://github.com/openclaw/telemetry).
 
-## Cloudflare-derived request geography
+<a id="cloudflare-derived-request-geography" />
 
-**Pending receiver rollout:** The geography recording described below starts
+## Approximate location
+
+**Pending receiver rollout:** The location recording described below starts
 only after the receiver change is deployed and verified. This client documentation
 change does not enable it.
 
-For the hosted telemetry service, Cloudflare processes the connection IP address
-and provides approximate request-origin **country, region code, city, and timezone**.
-After the rollout, the receiver will record those derived fields alongside
-request metadata in Analytics Engine. They come from Cloudflare's incoming request
-metadata, not a client payload or client-supplied geography headers. Missing or
-invalid values are left empty.
+After the rollout, the hosted service will record approximate location information
+provided by Cloudflare: **country and city**, plus **region code and timezone**.
+No raw IP addresses or precise location coordinates are stored in its analytics.
+Missing or invalid values will be left empty.
 
-These fields describe the network origin of a request. They may reflect a proxy,
-VPN exit, or remote server rather than a person's location, language, or locale.
-The derived timezone is not the OpenClaw runtime's clock setting. Region codes
-are interpreted within their country, not as globally unique names.
-
-Once deployed, geography will be baseline update-request metadata: it will remain
-included when feature statistics are off or `DO_NOT_TRACK` is set. There is no
-separate client timezone setting, payload field, or prompt. Disabling automatic
-update requests also stops their baseline metadata reporting.
+Recorded update-only requests will also include these fields when feature statistics
+are off or `DO_NOT_TRACK` is set. No additional client payload or prompt is needed.
 
 The same **three-month** Analytics Engine retention applies to these fields.
 Disabling requests does not erase previously recorded rows. Public stats and
-homepage aggregates do not expose geography fields or breakdowns.
+homepage aggregates do not expose location information.
 
 This section describes the hosted service at
 [telemetry.openclaw.ai](https://telemetry.openclaw.ai). A replacement endpoint
 configured with `OPENCLAW_TELEMETRY_ENDPOINT` can use different infrastructure
 and processing or storage policies.
 
-<a id="optional-anonymous-feature-statistics" />
+<a id="optional-feature-statistics" />
 
-## Optional feature statistics
+## Optional anonymous feature statistics
 
-Feature statistics are **off by default**. Interactive setup can offer a one-time
+Anonymous feature statistics are **off by default**. Interactive setup can offer a one-time
 opt-in with **No thanks** selected by default; guided Quick Start skips that
 prompt. OpenClaw records a prompt response so setup does not ask again.
 Non-interactive and scripted installations do not opt in automatically, but
@@ -175,10 +168,9 @@ The sender and `openclaw telemetry show` use the same payload builder, but their
 plugin registry, configuration, and collection time can differ. The CLI preview
 is not a guarantee of the exact next Gateway payload.
 
-Reports have no persistent client identifier. Repeated reports are not unique
-installations or users. The service does not maintain a per-install history or
-retention measure; derived geography and the other stored request metadata are
-not a guarantee of anonymity.
+Reports contain no user, account, install, or device identifier. Repeated reports
+are not unique installations or users. The service does not maintain a per-install
+history or retention measure.
 
 <a id="what-is-never-collected" />
 
@@ -192,12 +184,10 @@ persistent client identifier for these requests.
 
 The hosted service's Analytics Engine rows exclude those direct identifiers and raw
 client IP addresses, coordinates, postal codes, and physical-device hardware
-details. Cloudflare handles TLS and network requests and processes the connection
-IP to derive geography. The Worker also reads that IP transiently for rate
-limiting without writing it to Analytics Engine. The service's deployment
-configuration disables Worker
-observability, logs, and invocation logs; those settings do not describe or
-control Cloudflare's separate infrastructure-level processing.
+details. Cloudflare processes connection IP addresses, and the Worker uses them
+transiently for rate limiting without storing them in Analytics Engine. Worker
+logs are disabled; Cloudflare's separate infrastructure processing is outside
+those settings.
 
 Feature statistics are separate from optional, operator-configured
 [OpenTelemetry export](/gateway/opentelemetry).
@@ -224,8 +214,7 @@ You can also configure the same preference directly:
 Set `DO_NOT_TRACK=1` or `DO_NOT_TRACK=true` to force feature statistics off,
 even when `telemetry.enabled` is `true`. `DO_NOT_TRACK` does not disable the
 daily update check: OpenClaw sends the update-only `GET` request without a
-feature-statistics body. Baseline request metadata remains eligible for recording;
-Cloudflare-derived geography will join it after the receiver rollout.
+feature-statistics body.
 
 ## Automated environments
 
@@ -252,11 +241,10 @@ To go fully dark, disable the existing startup update check:
 }
 ```
 
-This stops both tiers and every automatic update request: no update request, no
-baseline request geography, no feature statistics, and no update notice, even when `update.auto.enabled` is
-`true`. Setting `OPENCLAW_NO_AUTO_UPDATE=1` also prevents automatic update
-requests and applies. Explicit update commands remain available when you choose
-to run them.
+This stops both tiers and every automatic update request: no update request,
+feature statistics, or update notice, even when `update.auto.enabled` is `true`.
+Setting `OPENCLAW_NO_AUTO_UPDATE=1` also prevents automatic update requests.
+Explicit update commands remain available when you choose to run them.
 
 See [Configuration reference](/gateway/config-observability#telemetry) for
 the full `telemetry` configuration and
