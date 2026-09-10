@@ -1,8 +1,25 @@
 import { execFileSync } from "node:child_process";
 import { expect, it } from "vitest";
 
+it("loads the worker compiler with native Node before preparing artifacts", () => {
+  const output = execFileSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      `
+await import("./scripts/lib/vitest-worker-compiler.mts");
+console.log("native worker compiler import verified");
+`,
+    ],
+    { encoding: "utf8", timeout: 30_000 },
+  );
+
+  expect(output.trim()).toBe("native worker compiler import verified");
+});
+
 it("seals recovery runtimes in independent single-entry builds", () => {
-  // Native config loading avoids Vitest requesting the very artifacts this guard validates.
+  // Separate tsx config loading avoids Vitest requesting artifacts before shape validation.
   const output = execFileSync(
     process.execPath,
     [

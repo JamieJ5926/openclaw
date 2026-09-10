@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
@@ -11,13 +11,14 @@ import {
 } from "./package-update-activation-journal.js";
 import {
   PACKAGE_ACTIVATION_HELPER,
-  stagePackageActivationRuntime,
+  packageActivationRuntimeEntrypoint,
 } from "./package-update-activation-runtime-assets.js";
 import {
   createPackageIntegrityReader,
   type PackageIntegrityFingerprint,
 } from "./package-update-integrity.js";
 import { isSupportedNodeVersion } from "./runtime-guard.js";
+import { resolveRuntimeWorkerUrl } from "./runtime-worker-url.js";
 import type { UpdateRecoveryFence } from "./update-run-recovery.js";
 
 export type PackageActivationOptions = {
@@ -36,6 +37,20 @@ export type PackageActivationPreparation = {
   previousLauncherRoot?: string;
   launchers: Array<{ name: string; previous: string | null }>;
 };
+
+function stagePackageActivationRuntime(anchor: string, assertCurrent: () => void): string {
+  const source = resolveRuntimeWorkerUrl(packageActivationRuntimeEntrypoint);
+  if (!source.pathname.endsWith(".mjs")) {
+    throw new Error("Package publication recovery requires its built sealed helper.");
+  }
+  const bytes = fs.readFileSync(source);
+  assertCurrent();
+  fs.writeFileSync(path.join(anchor, PACKAGE_ACTIVATION_HELPER), bytes, {
+    flag: "wx",
+    mode: 0o600,
+  });
+  return createHash("sha256").update(bytes).digest("hex");
+}
 
 export async function preparePackageActivationJournal(params: PackageActivationPreparation) {
   const authority = captureUpdateCommandExecutorAuthority(params.options.fence);
