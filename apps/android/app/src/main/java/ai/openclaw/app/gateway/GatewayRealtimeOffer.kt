@@ -26,7 +26,13 @@ internal class GatewayRealtimeOffer(
   private val client =
     client
       .newBuilder()
-      .followRedirects(false)
+      .apply {
+        interceptors().add(0) { chain ->
+          // Queued calls may start after retirement but before lifetime cancellation.
+          if (!isCurrent() || lifetime?.isActive == false) throw IOException("Gateway connection changed")
+          chain.proceed(chain.request())
+        }
+      }.followRedirects(false)
       .followSslRedirects(false)
       .callTimeout(30, TimeUnit.SECONDS)
       .build()
