@@ -407,8 +407,9 @@ win over provider defaults. In replace mode, only current declarations enter the
 catalog; manifest inventory and runtime fallback rows cannot add other models.
 
 <AccordionGroup>
-  <Accordion title="Merge mode precedence">
-    For matching provider IDs:
+  <Accordion title="models.json publication merge precedence">
+    The file publication step uses these rules for matching provider IDs. They do
+    not override current-configuration request authority in a prepared runtime:
 
     - A non-empty `baseUrl` already present in the agent `models.json` wins.
     - A non-empty `apiKey` in `models.json` wins only when that provider is not SecretRef-managed in the current config/auth-profile context.
