@@ -4864,6 +4864,7 @@ require("node:fs").writeFileSync("scheduler-baseline", process.env.OPENCLAW_UPGR
       row: Record<string, unknown>,
       context: Parameters<typeof evaluateWorkflowExpression>[1],
       failTask = "",
+      options: { gatewayClient?: boolean } = {},
     ) {
       const step: WorkflowStep = expectDefined(
         readCiWorkflow().jobs.android.steps.find(
@@ -4872,7 +4873,20 @@ require("node:fs").writeFileSync("scheduler-baseline", process.env.OPENCLAW_UPGR
         "Android task runner",
       );
       const root = tempDirs.make("openclaw-android-tier-");
+      if (options.gatewayClient) {
+        mkdirSync(path.join(root, "gateway-client"));
+        writeFileSync(path.join(root, "gateway-client/build.gradle.kts"), "");
+      }
       const callsPath = path.join(root, "gradle-calls.jsonl");
+      const clockPath = path.join(root, "clock-reads.jsonl");
+      writeExecutable(path.join(root, "date"), [
+        "#!/usr/bin/env node",
+        'const fs = require("node:fs");',
+        'const previous = fs.existsSync(process.env.CLOCK_READS) ? fs.readFileSync(process.env.CLOCK_READS, "utf8").trim().split("\\n") : [];',
+        "const instant = new Date(1700000000000 + previous.length * 1000).toISOString();",
+        'fs.appendFileSync(process.env.CLOCK_READS, instant + "\\n");',
+        "console.log(instant);",
+      ]);
       writeExecutable(path.join(root, "gradlew"), [
         "#!/usr/bin/env node",
         'require("node:fs").appendFileSync(process.env.GRADLE_CALLS, JSON.stringify(process.argv.slice(2)) + "\\n");',
@@ -4892,6 +4906,8 @@ require("node:fs").writeFileSync("scheduler-baseline", process.env.OPENCLAW_UPGR
           OPENCLAW_ROBOLECTRIC_INIT: "robolectric.gradle",
           GRADLE_CALLS: callsPath,
           FAIL_GRADLE_TASK: failTask,
+          CLOCK_READS: clockPath,
+          PATH: `${root}${path.delimiter}${process.env.PATH}`,
         },
       });
       const calls: string[][] = existsSync(callsPath)
@@ -4900,8 +4916,62 @@ require("node:fs").writeFileSync("scheduler-baseline", process.env.OPENCLAW_UPGR
             .split("\n")
             .map((line) => JSON.parse(line))
         : [];
-      return { ...result, calls, tasks: calls.flat().filter((arg) => arg.startsWith(":")) };
+      const clockReads = existsSync(clockPath)
+        ? readFileSync(clockPath, "utf8").trim().split("\n")
+        : [];
+      return {
+        ...result,
+        calls,
+        clockReads,
+        tasks: calls.flat().filter((arg) => arg.startsWith(":")),
+      };
     }
+
+    it.each(["test-play", "test-third-party"])(
+      "reuses one build instant across the %s unit and lint commands",
+      (task) => {
+        const result = runAndroidTask(
+          { task, lint: true },
+          { eventName: "pull_request", repository: "openclaw/openclaw", runAttempt: 1 },
+        );
+        expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
+        expect(result.calls).toHaveLength(2);
+        const metadata = result.calls.map((call) =>
+          call.filter((arg) => arg.startsWith("-PopenclawBuildTimestamp=")),
+        );
+        expect(metadata[0]).toHaveLength(1);
+        expect(metadata[1]).toEqual(metadata[0]);
+        expect(result.clockReads).toHaveLength(1);
+        expect(metadata[0]).toEqual([`-PopenclawBuildTimestamp=${result.clockReads[0]}`]);
+      },
+    );
+
+    it("keeps Gateway client unit and lint tasks on the shared Android build instant", () => {
+      const result = runAndroidTask(
+        { task: "test-play", lint: true },
+        { eventName: "pull_request", repository: "openclaw/openclaw", runAttempt: 1 },
+        "",
+        { gatewayClient: true },
+      );
+      expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
+      expect(result.calls.map((call) => call.filter((arg) => arg.startsWith(":")))).toEqual([
+        [
+          ":app:testPlayDebugUnitTest",
+          ":gateway-client:testDebugUnitTest",
+          ":wear-shared:testDebugUnitTest",
+        ],
+        [":app:lintPlayDebug", ":gateway-client:lintDebug", ":wear-shared:lintDebug"],
+      ]);
+      expect(result.clockReads).toHaveLength(1);
+      expect(
+        result.calls.map((call) =>
+          call.filter((arg) => arg.startsWith("-PopenclawBuildTimestamp=")),
+        ),
+      ).toEqual([
+        [`-PopenclawBuildTimestamp=${result.clockReads[0]}`],
+        [`-PopenclawBuildTimestamp=${result.clockReads[0]}`],
+      ]);
+    });
 
     it.each([
       { eventName: "pull_request", releaseGate: false, full: false, legacy: false },
@@ -4949,6 +5019,12 @@ require("node:fs").writeFileSync("scheduler-baseline", process.env.OPENCLAW_UPGR
             expect(call).toContain("--build-cache");
             const testCall = call.some((arg) => arg.endsWith("UnitTest"));
             expect(call.includes("--init-script")).toBe(testCall);
+          }
+          if ((row.task !== "test-play" && row.task !== "test-third-party") || row.lint !== true) {
+            expect(result.clockReads).toEqual([]);
+            expect(
+              result.calls.flat().filter((arg) => arg.startsWith("-PopenclawBuildTimestamp=")),
+            ).toEqual([]);
           }
           if (row.task === "build-play") {
             expect(result.calls.map((call) => call.filter((arg) => arg.startsWith(":")))).toEqual([
@@ -5050,6 +5126,7 @@ require("node:fs").writeFileSync("scheduler-baseline", process.env.OPENCLAW_UPGR
     it.each([
       ["test-play", ":app:testPlayDebugUnitTest"],
       ["test-play", ":app:lintPlayDebug"],
+      ["test-third-party", ":app:testThirdPartyDebugUnitTest"],
       ["test-third-party", ":app:lintThirdPartyDebug"],
       ["test-wear", ":wear:lintDebug"],
       ["ktlint", ":benchmark:assembleDebug"],
@@ -6153,10 +6230,15 @@ setImmediate(() => {
         "test-third-party",
         "test-wear",
       ]) {
-        expect(
-          evaluateTimeout("android", { ...context, matrix: { task } }),
-          `${label}: ${task}`,
-        ).toBe(task === "build-play" && runner === "ubuntu-24.04" ? 35 : 20);
+        for (const lint of [undefined, false, true]) {
+          const extendedBudget =
+            (task === "test-third-party" && lint === true) ||
+            (task === "build-play" && runner === "ubuntu-24.04");
+          expect(
+            evaluateTimeout("android", { ...context, matrix: { task, lint } }),
+            `${label}: ${task}, lint=${lint}`,
+          ).toBe(extendedBudget ? 35 : 20);
+        }
       }
     }
   });
