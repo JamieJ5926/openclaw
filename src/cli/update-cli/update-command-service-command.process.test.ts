@@ -7,7 +7,7 @@ it.each([
   "install",
   "stop",
   "missing candidate",
-  "executor revoked",
+  "unregistered executor",
   "restart revoked",
   "install revoked",
   "stop revoked",
@@ -59,7 +59,7 @@ it.each([
           await fs.mkdir(dist);
           const params = {
             result: { root, mode: "npm" },
-            opts: { json: true, ...(scenario === "executor revoked" ? {
+            opts: { json: true, ...(scenario === "unregistered executor" ? {
               run: { runId: "original", env: process.env, executorFence: {
                 assertCurrent() { if (existsSync(receipt)) { throw new Error("Update authority revoked during native command"); } },
               } },
@@ -67,7 +67,7 @@ it.each([
             invocationEnv: process.env,
             timeoutMs: 10_000,
             assertCurrent() {
-              if (scenario !== "executor revoked" && scenario.endsWith("revoked") && existsSync(receipt)) {
+              if (scenario !== "unregistered executor" && scenario.endsWith("revoked") && existsSync(receipt)) {
                 throw new Error("Update authority revoked during native command");
               }
             },
@@ -86,20 +86,27 @@ it.each([
               '  compileCacheDisabled: process.env.NODE_DISABLE_COMPILE_CACHE,',
               '}));',
             ].join("\n"));
-            if (scenario.endsWith("revoked")) {
+            if (scenario === "unregistered executor") {
+              await assert.rejects(runUpdatedInstallGatewayCommand(params, action, true), {
+                message: "Child continuation requires its live executor.",
+              });
+              assert.equal(existsSync(receipt), false);
+            } else if (scenario.endsWith("revoked")) {
               await assert.rejects(runUpdatedInstallGatewayCommand(params, action, true), {
                 message: "Update authority revoked during native command",
               });
             } else {
               assert.equal(await runUpdatedInstallGatewayCommand(params, action, true), "unverified");
             }
-            const observed = JSON.parse(await fs.readFile(receipt, "utf8"));
-            assert.deepEqual(observed, {
-              args: ["gateway", action, action === "restart" ? "--preserve-definition" : "--force", "--json"],
-              node: process.execPath,
-              config: process.env.OPENCLAW_CONFIG_PATH,
-              compileCacheDisabled: "1",
-            });
+            if (scenario !== "unregistered executor") {
+              const observed = JSON.parse(await fs.readFile(receipt, "utf8"));
+              assert.deepEqual(observed, {
+                args: ["gateway", action, action === "restart" ? "--preserve-definition" : "--force", "--json"],
+                node: process.execPath,
+                config: process.env.OPENCLAW_CONFIG_PATH,
+                compileCacheDisabled: "1",
+              });
+            }
           }
           console.log("UPDATE_COMMAND_AFTER_REPLACEMENT_OK");
         `;

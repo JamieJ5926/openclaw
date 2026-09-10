@@ -2777,7 +2777,9 @@ describe("launchd install", () => {
 
     await stopLaunchAgent({ env, stdout, disable });
 
-    expect(cleanStaleGatewayProcessesSync).toHaveBeenCalledWith(port);
+    expect(cleanStaleGatewayProcessesSync).toHaveBeenCalledWith(port, {
+      assertCurrent: expect.any(Function),
+    });
     expect(inspectPortUsage).toHaveBeenCalledWith(port, { probeHosts: ["127.0.0.1"] });
     expect(output).toContain("Stopped LaunchAgent");
   });
@@ -2841,7 +2843,9 @@ describe("launchd install", () => {
 
     await stopLaunchAgent(launchAgentControlFixture(env));
 
-    expect(cleanStaleGatewayProcessesSync).toHaveBeenCalledWith(19006);
+    expect(cleanStaleGatewayProcessesSync).toHaveBeenCalledWith(19006, {
+      assertCurrent: expect.any(Function),
+    });
     expect(inspectPortUsage).toHaveBeenCalledWith(19006, {
       probeHosts: ["127.0.0.1"],
     });
@@ -2871,7 +2875,9 @@ describe("launchd install", () => {
       );
 
       expect(onMutation).toHaveBeenCalledWith({ mode });
-      expect(cleanStaleGatewayProcessesSync).toHaveBeenCalledWith(port);
+      expect(cleanStaleGatewayProcessesSync).toHaveBeenCalledWith(port, {
+        assertCurrent: expect.any(Function),
+      });
       expect(inspectPortUsage).toHaveBeenCalledWith(port, { probeHosts: ["127.0.0.1"] });
       expect(launchctlCommandNames()).toContain("bootout");
       if (disable) {

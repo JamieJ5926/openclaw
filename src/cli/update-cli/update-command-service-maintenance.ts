@@ -598,7 +598,7 @@ async function stopManagedServiceBeforeMutableUpdate(
         const stopped = await runUpdatedInstallGatewayCommand(
           {
             result: { root: params.root },
-            opts: { json: params.jsonMode },
+            opts: { json: params.jsonMode, run: params.updateRun },
             invocationEnv: process.env,
             serviceEnv: currentState.env,
             timeoutMs: params.timeoutMs,

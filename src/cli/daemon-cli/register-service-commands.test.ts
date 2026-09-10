@@ -89,6 +89,20 @@ describe("addGatewayServiceCommands", () => {
     vi.restoreAllMocks();
   });
 
+  it.each(["install", "restart", "stop"])(
+    "probes %s update custody without invoking the action",
+    async (action) => {
+      const output = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+      await createGatewayParentLikeCommand().parseAsync([action, "--update-executor", "check"], {
+        from: "user",
+      });
+      expect(output).toHaveBeenCalledWith(JSON.stringify({ updateExecutor: "root-spawner-v1" }));
+      expect(runDaemonInstall).not.toHaveBeenCalled();
+      expect(runDaemonRestart).not.toHaveBeenCalled();
+      expect(runDaemonStop).not.toHaveBeenCalled();
+    },
+  );
+
   it.each([
     {
       name: "forwards install option collisions from parent gateway command",
