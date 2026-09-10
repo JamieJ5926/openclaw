@@ -3,15 +3,14 @@ summary: "Daily update requests, approximate location, optional anonymous featur
 title: "Usage telemetry and update checks"
 read_when:
   - Checking what OpenClaw sends and what the receiver stores
-  - Deciding whether to share feature statistics
-  - Enabling or disabling feature statistics
+  - Deciding whether to share anonymous feature statistics
+  - Enabling or disabling anonymous feature statistics
   - Disabling all automatic update-check requests
 ---
 
 **Automatic update checks send a daily request by default.** It asks whether a
 newer version exists and includes the OpenClaw version, operating system, Node.js
-version, CPU architecture, and request surface. A planned receiver rollout will
-add approximate location information to the hosted telemetry service.
+version, CPU architecture, and request surface.
 Anonymous feature statistics are opt-in.
 This page describes update-check telemetry, not requests made by configured
 providers, channels, or other services.
@@ -40,11 +39,11 @@ openclaw telemetry show
 Add `--json` to get the same state and payload as one machine-readable
 document.
 
-The output shows whether feature statistics are enabled, why they are enabled
-or disabled, the request endpoint, and the last successful check. When feature
-statistics are enabled, it prints a JSON payload preview built in the CLI
-process. It does not retrieve a payload from the running Gateway. When only
-feature statistics are disabled, it shows the update-only request
+The output shows whether anonymous feature statistics are enabled, why they are
+enabled or disabled, the request endpoint, and the last successful check. When
+anonymous feature statistics are enabled, it prints a JSON payload preview built
+in the CLI process. It does not retrieve a payload from the running Gateway.
+When only anonymous feature statistics are disabled, it shows the update-only request
 and its `User-Agent` header instead. When automation or update-check policy
 disables all requests, it shows `Request: none` with the reason (`request: null`
 in JSON).
@@ -83,21 +82,15 @@ replacement endpoint URL. The public server source is available at
 
 ## Approximate location
 
-**Pending receiver rollout:** The location recording described below starts
-only after the receiver change is deployed and verified. This client documentation
-change does not enable it.
+Cloudflare provides approximate location: country, region code, city, and timezone.
+We store no raw IP addresses or precise coordinates in analytics.
 
-After the rollout, the hosted service will record approximate location information
-provided by Cloudflare: **country and city**, plus **region code and timezone**.
-No raw IP addresses or precise location coordinates are stored in its analytics.
-Missing or invalid values will be left empty.
+Recorded update checks include these fields even when anonymous feature statistics
+are off or `DO_NOT_TRACK` is set. Missing or invalid fields stay empty.
+No additional client payload or prompt is needed.
 
-Recorded update-only requests will also include these fields when feature statistics
-are off or `DO_NOT_TRACK` is set. No additional client payload or prompt is needed.
-
-The same **three-month** Analytics Engine retention applies to these fields.
-Disabling requests does not erase previously recorded rows. Public stats and
-homepage aggregates do not expose location information.
+Analytics Engine retains records for **three months**. Public aggregates exclude
+location information. Disabling requests does not erase existing records.
 
 This section describes the hosted service at
 [telemetry.openclaw.ai](https://telemetry.openclaw.ai). A replacement endpoint
@@ -112,11 +105,11 @@ Anonymous feature statistics are **off by default**. Interactive setup can offer
 opt-in with **No thanks** selected by default; guided Quick Start skips that
 prompt. OpenClaw records a prompt response so setup does not ask again.
 Non-interactive and scripted installations do not opt in automatically, but
-operators can explicitly enable statistics with `openclaw telemetry on` or
+operators can explicitly enable anonymous feature statistics with `openclaw telemetry on` or
 `telemetry.enabled: true`. The enabled setting, not the presence of a prompt
-response, controls whether feature statistics are included.
+response, controls whether anonymous feature statistics are included.
 
-When you explicitly enable feature statistics, the same daily request becomes a
+When you explicitly enable anonymous feature statistics, the same daily request becomes a
 `POST` with a JSON payload in this shape (values are illustrative):
 
 ```json
@@ -176,8 +169,8 @@ history or retention measure.
 
 ### What is not sent or stored
 
-Neither the update-check `User-Agent` nor the feature-statistics body includes
-message content, prompts, model names, API keys, credentials, secret references,
+Neither the update-check `User-Agent` nor the body containing anonymous feature
+statistics includes message content, prompts, model names, API keys, credentials, secret references,
 file paths, hostnames, account identifiers, user identifiers, or installation
 and machine identifiers. OpenClaw does not create a random UUID or other
 persistent client identifier for these requests.
@@ -189,12 +182,14 @@ transiently for rate limiting without storing them in Analytics Engine. Worker
 logs are disabled; Cloudflare's separate infrastructure processing is outside
 those settings.
 
-Feature statistics are separate from optional, operator-configured
+Anonymous feature statistics are separate from optional, operator-configured
 [OpenTelemetry export](/gateway/opentelemetry).
 
-## Turn feature statistics on or off
+<a id="turn-feature-statistics-on-or-off" />
 
-Enable or disable feature statistics at any time:
+## Turn anonymous feature statistics on or off
+
+Enable or disable anonymous feature statistics at any time:
 
 ```bash
 openclaw telemetry on
@@ -211,10 +206,10 @@ You can also configure the same preference directly:
 }
 ```
 
-Set `DO_NOT_TRACK=1` or `DO_NOT_TRACK=true` to force feature statistics off,
+Set `DO_NOT_TRACK=1` or `DO_NOT_TRACK=true` to force anonymous feature statistics off,
 even when `telemetry.enabled` is `true`. `DO_NOT_TRACK` does not disable the
 daily update check: OpenClaw sends the update-only `GET` request without a
-feature-statistics body.
+body containing anonymous feature statistics.
 
 ## Automated environments
 
@@ -224,8 +219,8 @@ are not installations: they would outnumber real operators by orders of
 magnitude and make version and platform counts meaningless, and your pipeline
 should not report to us on every job.
 
-This applies to both tiers, so a CI job sends no update check and no feature
-statistics. Setting `OPENCLAW_TELEMETRY_ENDPOINT` overrides the suppression,
+This applies to both tiers, so a CI job sends no update check and no anonymous
+feature statistics. Setting `OPENCLAW_TELEMETRY_ENDPOINT` overrides the suppression,
 because a configured endpoint means the run is deliberately exercising this
 path.
 
@@ -242,7 +237,7 @@ To go fully dark, disable the existing startup update check:
 ```
 
 This stops both tiers and every automatic update request: no update request,
-feature statistics, or update notice, even when `update.auto.enabled` is `true`.
+anonymous feature statistics, or update notice, even when `update.auto.enabled` is `true`.
 Setting `OPENCLAW_NO_AUTO_UPDATE=1` also prevents automatic update requests.
 Explicit update commands remain available when you choose to run them.
 
