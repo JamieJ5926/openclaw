@@ -1,10 +1,8 @@
 // Covers provider usage summary loading across auth and plugin paths.
-import { createServer } from "node:http";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AsyncWorkScope } from "../shared/async-work-scope.js";
 import { createDeferredCore } from "../shared/deferred.js";
 import { createProviderUsageFetch, makeResponse } from "../test-utils/provider-usage-fetch.js";
-import { fetchWithSsrFGuard } from "./net/fetch-guard.js";
 import {
   getProviderUsageAuthWithPluginMock,
   getProviderUsageSnapshotWithPluginMock,
@@ -115,114 +113,6 @@ describe("provider-usage.load", () => {
     const mockFetch = createProviderUsageFetch(async () => makeResponse(404, "not found"));
     const summary = await loadUsageWithAuth(loadProviderUsageSummary, [], mockFetch);
     expect(summary).toEqual({ updatedAt: usageNow, providers: [] });
-  });
-
-  it("respects selected Codex token expiry", async () => {
-    resolveProviderUsageAuthWithPluginMock.mockImplementation(
-      async ({ context }) => (await context.resolveOAuthToken()) ?? { handled: true },
-    );
-    const fetchMock = createProviderUsageFetch(async () => makeResponse(200, "{}"));
-    resolveProviderUsageSnapshotWithPluginMock.mockImplementation(async ({ context }) => {
-      await context.fetchFn("https://usage.example.invalid", {
-        headers: { Authorization: `Bearer ${context.token}` },
-      });
-      return { provider: "openai", displayName: "OpenAI", windows: [] };
-    });
-    const options = {
-      authProfile: { provider: "openai", profileId: "openai:saved" },
-      authStore: {
-        version: 1,
-        profiles: {
-          "openai:saved": {
-            type: "token",
-            provider: "openai",
-            token: "synthetic-expired-token",
-            expires: Date.now() - 60_000,
-          },
-        },
-      },
-      config: {},
-      env: {},
-      fetch: fetchMock,
-    } satisfies Parameters<typeof loadProviderUsageSummary>[0];
-    const summary = await loadProviderUsageSummary(options);
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(summary.providers).toEqual([]);
-    options.authStore.profiles["openai:saved"].expires = Date.now() + 60_000;
-    await loadProviderUsageSummary(options);
-    expect(fetchMock).toHaveBeenCalledOnce();
-  });
-
-  it("keeps legacy hooks provider-wide and never invokes them for a selected account", async () => {
-    const legacy = [{ provider: "anthropic", displayName: "Claude" }];
-    const runtime = await import("../plugins/provider-runtime.js");
-    vi.spyOn(runtime, "listProviderUsagePluginDescriptors").mockReturnValue(legacy);
-    resolveProviderUsageAuthWithPluginMock.mockImplementation(async ({ context }) => {
-      const token = context.env.ANTHROPIC_ADMIN_KEY ?? (await context.resolveOAuthToken())?.token;
-      return token ? { token } : { handled: true };
-    });
-    resolveProviderUsageSnapshotWithPluginMock.mockImplementation(async ({ context }) => ({
-      provider: "anthropic",
-      displayName: "Claude",
-      windows: [{ label: context.token, usedPercent: 42 }],
-    }));
-    const options = {
-      config: {},
-      env: { ANTHROPIC_ADMIN_KEY: "synthetic-organization" },
-      authStore: {
-        version: 1,
-        profiles: {
-          "anthropic:login": { type: "token", provider: "anthropic", token: "synthetic-login" },
-        },
-      },
-    } satisfies Parameters<typeof loadProviderUsageSummary>[0];
-    const account = await loadProviderUsageSummary({
-      ...options,
-      authProfile: { provider: "anthropic", profileId: "anthropic:login" },
-    });
-    expect(account.providers).toEqual([]);
-    expect(resolveProviderUsageAuthWithPluginMock).not.toHaveBeenCalled();
-    expect(resolveProviderUsageSnapshotWithPluginMock).not.toHaveBeenCalled();
-
-    for (const [env, expected] of [
-      [options.env, "synthetic-organization"],
-      [{}, "synthetic-login"],
-    ] as const) {
-      const summary = await loadProviderUsageSummary({
-        ...options,
-        env,
-        providers: ["anthropic"],
-      });
-      expect(summary.providers[0]?.windows).toEqual([{ label: expected, usedPercent: 42 }]);
-    }
-  });
-
-  it("reports exact-account auth failures without contacting the provider", async () => {
-    resolveProviderUsageAuthWithPluginMock.mockRejectedValueOnce(
-      new Error("Saved account secret is unavailable"),
-    );
-    const summary = await loadProviderUsageSummary({
-      now: usageNow,
-      authProfile: { provider: "openai", profileId: "openai:account" },
-      authStore: {
-        version: 1,
-        profiles: {
-          "openai:account": { type: "token", provider: "openai", token: "synthetic-token" },
-        },
-      },
-      config: {},
-      env: {},
-    });
-
-    expect(summary.providers).toEqual([
-      {
-        provider: "openai",
-        displayName: "OpenAI",
-        windows: [],
-        error: "Saved account secret is unavailable",
-      },
-    ]);
-    expect(resolveProviderUsageSnapshotWithPluginMock).not.toHaveBeenCalled();
   });
 
   it("returns unsupported provider snapshots for unknown provider ids", async () => {
@@ -403,125 +293,6 @@ describe("provider-usage.load", () => {
     }
   });
 
-  it("refreshes every healthy profile across successive batches larger than the queue deadline", async () => {
-    vi.useFakeTimers();
-    const profileIds = Array.from({ length: 10 }, (_, index) => `openai:${index}`);
-    const batches: string[][] = [];
-    let active = 0;
-    let peakActive = 0;
-    resolveProviderUsageAuthWithPluginMock.mockResolvedValue({ token: "profile-token" });
-    resolveProviderUsageSnapshotWithPluginMock.mockImplementation(async ({ provider, context }) => {
-      active += 1;
-      peakActive = Math.max(peakActive, active);
-      try {
-        await new Promise<void>((resolve) => {
-          setTimeout(resolve, 40);
-        });
-        return {
-          provider,
-          displayName: provider,
-          windows: [{ label: context.authProfileId ?? "missing profile", usedPercent: 12 }],
-        };
-      } finally {
-        active -= 1;
-      }
-    });
-    try {
-      for (let batch = 0; batch < 2; batch += 1) {
-        const pending = profileIds.map((profileId) =>
-          loadProviderUsageSummary({
-            authProfile: { provider: "openai", profileId },
-            authStore: {
-              version: 1,
-              profiles: {
-                [profileId]: { type: "token", provider: "openai", token: "synthetic-token" },
-              },
-            },
-            config: {},
-            env: {},
-            timeoutMs: 50,
-            isAuthProfileCurrent: () => true,
-          }),
-        );
-        await vi.advanceTimersByTimeAsync(160);
-        batches.push(
-          (await Promise.all(pending)).map((summary) => {
-            const snapshot = summary.providers[0];
-            return snapshot?.windows[0]?.label ?? snapshot?.error ?? "missing usage";
-          }),
-        );
-      }
-      expect(batches).toEqual([profileIds, profileIds]);
-      expect(peakActive).toBe(3);
-      expect(active).toBe(0);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it.each([
-    { releaseAfter: 50, requestsStarted: 4 },
-    { releaseAfter: 100, requestsStarted: 3 },
-  ])(
-    "holds the I/O cap and expires queued work before release at $releaseAfter ms",
-    async ({ releaseAfter, requestsStarted }) => {
-      vi.useFakeTimers();
-      let releaseWork: (() => void) | undefined;
-      const workBlocked = new Promise<void>((resolve) => {
-        releaseWork = resolve;
-      });
-      resolveProviderUsageAuthWithPluginMock.mockResolvedValue({ token: "profile-token" });
-      resolveProviderUsageSnapshotWithPluginMock.mockImplementation(async ({ provider }) => {
-        await workBlocked;
-        return { provider, displayName: provider, windows: [] };
-      });
-      const pending = Array.from({ length: 4 }, (_, index) =>
-        loadProviderUsageSummary({
-          authProfile: { provider: "openai", profileId: `openai:${index}` },
-          authStore: {
-            version: 1,
-            profiles: {
-              [`openai:${index}`]: { type: "token", provider: "openai", token: "synthetic-token" },
-            },
-          },
-          config: {},
-          env: {},
-          timeoutMs: 50,
-          isAuthProfileCurrent: () => true,
-        }),
-      );
-      let queuedSettled = false;
-      void pending[3]?.then(() => {
-        queuedSettled = true;
-      });
-      try {
-        await vi.advanceTimersByTimeAsync(1);
-        expect(resolveProviderUsageSnapshotWithPluginMock).toHaveBeenCalledTimes(3);
-
-        await vi.advanceTimersByTimeAsync(49);
-        await Promise.all(pending.slice(0, 3));
-        expect(resolveProviderUsageSnapshotWithPluginMock).toHaveBeenCalledTimes(3);
-        expect(queuedSettled).toBe(false);
-
-        if (releaseAfter === 100) {
-          await vi.advanceTimersByTimeAsync(50);
-          await expect(pending[3]).resolves.toMatchObject({
-            providers: [{ error: "Refresh queue timeout" }],
-          });
-          expect(resolveProviderUsageSnapshotWithPluginMock).toHaveBeenCalledTimes(3);
-        }
-        releaseWork?.();
-        await vi.advanceTimersByTimeAsync(0);
-        await Promise.all(pending);
-        expect(resolveProviderUsageSnapshotWithPluginMock).toHaveBeenCalledTimes(requestsStarted);
-      } finally {
-        releaseWork?.();
-        await Promise.allSettled(pending);
-        vi.useRealTimers();
-      }
-    },
-  );
-
   it("keeps successful provider usage when a sibling auth hook rejects", async () => {
     resolveProviderUsageAuthWithPluginMock.mockImplementation(async ({ provider }) => {
       if (provider === "anthropic") {
@@ -553,65 +324,20 @@ describe("provider-usage.load", () => {
     ]);
   });
 
-  it.each(["direct", "guarded"])(
-    "loads provider usage through %s HTTP with the default fetch",
-    async (transport) => {
-      const globalFetch = globalThis.fetch;
-      let interceptedRequests = 0;
-      if (transport === "direct") {
-        globalThis.fetch = (input, init) => {
-          interceptedRequests++;
-          return globalFetch(input, init);
-        };
-      }
-      const server = createServer((_request, response) => response.end("42"));
-      await new Promise<void>((resolve) => {
-        server.listen(0, "127.0.0.1", resolve);
-      });
-      try {
-        const address = server.address();
-        if (!address || typeof address === "string") {
-          throw new Error("Expected a listening HTTP server");
-        }
-        resolveProviderUsageSnapshotWithPluginMock.mockImplementation(async ({ context }) => {
-          const url = `http://127.0.0.1:${address.port}`;
-          const guarded =
-            transport === "guarded"
-              ? await fetchWithSsrFGuard({
-                  url,
-                  fetchImpl: context.fetchFn,
-                  policy: { allowPrivateNetwork: true },
-                })
-              : { response: await context.fetchFn(url), release: async () => {} };
-          try {
-            return {
-              provider: "xiaomi",
-              displayName: "Xiaomi",
-              windows: [{ label: "5h", usedPercent: Number(await guarded.response.text()) }],
-            };
-          } finally {
-            await guarded.release();
-          }
-        });
-        const summary = await loadProviderUsageSummary({
+  it("throws when fetch is unavailable", async () => {
+    const previousFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", undefined);
+    try {
+      await expect(
+        loadProviderUsageSummary({
           now: usageNow,
           auth: [{ provider: "xiaomi", token: "token-x" }],
           env: {},
-        });
-        expect(summary.providers).toEqual([
-          {
-            provider: "xiaomi",
-            displayName: "Xiaomi",
-            windows: [{ label: "5h", usedPercent: 42 }],
-          },
-        ]);
-        expect(interceptedRequests).toBe(transport === "direct" ? 1 : 0);
-      } finally {
-        globalThis.fetch = globalFetch;
-        await new Promise<void>((resolve, reject) => {
-          server.close((error) => (error ? reject(error) : resolve()));
-        });
-      }
-    },
-  );
+          fetch: undefined,
+        }),
+      ).rejects.toThrow("fetch is not available");
+    } finally {
+      vi.stubGlobal("fetch", previousFetch);
+    }
+  });
 });

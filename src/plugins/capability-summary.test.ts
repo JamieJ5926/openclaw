@@ -144,7 +144,6 @@ describe("plugin capability summaries", () => {
       webSearchProviders: ["web-search"],
       workerProviders: ["worker"],
       usageProviders: ["usage"],
-      accountUsageProviders: ["usage"],
       migrationProviders: ["migration"],
       gatewayMethodDispatch: ["gateway-method"],
       tools: ["tool"],

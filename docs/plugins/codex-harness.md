@@ -104,6 +104,18 @@ broader model/provider/runtime split, start with
 ref, `codex` is the runtime, and Telegram, Discord, Slack, or another
 channel is the communication surface.
 
+## Saved-account usage
+
+With the Codex plugin enabled, administrators can view and refresh quotas beside
+each saved OpenAI subscription login on the Models page. Other providers and API
+keys keep their existing display.
+
+The plugin's `codex.accountUsage` Gateway method accepts `agentId` and `profileId`.
+It reuses `account/rateLimits/read` in a temporary local app-server with the
+selected login, even when the normal harness uses a native home or remote server.
+Each request fetches current quotas; the UI retains the result until refreshed.
+The request requires `operator.admin` and rejects changed or removed credentials.
+
 ## Requirements
 
 - The official `@openclaw/codex` plugin installed. Include `codex` in

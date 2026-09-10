@@ -94,7 +94,7 @@ families](/plugins/sdk-provider-plugins/hook-families) for the shared builders.
       return auth ? { token: auth.token } : null;
     },
     fetchUsageSnapshot: async (ctx) => {
-      return await fetchAcmeUsage(ctx.token, ctx.timeoutMs, ctx.fetchFn);
+      return await fetchAcmeUsage(ctx.token, ctx.timeoutMs);
     },
     ```
 
@@ -108,46 +108,12 @@ families](/plugins/sdk-provider-plugins/hook-families) for the shared builders.
     API-key/OAuth fallback. Return `null` or `undefined` when the provider did
     not handle the request and OpenClaw should continue with generic fallback.
 
-    Account usage is currently implemented for Codex logins through the OpenAI
-    provider. Other bundled providers retain provider-wide usage only.
-    To support per-account usage, also declare the provider id in
-    `contracts.accountUsageProviders`. Without this opt-in, OpenClaw keeps
-    provider-wide usage collection and does not attribute results to a saved
-    login. If multiple eligible plugins own the same provider, all must opt
-    in. Declare it only after both hooks honor the following contract.
-
-    When `ctx.authProfileId` is present, the request is for one saved
-    OAuth or token account. `resolveOAuthToken` is pinned to that exact profile;
-    OAuth refresh stays with its current account and prepared configuration.
-    API-key helpers return no credentials for account requests. Use the OAuth
-    helper instead of a
-    provider-wide environment or administrator key, and never substitute a
-    different account when the selected profile cannot supply usage auth.
-    OpenClaw passes the same `authProfileId` to `fetchUsageSnapshot`.
-    Use `ctx.fetchFn` for provider HTTP so a removed selected profile is
-    rechecked at final I/O. Hooks with a custom transport must call
-    `ctx.isAuthProfileCurrent?.()` immediately before starting that I/O.
-
-    The admin-only Gateway method `models.authUsage` accepts `profileId`,
-    optional `agentId`, and optional `refresh: true`. It returns a
-    `UsageSummary` for that account, or an empty `providers` array when the
-    plugin has not opted in. Cached results expire after one minute; refresh
-    waits for a new result. `models.authStatus` and `usage.status` retain
-    normal provider usage collection. If configured request authentication
-    overrides the selected account, return an explanatory error without
-    sending the account request.
-
     Declare the provider id in `contracts.usageProviders`. When that manifest
     contract and **both** hooks are present, OpenClaw automatically includes
     the provider in usage collection without loading unrelated provider
     plugins. No core allowlist update is required.
     `fetchUsageSnapshot` returns the shared provider-neutral shape:
 
-    - `usageScope`: optional `"account"` for account quota or `"provider"` for
-      organization/provider billing, declared by the endpoint owner on both
-      success and error snapshots. Omit it when unknown; consumers must not
-      infer scope from email, credential format, profile id, or billing shape.
-      Account scope alone does not establish ownership by a saved profile.
     - `plan`: provider-reported subscription or key label
     - `windows`: resettable quota windows as used percentages
     - `billing`: typed `balance`, `spend`, or `budget` entries; `unit` can be

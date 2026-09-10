@@ -930,7 +930,6 @@ enum class GatewayMethod(
   PluginsCatalogBrowse("plugins.catalog.browse"),
   PluginsCatalogCategories("plugins.catalog.categories"),
   PluginsCatalogGet("plugins.catalog.get"),
-  ModelsAuthUsage("models.authUsage"),
 }
 
 enum class GatewayEvent(

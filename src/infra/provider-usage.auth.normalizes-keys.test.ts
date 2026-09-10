@@ -293,7 +293,6 @@ vi.mock("../agents/auth-profiles/external-cli-sync.js", () => ({
 }));
 
 let resolveProviderAuths: typeof import("./provider-usage.auth.js").resolveProviderAuths;
-let resolveProviderProfileUsageAuth: typeof import("./provider-usage.auth.js").resolveProviderProfileUsageAuth;
 let clearRuntimeAuthProfileStoreSnapshots: typeof import("../agents/auth-profiles.js").clearRuntimeAuthProfileStoreSnapshots;
 let clearConfigCache: typeof import("../config/config.js").clearConfigCache;
 let clearRuntimeConfigSnapshot: typeof import("../config/config.js").clearRuntimeConfigSnapshot;
@@ -315,8 +314,7 @@ describe("resolveProviderAuths key normalization", () => {
 
   beforeAll(async () => {
     await suiteRootTracker.setup();
-    ({ resolveProviderAuths, resolveProviderProfileUsageAuth } =
-      await import("./provider-usage.auth.js"));
+    ({ resolveProviderAuths } = await import("./provider-usage.auth.js"));
     ({ clearRuntimeAuthProfileStoreSnapshots } = await import("../agents/auth-profiles.js"));
     ({ clearConfigCache, clearRuntimeConfigSnapshot } = await import("../config/config.js"));
   });
@@ -751,27 +749,6 @@ describe("resolveProviderAuths key normalization", () => {
         env: buildSuiteEnv(home),
       });
       expect(auths).toStrictEqual([]);
-    });
-  });
-
-  it("resolves the exact profile requested for account-scoped usage", async () => {
-    const auth = await resolveProviderProfileUsageAuth({
-      provider: "openai",
-      profileId: "openai:second",
-      store: {
-        version: 1,
-        profiles: {
-          "openai:first": { type: "token", provider: "openai", token: "first-token" },
-          "openai:second": { type: "token", provider: "openai", token: "second-token" },
-        },
-      },
-      config: {},
-    });
-
-    expect(auth).toEqual({
-      provider: "openai",
-      token: "second-token",
-      authProfileId: "openai:second",
     });
   });
 

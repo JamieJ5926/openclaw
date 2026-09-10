@@ -85,7 +85,6 @@ vi.mock("../secrets/provider-env-vars.js", () => ({
 }));
 
 let resolveProviderAuths: typeof import("./provider-usage.auth.js").resolveProviderAuths;
-let resolveProviderProfileUsageAuth: typeof import("./provider-usage.auth.js").resolveProviderProfileUsageAuth;
 
 function resolveProviderAuthsForTest(
   params: Parameters<typeof resolveProviderAuths>[0],
@@ -115,8 +114,7 @@ function providerCalls(mockFn: { mock: { calls: unknown[][] } }): unknown[] {
 
 describe("resolveProviderAuths plugin boundary", () => {
   beforeAll(async () => {
-    ({ resolveProviderAuths, resolveProviderProfileUsageAuth } =
-      await import("./provider-usage.auth.js"));
+    ({ resolveProviderAuths } = await import("./provider-usage.auth.js"));
   });
 
   beforeEach(() => {
@@ -157,56 +155,6 @@ describe("resolveProviderAuths plugin boundary", () => {
       ]);
     });
     expect(ensureAuthProfileStoreMock).not.toHaveBeenCalled();
-  });
-
-  it("does not invoke account usage hooks for inference API keys", async () => {
-    await expect(
-      resolveProviderProfileUsageAuth({
-        provider: "openai",
-        profileId: "openai:key",
-        store: {
-          version: 1,
-          profiles: {
-            "openai:key": { type: "api_key", provider: "openai", key: "synthetic-api-key" },
-          },
-        },
-        config: {},
-      }),
-    ).resolves.toBeNull();
-    expect(resolveProviderUsageAuthWithPluginMock).not.toHaveBeenCalled();
-  });
-
-  it("preserves an unavailable secret error for an exact account", async () => {
-    const profileId = "openai:account";
-    const secretError = new Error("Saved account secret is unavailable");
-    resolveApiKeyForProfileMock.mockRejectedValueOnce(secretError);
-    resolveProviderUsageAuthWithPluginMock.mockImplementationOnce(async (rawParams) => {
-      const { context } = rawParams as {
-        context: {
-          resolveOAuthToken: () => Promise<{ token: string } | null>;
-        };
-      };
-      return context.resolveOAuthToken();
-    });
-
-    await expect(
-      resolveProviderProfileUsageAuth({
-        provider: "openai",
-        profileId,
-        store: {
-          version: 1,
-          profiles: {
-            [profileId]: {
-              type: "token",
-              provider: "openai",
-              tokenRef: { source: "env", provider: "default", id: "ACCOUNT_KEY" },
-            },
-          },
-        },
-        config: {},
-        env: {},
-      }),
-    ).rejects.toBe(secretError);
   });
 
   it("preserves exact plugin auth failures for direct callers", async () => {
