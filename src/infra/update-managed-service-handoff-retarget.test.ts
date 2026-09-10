@@ -610,6 +610,9 @@ unix(
     const { createManagedHandoffLeaseStore, resolveManagedUpdateLeaseDatabasePath } =
       await import("./update-managed-service-handoff-lease.js");
     const { to } = fixture();
+    const tmpDirOwner = await import("./tmp-openclaw-dir.js");
+    // Common admission and its detached helper must share this fixture's coordinator.
+    vi.spyOn(tmpDirOwner, "resolvePreferredOpenClawTmpDir").mockReturnValue(path.dirname(to));
     const store = createManagedHandoffLeaseStore();
     const reserved = store.acquire(to, "legacy-owner", { kind: "update" });
     expect(reserved.kind).toBe("acquired");
@@ -646,7 +649,8 @@ unix(
         scratch.push(directory);
         const params = JSON.parse(
           fs.readFileSync(path.join(directory, "handoff.json"), "utf8"),
-        ) as { sensitivePaths: string[] };
+        ) as { sensitivePaths: string[]; updateLeaseDatabasePath: string };
+        expect(path.dirname(params.updateLeaseDatabasePath)).toBe(path.dirname(to));
         await expect(cancelManagedServiceUpdateHandoff(identity)).resolves.toBe(
           "restored-in-process",
         );
