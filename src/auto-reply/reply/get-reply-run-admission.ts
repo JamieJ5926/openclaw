@@ -344,9 +344,13 @@ export async function prepareReplyRunAdmission(context: PreparedReplyRunContext)
     const latestSessionId = latestSessionEntry?.sessionId ?? sessionIdFinal;
     rebindProvidedReplyOperation(latestSessionId);
     opts?.onSessionPrepared?.({ sessionKey, sessionId: latestSessionId, storePath });
-    const sessionFile = storePath
-      ? formatSqliteSessionFileMarker({ agentId, sessionId: latestSessionId, storePath })
-      : resolveSessionFilePathCore(latestSessionId, latestSessionEntry, sessionFilePathOptions);
+    // Queued admission uses the scoped key too. A legacy marker for the same
+    // transcript would make unchanged tool authority fail the steering check.
+    const sessionFile =
+      normalizeOptionalString(sessionKey) ??
+      (storePath
+        ? formatSqliteSessionFileMarker({ agentId, sessionId: latestSessionId, storePath })
+        : resolveSessionFilePathCore(latestSessionId, latestSessionEntry, sessionFilePathOptions));
     return { sessionEntry: latestSessionEntry, sessionId: latestSessionId, sessionFile };
   };
   let preparedSessionState = resolvePreparedSessionState();
