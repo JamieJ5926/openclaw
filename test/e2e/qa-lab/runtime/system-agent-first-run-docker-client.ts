@@ -80,6 +80,7 @@ function renderCommandTemplate(template: string, vars: Record<string, string>): 
 const FAKE_PLANNER_REPLY = "Fake Claude planner selected an inference-backed typed setup.";
 const PACKAGED_CLI_TIMEOUT_MS = 60_000;
 const INFERENCE_PROBE_PROMPT = "Reply with the single word OK";
+const EXPECTED_PERSISTED_MODEL = "anthropic/claude-opus-5";
 const DISCORD_CREDENTIAL_ENV = ["DISCORD", "BOT", "TOKEN"].join("_");
 const DISCORD_CREDENTIAL_FIXTURE = ["openclaw", "discord", "fixture"].join("-");
 
@@ -255,9 +256,17 @@ async function main() {
     `activation selected the wrong model: ${activation.modelRef}`,
   );
   const inferenceConfig = JSON.parse(await fs.readFile(configPath, "utf8")) as OpenClawConfig;
+  // The CLI probe route persists as a canonical model with a separate runtime pin.
+  const persistedModel = resolveDefaultModel(inferenceConfig);
   assert(
-    resolveDefaultModel(inferenceConfig) === activation.modelRef,
-    "activation did not persist the verified inference route",
+    persistedModel === EXPECTED_PERSISTED_MODEL,
+    `activation persisted model ${persistedModel}; expected ${EXPECTED_PERSISTED_MODEL}`,
+  );
+  const persistedRuntime =
+    inferenceConfig.agents?.entries?.main?.models?.[EXPECTED_PERSISTED_MODEL]?.agentRuntime?.id;
+  assert(
+    persistedRuntime === "claude-cli",
+    `activation pinned ${EXPECTED_PERSISTED_MODEL} to runtime ${persistedRuntime}; expected claude-cli`,
   );
   assert(
     inferenceConfig.agents?.defaults?.workspace === undefined &&
@@ -278,8 +287,13 @@ async function main() {
     "--json",
   ]);
   assert(
-    modern.code === 0 && `${modern.stdout}\n${modern.stderr}`.includes(activation.modelRef),
+    modern.code === 0,
     "modern compatibility entrypoint did not expose OpenClaw after activation",
+  );
+  const modernOverview = JSON.parse(modern.stdout) as { defaultModel?: string };
+  assert(
+    modernOverview.defaultModel === EXPECTED_PERSISTED_MODEL,
+    `modern entrypoint exposed model ${modernOverview.defaultModel}; expected ${EXPECTED_PERSISTED_MODEL}`,
   );
 
   // An unrelated ambient channel credential must not alter the requested setup.
@@ -332,7 +346,7 @@ async function main() {
     }
     if (command.planner) {
       assert(
-        output.includes(`[openclaw] planner: ${spec.model}`) &&
+        output.includes(`[openclaw] planner: ${EXPECTED_PERSISTED_MODEL}`) &&
           output.includes(FAKE_PLANNER_REPLY) &&
           output.includes(`[openclaw] interpreted: ${plannerCommand}`),
         `OpenClaw first-run command ${command.id} did not use the verified planner: ${output}`,
