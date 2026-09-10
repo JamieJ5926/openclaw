@@ -29,7 +29,7 @@ describe("queued turn steering", () => {
     state.execute.mockImplementation(async () => {
       operation.bindToolAuthorityRoute({ provider: "anthropic", model: "claude" });
       operation.attachBackend({ kind: "embedded", cancel: vi.fn(), queueMessage });
-      operation.setPhase("running");
+      expect(operation.phase).toBe("running");
       expect(
         resolveReplyQueueAdmissionState(
           { items: [turn.queued], inFlight: new Set([turn.queued]), droppedCount: 0 },

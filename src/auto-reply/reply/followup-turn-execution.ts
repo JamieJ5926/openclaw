@@ -357,6 +357,7 @@ export async function executeFollowupTurn(params: {
   } else {
     try {
       turn.operation.bindToolAuthoritySnapshot(prepareReplyToolAuthority(turn.queued));
+      turn.operation.setPhase("running");
       const execute = () =>
         executeAgentTurn({
           commandBody: turn.queued.prompt,
