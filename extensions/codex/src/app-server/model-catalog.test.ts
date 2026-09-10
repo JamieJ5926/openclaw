@@ -143,9 +143,35 @@ describe("Codex app-server model catalog", () => {
         { ...catalogParams, provider: "openai", modelId: "synthetic-opaque" },
         pluginConfig,
       ),
-    ).toEqual({ accountType: "apiKey" });
+    ).toEqual({ accountType: "apiKey", authMode: "api_key" });
     expect(probeCodexNativeAuth).not.toHaveBeenCalled();
   });
+
+  it.each(["oauth", "token"] as const)(
+    "retains the observed native %s mode through discovery",
+    async (mode) => {
+      vi.mocked(probeCodexNativeAuth).mockResolvedValue({
+        apiKey: "native-presence",
+        source: "native login",
+        mode,
+      });
+      rpc.request.mockResolvedValue({ account: { type: "chatgpt" }, requiresOpenaiAuth: true });
+      listModelsMock.mockResolvedValue({
+        models: [
+          {
+            id: "synthetic-opaque",
+            model: "synthetic-opaque",
+            inputModalities: ["text"],
+            supportedReasoningEfforts: [],
+          },
+        ],
+      });
+      await owner.load(catalogParams, undefined);
+      expect(read()).toEqual({ accountType: "chatgpt", authMode: mode });
+      rpc.epoch += 1;
+      expect(read()).toBeUndefined();
+    },
+  );
 
   it("discovers configured hidden models without exposing other hidden models or readiness", async () => {
     const models = ["visible", "configured", "other-agent", "unconfigured", "other-provider"].map(
@@ -245,7 +271,7 @@ describe("Codex app-server model catalog", () => {
       ],
     });
     await owner.load(catalogParams, undefined);
-    expect(read()).toEqual({ accountType: "apiKey" });
+    expect(read()).toEqual({ accountType: "apiKey", authMode: "api_key" });
     rpc.request.mockRejectedValueOnce(new Error("synthetic account failure"));
     await expect(owner.load(catalogParams, undefined)).rejects.toThrow("synthetic account failure");
     expect(read()).toBeUndefined();
@@ -273,7 +299,7 @@ describe("Codex app-server model catalog", () => {
     await owner.load(catalogParams, undefined);
     pending.resolve({ account: { type: "chatgpt" }, requiresOpenaiAuth: true });
     expect(await older).toEqual([]);
-    expect(read()).toEqual({ accountType: "apiKey" });
+    expect(read()).toEqual({ accountType: "apiKey", authMode: "api_key" });
     const disposed = createDeferred<unknown>();
     rpc.request.mockReturnValueOnce(disposed.promise);
     const late = owner.load(catalogParams, undefined);

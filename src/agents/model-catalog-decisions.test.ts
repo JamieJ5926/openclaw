@@ -57,6 +57,61 @@ function nativeOwner(complete: boolean, loggedIn: boolean, isCurrent = () => tru
 describe("captured model decisions", () => {
   afterEach(() => vi.restoreAllMocks());
 
+  it.each([true, false])(
+    "preserves provider auth for a non-CLI harness (authenticated=%s)",
+    async (authenticated) => {
+      const model = { provider: "github-copilot", id: "fixture-model", name: "Fixture model" };
+      const registry = createEmptyPluginRegistry();
+      registry.agentHarnesses.push({
+        pluginId: "copilot",
+        source: "fixture",
+        harness: {
+          id: "copilot",
+          label: "Copilot",
+          supports: () => ({ supported: true }),
+          async runAttempt() {
+            throw new Error("Catalog reads must not execute a model");
+          },
+        },
+      });
+      const owner = createModelCatalogDecisions({
+        cfg: { plugins: { entries: { copilot: { enabled: true } } } },
+        agentId: "main",
+        agentDir: "/tmp/copilot-agent",
+        workspaceDir: "/tmp/copilot-workspace",
+        snapshot: { entries: [model], routeVariants: [model] },
+        metadataSnapshot: createPluginMetadataSnapshotFixture({
+          plugins: [{ id: "github-copilot", providers: ["github-copilot"] }, { id: "copilot" }],
+        }),
+        preparedAuthStore: {
+          version: 1,
+          profiles: authenticated
+            ? {
+                "github-copilot:work": {
+                  type: "token",
+                  provider: "github-copilot",
+                  token: "fixture-token",
+                },
+              }
+            : {},
+        },
+        preparedSyntheticAuthComplete: true,
+        pluginRegistry: registry,
+        isCurrent: () => true,
+      });
+      const choices = await owner.runtimeChoices(model);
+      if (authenticated) {
+        expect(await owner.evaluateEntry(model, undefined, "copilot")).toMatchObject({
+          availability: true,
+          selectedProfileId: "github-copilot:work",
+        });
+        expect(choices).toContain("copilot");
+      } else {
+        expect(choices).not.toContain("copilot");
+      }
+    },
+  );
+
   it.each([undefined, "auto"])(
     "keeps native availability and runtime together under %s policy",
     async (runtime) => {
