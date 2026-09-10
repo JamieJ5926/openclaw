@@ -26,12 +26,14 @@ import type {
   AgentHarnessIsolatedCompletionParamsV2,
   AgentHarnessIsolatedCompletionResult,
 } from "./harness/types.js";
+import { runWithIsolatedCompletionResources } from "./isolated-completion-work.js";
 import { ensureAuthProfileStore } from "./model-auth.js";
 import {
   isCliRuntimeAliasForProvider,
   resolveCliRuntimeExecutionProvider,
 } from "./model-runtime-aliases.js";
 import type { PreparedModelRuntimeSnapshot } from "./prepared-model-runtime.js";
+import type { PreparedModelRuntimeResourceClaim } from "./prepared-model-runtime.types.js";
 import { withPreparedModelSelection } from "./prepared-model-selection.js";
 import {
   unwrapModelHeaderSentinelsForProviderEgress,
@@ -397,6 +399,16 @@ async function prepareHostAuthorization(params: {
 export async function runIsolatedCompletion(
   params: RunIsolatedCompletionParams,
 ): Promise<IsolatedCompletionResult> {
+  return await runWithIsolatedCompletionResources((onAcquired, captureWorkContext) =>
+    runIsolatedCompletionOwned(params, onAcquired, captureWorkContext),
+  );
+}
+
+async function runIsolatedCompletionOwned(
+  params: RunIsolatedCompletionParams,
+  onAcquired: (resources: PreparedModelRuntimeResourceClaim) => void,
+  captureWorkContext: () => void,
+): Promise<IsolatedCompletionResult> {
   // Snapshot caller choices and validators before admission yields; callbacks expire on close.
   const input = {
     ...params,
@@ -404,8 +416,9 @@ export async function runIsolatedCompletion(
   };
   input.assertCurrent?.();
   input.abortSignal?.throwIfAborted();
-  const requestConfig = input.config ?? input.borrowPreparedRuntime?.().config ?? {};
-  const agentId = input.agentId ?? resolveDefaultAgentId(requestConfig);
+  const borrowedRuntime = input.borrowPreparedRuntime?.();
+  const requestConfig = input.config ?? borrowedRuntime?.config ?? {};
+  const agentId = input.agentId ?? borrowedRuntime?.agentId ?? resolveDefaultAgentId(requestConfig);
   const canonicalProvider = resolveCliRuntimeCanonicalProvider({
     runtime: input.provider,
     config: requestConfig,
@@ -424,6 +437,7 @@ export async function runIsolatedCompletion(
       abortSignal: input.abortSignal,
       assertCurrent: input.assertCurrent,
       borrowPreparedRuntime: input.borrowPreparedRuntime,
+      onAcquired,
     },
     () => [
       {
@@ -435,6 +449,7 @@ export async function runIsolatedCompletion(
     ],
     async ({ preparedModelRuntime, assertCurrent, workspaceDir: preparedWorkspaceDir }) => {
       const run = async (): Promise<IsolatedCompletionResult> => {
+        captureWorkContext();
         // A new admission owns config and directories; the caller keeps its explicit route and profile.
         const context = {
           config: preparedModelRuntime.config,

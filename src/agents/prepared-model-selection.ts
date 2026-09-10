@@ -13,7 +13,11 @@ import {
   type PreparedModelRuntimeInput,
   type PreparedModelRuntimeSnapshot,
 } from "./prepared-model-runtime.js";
-import type { PreparedModelRuntimeLeaseOptions } from "./prepared-model-runtime.types.js";
+import { retainPreparedModelRuntimeSnapshotResources } from "./prepared-model-runtime.resources.js";
+import type {
+  PreparedModelRuntimeLeaseOptions,
+  PreparedModelRuntimeResourceClaim,
+} from "./prepared-model-runtime.types.js";
 export type PreparedModelSelectionContext = {
   preparedModelRuntime: PreparedModelRuntimeSnapshot;
   workspaceDir: string;
@@ -36,6 +40,7 @@ export async function acquirePreparedModelSelection(
     abortSignal?: AbortSignal;
     assertCurrent?: () => void;
     borrowPreparedRuntime?: () => PreparedModelRuntimeSnapshot;
+    onAcquired?: (resources: PreparedModelRuntimeResourceClaim) => void;
   },
   runtimePluginSelections:
     | readonly AgentHarnessPluginSelection[]
@@ -93,6 +98,11 @@ export async function acquirePreparedModelSelection(
           abortSignal: params.abortSignal,
           deriveRuntimePluginSelections,
         });
+  const borrowedResources =
+    borrowed && params.onAcquired
+      ? retainPreparedModelRuntimeSnapshotResources(borrowed)
+      : undefined;
+  let releaseResources = lease?.release ?? borrowedResources?.release;
   let active = true;
   const assertCurrent = () => {
     if (!active) {
@@ -100,15 +110,21 @@ export async function acquirePreparedModelSelection(
     }
     params.abortSignal?.throwIfAborted();
     params.assertCurrent?.();
+    borrowedResources?.assertOpen();
     if (borrowed && params.borrowPreparedRuntime?.() !== borrowed) {
       throw new PreparedModelSelectionError("Borrowed model runtime changed during selection.");
     }
   };
   const release = () => {
     active = false;
-    lease?.release();
+    releaseResources?.();
   };
   try {
+    if (releaseResources && params.onAcquired) {
+      // Cleanup can outlive the result, including cancellation during acquisition.
+      params.onAcquired({ release: releaseResources });
+      releaseResources = undefined;
+    }
     assertCurrent();
     const preparedModelRuntime = borrowed ?? lease!.snapshot;
     const workspaceDir =
