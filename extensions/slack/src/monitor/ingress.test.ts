@@ -14,6 +14,7 @@ import type {
   ChannelIngressQueue,
 } from "openclaw/plugin-sdk/channel-outbound";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 import type { PluginJsonValue } from "openclaw/plugin-sdk/plugin-entry";
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env";
 import {
@@ -309,10 +310,7 @@ describe("Slack durable ingress", () => {
 
   it("releases a waiting duplicate's channel lane while preserving its migration fence", async () => {
     await withQueue(async (queue) => {
-      let settleDuplicate = () => {};
-      const pending = new Promise<boolean>((resolve) => {
-        settleDuplicate = () => resolve(true);
-      });
+      const duplicate = createDeferred<boolean>();
       const starts: string[] = [];
       const processEvent = vi.fn(async (receiverEvent: ReceiverEvent) => {
         const id = (receiverEvent.body as { event_id: string }).event_id;
@@ -320,7 +318,7 @@ describe("Slack durable ingress", () => {
         if (id === "Ev-duplicate") {
           await claimSlackMessageDispatchReplay({
             guard: {
-              claim: async () => ({ kind: "inflight", pending }),
+              claim: async () => ({ kind: "inflight", pending: duplicate.promise }),
             } as unknown as Parameters<typeof claimSlackMessageDispatchReplay>[0]["guard"],
             key: "logical-message",
             onWaiting: lifecycle.onDispatchWaiting,
@@ -354,13 +352,13 @@ describe("Slack durable ingress", () => {
         });
         expect(starts).toEqual(["Ev-independent"]);
         expect(processEvent).toHaveBeenCalledTimes(2);
-        settleDuplicate();
+        duplicate.resolve(true);
         await ingress.waitForIdle();
         expect(starts).toEqual(["Ev-independent", "Ev-duplicate", "Ev-migration"]);
         expect(await queue.listPending()).toEqual([]);
         expect(await queue.listClaims()).toEqual([]);
       } finally {
-        settleDuplicate();
+        duplicate.resolve(true);
         await ingress.stop();
       }
     });
@@ -368,14 +366,11 @@ describe("Slack durable ingress", () => {
 
   it("readmits a released twin before reclaiming dispatch and rearms its watchdog", async () => {
     await withQueue(async (queue) => {
-      let rejectOwner = (_error: Error) => {};
-      const pending = new Promise<boolean>((_resolve, reject) => {
-        rejectOwner = reject;
-      });
+      const owner = createDeferred<boolean>();
       const handle = { commit: vi.fn(async () => true), release: vi.fn() };
       const claim = vi
         .fn()
-        .mockResolvedValueOnce({ kind: "inflight", pending })
+        .mockResolvedValueOnce({ kind: "inflight", pending: owner.promise })
         .mockResolvedValue({ kind: "claimed", handle });
       let attempts = 0;
       let retrySignal: AbortSignal | undefined;
@@ -412,7 +407,7 @@ describe("Slack durable ingress", () => {
       try {
         await receive(createReceiverEvent("Ev-released-twin"));
         await vi.waitFor(() => expect(claim).toHaveBeenCalledOnce());
-        rejectOwner(new Error("original dispatch failed"));
+        owner.reject(new Error("original dispatch failed"));
         await vi.waitFor(() => expect(attempts).toBe(2), { timeout: 2_000 });
         expect(claim).toHaveBeenCalledTimes(2);
         await receive(createReceiverEvent("Ev-later", undefined, { ts: "1700000002.000100" }));
@@ -666,18 +661,9 @@ describe("Slack durable ingress", () => {
     { name: "a deferred message", deferred: true },
   ])("serializes channel-ID migration behind $name through Bolt", async ({ deferred }) => {
     await withQueue(async (queue) => {
-      let markMessageStarted: () => void = () => {};
-      let releaseMessage: () => void = () => {};
-      let releaseMigration: () => void = () => {};
-      const messageStarted = new Promise<void>((resolve) => {
-        markMessageStarted = resolve;
-      });
-      const messageGate = new Promise<void>((resolve) => {
-        releaseMessage = resolve;
-      });
-      const migrationGate = new Promise<void>((resolve) => {
-        releaseMigration = resolve;
-      });
+      const messageStarted = createDeferred<void>();
+      const messageGate = createDeferred<void>();
+      const migrationGate = createDeferred<void>();
       const starts: string[] = [];
       const ingress = createSlackDurableIngress({
         accountId: "default",
@@ -704,13 +690,13 @@ describe("Slack durable ingress", () => {
         if (deferred) {
           lifecycle?.onDeferred();
         }
-        markMessageStarted();
-        await messageGate;
+        messageStarted.resolve();
+        await messageGate.promise;
         await lifecycle?.onAdopted();
       });
       app.event("channel_id_changed", async ({ context }) => {
         starts.push("channel_id_changed");
-        await migrationGate;
+        await migrationGate.promise;
         await resolveSlackIngressTurnLifecycle(context)?.onAdopted();
       });
       ingress.start();
@@ -730,7 +716,7 @@ describe("Slack durable ingress", () => {
             },
           }),
         );
-        await messageStarted;
+        await messageStarted.promise;
         await harness.receive(
           createReceiverEventWithBody(
             createChannelIdChangedEnvelope("Ev-migration-after-route", "C_OLD", "C_NEW"),
@@ -747,11 +733,11 @@ describe("Slack durable ingress", () => {
         });
         expect(starts).toEqual(["message"]);
 
-        releaseMessage();
+        messageGate.resolve();
         await vi.waitFor(() => expect(starts).toEqual(["message", "channel_id_changed"]));
       } finally {
-        releaseMessage();
-        releaseMigration();
+        messageGate.resolve();
+        migrationGate.resolve();
         await ingress.waitForIdle();
         await ingress.stop();
       }

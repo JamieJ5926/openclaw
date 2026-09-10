@@ -1,6 +1,7 @@
 // Slack tests cover message handler plugin behavior.
 import { createTestInboundDebounceFlush } from "openclaw/plugin-sdk/channel-test-helpers";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 import {
   clearRuntimeConfigSnapshot,
   setRuntimeConfigSnapshot,
@@ -729,10 +730,7 @@ describe("createSlackMessageHandler", () => {
   });
 
   it("defers ingress before waiting for a duplicate's dispatch claim", async () => {
-    let release = () => {};
-    const pending = new Promise<boolean>((resolve) => {
-      release = () => resolve(true);
-    });
+    const duplicate = createDeferred<boolean>();
     const onDispatchWaiting = vi.fn();
     const handler = createSlackMessageHandler({
       ctx: createContext(),
@@ -740,7 +738,7 @@ describe("createSlackMessageHandler", () => {
         typeof createSlackMessageHandler
       >[0]["account"],
       dispatchReplayGuard: {
-        claim: async () => ({ kind: "inflight", pending }),
+        claim: async () => ({ kind: "inflight", pending: duplicate.promise }),
       } as unknown as NonNullable<
         Parameters<typeof createSlackMessageHandler>[0]["dispatchReplayGuard"]
       >,
@@ -782,7 +780,7 @@ describe("createSlackMessageHandler", () => {
       await vi.waitFor(() => expect(admitted).toBe(true));
       expect(prepareSlackMessageMock).not.toHaveBeenCalled();
     } finally {
-      release();
+      duplicate.resolve(true);
       await admission;
       await debouncer.drain();
       await handled;
@@ -974,16 +972,13 @@ describe("createSlackMessageHandler", () => {
   });
 
   it("requeues a released twin and releases other claims from its flush", async () => {
-    let rejectOwner = (_error: Error) => {};
-    const pending = new Promise<boolean>((_resolve, reject) => {
-      rejectOwner = reject;
-    });
+    const owner = createDeferred<boolean>();
     const release = vi.fn();
     const claim = vi
       .fn()
       .mockResolvedValue({ kind: "claimed", handle: { commit: vi.fn(), release: vi.fn() } })
       .mockResolvedValueOnce({ kind: "claimed", handle: { commit: vi.fn(), release } })
-      .mockResolvedValueOnce({ kind: "inflight", pending });
+      .mockResolvedValueOnce({ kind: "inflight", pending: owner.promise });
     const handler = createSlackMessageHandler({
       ctx: createContext(),
       account: { accountId: "default" } as Parameters<
@@ -1005,7 +1000,7 @@ describe("createSlackMessageHandler", () => {
     await vi.waitFor(() => expect(claim).toHaveBeenCalledTimes(2));
     vi.useFakeTimers();
     try {
-      rejectOwner(new Error("original dispatch failed"));
+      owner.reject(new Error("original dispatch failed"));
       await failure;
       expect(release).toHaveBeenCalledOnce();
       expect(claim).toHaveBeenCalledTimes(2);
