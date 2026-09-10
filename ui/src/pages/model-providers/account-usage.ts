@@ -56,11 +56,15 @@ export class ModelAccountUsage extends OpenClawLightDomElement {
                   (snapshot) => html`
                     ${snapshot.plan ? html`<strong>${snapshot.plan}</strong>` : nothing}
                     <div>
-                      ${renderProviderUsageDetails(snapshot, { compactWindowLabels: true })}
+                      ${
+                        snapshot.windows.length || snapshot.billing?.length
+                          ? renderProviderUsageDetails(snapshot, { compactWindowLabels: true })
+                          : t("modelProviders.noStats")
+                      }
                     </div>
                   `,
                 ),
-          error: (error) => html`<span class="callout danger">${formatUiError(error)}</span>`,
+          error: (error) => html`<span class="provider-usage-error">${formatUiError(error)}</span>`,
         })}
       </div>
     `;

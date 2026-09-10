@@ -1,12 +1,15 @@
 import { expectDefined } from "@openclaw/normalization-core";
 import { afterEach, expect, it } from "vitest";
 import { createDeferredCore } from "../../../../src/shared/deferred.js";
+import { registerSettingsEnglish } from "../../i18n/locales/en-settings.ts";
 import {
   createGatewayRequestMock,
   createTestGatewayClient,
 } from "../../test-helpers/gateway-client.ts";
 import { nextFrame } from "../../test-helpers/modal-dialog.ts";
 import { ModelAccountUsage } from "./account-usage.ts";
+
+registerSettingsEnglish();
 
 let element: ModelAccountUsage | undefined;
 afterEach(() => element?.remove());
@@ -81,4 +84,13 @@ it("drops a pending response when the selected agent changes and shows the curre
   view.client = null;
   await view.updateComplete;
   expect(view.textContent?.trim()).toBe("");
+});
+
+it("shows the empty state when Codex returns a snapshot without quota data", async () => {
+  const request = createGatewayRequestMock(async () => ({
+    updatedAt: 1,
+    providers: [{ provider: "openai", displayName: "OpenAI", windows: [] }],
+  }));
+  const view = await mount(request);
+  await expect.poll(() => view.textContent).toContain("No live usage data");
 });
