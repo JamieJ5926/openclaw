@@ -2605,6 +2605,20 @@ fi
     expect(source).not.toMatch(/apps-signing|MATCH_PASSWORD|GOOGLE_PLAY|upload-and-record/iu);
   });
 
+  it("generates varied-color Android conversion smoke inputs", () => {
+    const workflow = parse(
+      fs.readFileSync(".github/workflows/android-emulator-diagnostic.yml", "utf8"),
+    ) as {
+      jobs: Record<string, { steps?: Array<{ name: string; run?: string }> }>;
+    };
+    const tooling = Object.values(workflow.jobs)
+      .flatMap((job) => job.steps ?? [])
+      .find((step) => step.name === "Prepare trusted Linux Android tooling")?.run;
+
+    expect(tooling).toContain("'gradient:rgba(24,120,200,0.5)-rgba(200,40,120,0.9)'");
+    expect(tooling).not.toContain("'xc:");
+  });
+
   it("isolates Ubuntu APT sources before Android tooling setup", () => {
     const workflowFiles = [
       ".github/workflows/android-emulator-diagnostic.yml",
@@ -2844,7 +2858,10 @@ fi
       expect(fs.existsSync(broad.kvmSentinel)).toBe(false);
 
       const restricted = runToolingFixture(file);
-      expect(restricted.result.status, restricted.result.stderr).toBe(0);
+      expect(
+        restricted.result.status,
+        `${file}: signal=${restricted.result.signal ?? "none"}\n${restricted.result.stderr}`,
+      ).toBe(0);
       expect(restricted.calls).toEqual([
         `-o Dir::Etc::sourcelist=${restricted.aptSource} -o Dir::Etc::sourceparts=${restricted.aptSourceParts} update`,
         `-o Dir::Etc::sourcelist=${restricted.aptSource} -o Dir::Etc::sourceparts=${restricted.aptSourceParts} install -y --no-install-recommends acl imagemagick`,
