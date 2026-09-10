@@ -6,6 +6,7 @@ import {
   getFollowupTurnTestState,
   resetFollowupTurnTestState,
 } from "./followup-turn-execution.test-support.js";
+import { resolveReplyQueueAdmissionState } from "./queue-policy.js";
 import {
   beginReplyMessageInjectionTarget,
   createReplyOperation,
@@ -20,6 +21,7 @@ describe("queued turn steering", () => {
     const operation = createReplyOperation({
       sessionKey: "main",
       sessionId: "session",
+      turnKind: "queued_followup",
       resetTriggered: false,
     });
     const turn = createTurn({ operation });
@@ -28,6 +30,12 @@ describe("queued turn steering", () => {
       operation.bindToolAuthorityRoute({ provider: "anthropic", model: "claude" });
       operation.attachBackend({ kind: "embedded", cancel: vi.fn(), queueMessage });
       operation.setPhase("running");
+      expect(
+        resolveReplyQueueAdmissionState(
+          { items: [turn.queued], inFlight: new Set([turn.queued]), droppedCount: 0 },
+          operation,
+        ),
+      ).toBe("steering");
       const target = replyRunRegistry.resolveCurrentMessageInjectionTarget("main");
       expect(target).toBeDefined();
       const overlay = {

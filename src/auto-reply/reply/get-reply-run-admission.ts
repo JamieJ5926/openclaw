@@ -41,7 +41,7 @@ import {
   resolvePreparedReplyQueueState,
 } from "./get-reply-run-queue.js";
 import { buildReplyPromptEnvelope } from "./prompt-prelude.js";
-import { resolveActiveRunQueueAction } from "./queue-policy.js";
+import { resolveActiveRunQueueAction, resolveReplyQueueAdmissionState } from "./queue-policy.js";
 import { resolveQueueSettings } from "./queue/settings-runtime.js";
 import { getExistingFollowupQueue } from "./queue/state.js";
 import {
@@ -547,13 +547,10 @@ export async function prepareReplyRunAdmission(context: PreparedReplyRunContext)
       ? replyRunRegistry.resolveCurrentInterruptTarget(sessionKey)
       : undefined;
   const pendingQueue = getExistingFollowupQueue(queueKey);
-  const queueAdmissionState = !pendingQueue
-    ? "empty"
-    : pendingQueue.items.some((item) => !item.steerPending) ||
-        pendingQueue.inFlight.size > 0 ||
-        pendingQueue.droppedCount > 0
-      ? "ready"
-      : "steering";
+  const queueAdmissionState = resolveReplyQueueAdmissionState(
+    pendingQueue,
+    replyRunRegistry.get(queueKey),
+  );
   const activeRunAcceptsCurrentThread = resolveActiveRunAcceptsCurrentThread({ isActive });
   const shouldSteer =
     !isRoomEvent &&
