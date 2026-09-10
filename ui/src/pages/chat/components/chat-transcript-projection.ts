@@ -1,5 +1,5 @@
 // Chat-item projection, expansion, reply hydration, and guarded row rendering.
-import { nothing, type TemplateResult } from "lit";
+import { nothing } from "lit";
 import { classifySessionKind } from "../../../../../src/sessions/classify-session-kind.js";
 import { i18n, t } from "../../../i18n/index.ts";
 import { latestBrowserTabCards } from "../../../lib/chat/browser-tab-preview.ts";
@@ -62,19 +62,14 @@ import {
   guardChatRenderItems,
   trackTranscriptRenderDependencies,
 } from "./chat-transcript-render-guard.ts";
-import type { ChatTranscriptSession, TranscriptHeader } from "./chat-transcript-session.ts";
+import type {
+  ChatTranscriptProjection,
+  ChatTranscriptSession,
+  TranscriptHeader,
+} from "./chat-transcript-session.ts";
 import { renderChatTypingIndicator } from "./chat-typing-indicator.ts";
 import { resolveAssistantDisplayAvatar } from "./chat-welcome.ts";
 import { renderTurnRecapRow } from "./chat-working-indicator.ts";
-
-type ChatTranscriptProjection = {
-  positionMessages: readonly unknown[];
-  isDirectThread: boolean;
-  isEmpty: boolean;
-  showLoadingSkeleton: boolean;
-  searchOpen: boolean;
-  renderRows: (overlay?: unknown, header?: TranscriptHeader | null) => TemplateResult;
-};
 
 type ChatRenderItem = ReturnType<typeof coalesceAgentRunFrames>[number];
 
@@ -309,6 +304,7 @@ export function projectChatTranscript(
     embedSandboxMode: props.embedSandboxMode ?? "scripts",
     allowExternalEmbedUrls: props.allowExternalEmbedUrls ?? false,
     fetchLinkFavicon: props.fetchLinkFavicon,
+    pluginToolIcons: props.pluginToolIcons,
     githubRepo: props.githubRepo,
     showAssistantAvatar: avatarPlacement === "gutter" && Boolean(assistantIdentity.avatar),
   } satisfies StreamGroupOptions;
@@ -690,6 +686,7 @@ export function projectChatTranscript(
     props.embedSandboxMode ?? "scripts",
     props.allowExternalEmbedUrls ?? false,
     Boolean(props.fetchLinkFavicon),
+    props.pluginToolIcons,
     props.githubRepo?.owner,
     props.githubRepo?.repo,
     threadContextWindow,

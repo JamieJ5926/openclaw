@@ -25,6 +25,15 @@ export type TranscriptHeader = {
   height: number;
 };
 
+export type ChatTranscriptProjection = {
+  positionMessages: readonly unknown[];
+  isDirectThread: boolean;
+  isEmpty: boolean;
+  showLoadingSkeleton: boolean;
+  searchOpen: boolean;
+  renderRows: (overlay?: unknown, header?: TranscriptHeader | null) => TemplateResult;
+};
+
 export type ChatTranscriptSession = {
   readonly expandedAssistantMessages: Map<string, AssistantMessageExpansionState>;
   readonly liveAnnouncementText: string;
