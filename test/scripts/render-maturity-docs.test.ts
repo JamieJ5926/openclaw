@@ -492,7 +492,9 @@ describe("maturity docs renderer CLI", () => {
     scores.rollups.category_average.coverage = { ...coverage };
     for (const surface of scores.surfaces) {
       surface.scores.coverage = { ...coverage };
-      for (const category of surface.categories) category.coverage = { ...coverage };
+      for (const category of surface.categories) {
+        category.coverage = { ...coverage };
+      }
     }
     fs.writeFileSync(scoresPath, stringifyYaml(scores));
     const result = runCli(
@@ -580,8 +582,9 @@ describe("maturity docs renderer CLI", () => {
     const file = path.join(evidenceDir, "all", "qa-evidence.json");
     const stale = JSON.parse(fs.readFileSync(file, "utf8"));
     stale.profilePlan.taxonomyIdentity.sha256 = "0".repeat(64);
-    for (const category of stale.scorecard.categoryReports)
+    for (const category of stale.scorecard.categoryReports) {
       category.coverageIds.fulfillmentPercent = 100;
+    }
     fs.writeFileSync(file, JSON.stringify(stale));
     const result = runCli("--output-dir", outputDir, "--evidence-dir", evidenceDir);
     expect(result.status).toBe(0);
