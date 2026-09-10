@@ -47,7 +47,14 @@ function createLaneController(params: {
   });
 }
 
-function expectLaneCounts(lane: string, activeCount: number, queuedCount: number) {
+async function expectLaneCounts(lane: string, activeCount: number, queuedCount: number) {
+  for (let turn = 0; turn < 20; turn += 1) {
+    const snapshot = getCommandLaneSnapshot(lane);
+    if (snapshot.activeCount === activeCount && snapshot.queuedCount === queuedCount) {
+      break;
+    }
+    await delay(0);
+  }
   expect(getCommandLaneSnapshot(lane)).toMatchObject({ activeCount, queuedCount });
 }
 
@@ -101,7 +108,7 @@ describe("embedded run session lane", () => {
       });
       const successor = successorController.enqueueSession(async () => "finished");
 
-      expectLaneCounts(sessionLane, 1, 1);
+      await expectLaneCounts(sessionLane, 1, 1);
 
       if (termination === "release") {
         stalledController.laneTaskReleaseController.abort();
@@ -109,7 +116,7 @@ describe("embedded run session lane", () => {
 
       await stalledFailure;
       await expect(successor).resolves.toBe("finished");
-      expectLaneCounts(sessionLane, 0, 0);
+      await expectLaneCounts(sessionLane, 0, 0);
     },
   );
 
@@ -153,8 +160,8 @@ describe("embedded run session lane", () => {
     try {
       await interveningGlobalTaskStarted.promise;
       await delay(75);
-      expectLaneCounts(sessionLane, 1, 0);
-      expectLaneCounts(globalLane, 1, 1);
+      await expectLaneCounts(sessionLane, 1, 0);
+      await expectLaneCounts(globalLane, 1, 1);
 
       interveningGlobalGate.resolve();
       await expect(run).resolves.toEqual([
@@ -162,7 +169,7 @@ describe("embedded run session lane", () => {
         undefined,
         { meta: { durationMs: 2 } },
       ]);
-      expectLaneCounts(sessionLane, 0, 0);
+      await expectLaneCounts(sessionLane, 0, 0);
     } finally {
       interveningGlobalGate.resolve();
     }
@@ -203,11 +210,11 @@ describe("embedded run session lane", () => {
     const completedRun = expect(run).resolves.toEqual({ meta: { durationMs: 1 } });
 
     await stalledGlobalTaskStarted.promise;
-    expectLaneCounts(sessionLane, 1, 0);
-    expectLaneCounts(globalLane, 1, 1);
+    await expectLaneCounts(sessionLane, 1, 0);
+    await expectLaneCounts(globalLane, 1, 1);
 
     await completedRun;
-    expectLaneCounts(sessionLane, 0, 0);
-    expectLaneCounts(globalLane, 0, 0);
+    await expectLaneCounts(sessionLane, 0, 0);
+    await expectLaneCounts(globalLane, 0, 0);
   });
 });
