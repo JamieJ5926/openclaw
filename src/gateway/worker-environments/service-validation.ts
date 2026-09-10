@@ -109,6 +109,8 @@ export function normalizeWorkerOperatingSystems(
       !Value.Check(WorkerOperatingSystemSchema, option) ||
       option.id.trim() !== option.id ||
       option.label.trim() !== option.label ||
+      (option.disabledReason !== undefined &&
+        option.disabledReason.trim() !== option.disabledReason) ||
       ids.has(option.id) ||
       (option.default === true && hasDefault)
     ) {
@@ -120,6 +122,7 @@ export function normalizeWorkerOperatingSystems(
       id: option.id,
       label: option.label,
       ...(option.default === undefined ? {} : { default: option.default }),
+      ...(option.disabledReason === undefined ? {} : { disabledReason: option.disabledReason }),
     });
   }
   return systems;
@@ -207,7 +210,7 @@ export function requireWorkerLease(value: unknown): WorkerLease {
   }
   const common = {
     leaseId: value.leaseId.trim(),
-    ...(value.sharedHost === true ? { sharedHost: true } : {}),
+    ...(value.sharedHost === undefined ? {} : { sharedHost: value.sharedHost }),
     ...(value.desktop === undefined
       ? {}
       : { desktop: normalizeWorkerDesktopEndpoint(value.desktop as WorkerDesktopEndpoint) }),

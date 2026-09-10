@@ -2,22 +2,29 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync, realpathSync, statSync } from "node:fs";
+import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import {
-  DEFAULT_LIVE_RETRIES,
-  parseLaneSelection,
-  parseLiveMode,
-  parseProfile,
-  resolveDockerE2ePlan,
-} from "./lib/docker-e2e-plan.mts";
-import { createFrozenTargetSource } from "./lib/frozen-target-source.mjs";
-import { classifyReleaseTrain, parseReleaseVersion } from "./lib/release-version.mjs";
-import { resolveFrozenCodexCompatibility } from "./resolve-frozen-codex-live-suite.mjs";
-import { resolveFsSafeNativeContract } from "./resolve-fs-safe-native-contract.mjs";
+import { fileURLToPath } from "node:url";
 
 const ownRoot = realpathSync(resolve(dirname(fileURLToPath(import.meta.url)), ".."));
+const entryPath = "scripts/preflight-frozen-target-contracts.mjs";
+const readerPath = "scripts/lib/frozen-target-source.mjs";
+const toolingClosure = [
+  entryPath,
+  readerPath,
+  "scripts/lib/docker-e2e-plan.mts",
+  "scripts/lib/docker-e2e-scenarios.mts",
+  "scripts/lib/official-external-channel-catalog.json",
+  "scripts/lib/upgrade-survivor-policy.mjs",
+  "scripts/lib/release-version.mjs",
+  "scripts/lib/frozen-target-compat.sh",
+  "scripts/resolve-frozen-codex-live-suite.mjs",
+  "scripts/resolve-fs-safe-native-contract.mjs",
+  "scripts/e2e/lib/upgrade-survivor/config-recipe.mts",
+  "scripts/windows-cmd-helpers.mjs",
+  "package.json",
+  "pnpm-lock.yaml",
+];
 const maxRecordBytes = 256 * 1024;
 const prefix = "OPENCLAW_FROZEN_TARGET_";
 const shellOwners = {
@@ -170,6 +177,77 @@ function required(source, path) {
   return content;
 }
 
+function verifyToolingFile(path, committed) {
+  const file = join(ownRoot, path);
+  let info;
+  try {
+    info = lstatSync(file);
+    if (!info.isFile() || realpathSync.native(file) !== file) {
+      throw new Error("not an owned regular file");
+    }
+  } catch {
+    throw new Error(`tooling closure requires an owned regular file: ${path}`);
+  }
+  if (info.size !== committed.length || !readFileSync(file).equals(committed)) {
+    throw new Error(`tooling closure does not match committed source: ${path}`);
+  }
+}
+
+function verifyReaderBootstrap(sha) {
+  if (!/^[0-9a-f]{40}$/.test(sha)) {
+    throw new Error("tooling source requires a full lowercase commit SHA");
+  }
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
+  );
+  Object.assign(env, {
+    GIT_NO_LAZY_FETCH: "1",
+    GIT_NO_REPLACE_OBJECTS: "1",
+    GIT_OPTIONAL_LOCKS: "0",
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+  });
+  const deadline = Date.now() + 30_000;
+  const git = (...args) => {
+    try {
+      const timeout = deadline - Date.now();
+      if (timeout <= 0) {
+        throw new Error("bootstrap read limit exceeded");
+      }
+      // Unsupported no-lazy-fetch flags fail closed before the reader can load.
+      return execFileSync(
+        "git",
+        ["--no-lazy-fetch", "--no-replace-objects", "-C", ownRoot, ...args],
+        {
+          env,
+          stdio: ["ignore", "pipe", "pipe"],
+          timeout,
+          maxBuffer: 16 * 1024 * 1024,
+        },
+      );
+    } catch {
+      throw new Error("unable to read committed tooling bootstrap");
+    }
+  };
+  // The launched bootstrap and checkout are trusted; this binds their working
+  // bytes, not hostile bootstrap code or concurrent writers. The verified reader
+  // still owns Git version, HEAD, commit/tree hashes, and all other source reads.
+  for (const path of [entryPath, readerPath]) {
+    const entry = /^(100644|100755) blob ([0-9a-f]{40})\t([^\0]+)\0$/.exec(
+      git("ls-tree", "-z", sha, "--", path).toString("utf8"),
+    );
+    if (!entry || entry[3] !== path) {
+      throw new Error(`tooling bootstrap requires a regular committed file: ${path}`);
+    }
+    const content = git("cat-file", "blob", entry[2]);
+    const oid = createHash("sha1").update(`blob ${content.length}\0`).update(content).digest("hex");
+    if (oid !== entry[2]) {
+      throw new Error("unable to read committed tooling bootstrap (object hash mismatch)");
+    }
+    verifyToolingFile(path, content);
+  }
+}
+
 function consumerForLane(name) {
   if (/^(published-upgrade-survivor|update-migration)(-|$)/u.test(name)) {
     return "upgrade-survivor";
@@ -186,7 +264,7 @@ function consumerForLane(name) {
   return Object.hasOwn(shellOwners, name) || Object.hasOwn(targetFiles, name) ? name : null;
 }
 
-function preflightFrozenTargetContracts(input) {
+async function preflightFrozenTargetContracts(input) {
   object(
     input,
     [
@@ -208,11 +286,34 @@ function preflightFrozenTargetContracts(input) {
   for (const key of ["selected", "tooling"]) {
     object(input[key], ["root", "sha"], `${key} identity`);
     roots[key] = realpathSync(text(input[key].root, `${key} root`));
-    sources[key] = createFrozenTargetSource(roots[key], input[key].sha);
   }
   if (roots.tooling !== ownRoot) {
     throw new Error("tooling identity does not own this evaluator");
   }
+  verifyReaderBootstrap(input.tooling.sha);
+  const { createFrozenTargetSource } = await import("./lib/frozen-target-source.mjs");
+  for (const key of ["selected", "tooling"]) {
+    sources[key] = createFrozenTargetSource(roots[key], input[key].sha);
+  }
+  const toolingRecipes = sources.tooling.readDirectory(
+    "scripts/e2e/lib/upgrade-survivor/config-recipe",
+  );
+  if (toolingRecipes === null) {
+    throw new Error("missing required tooling recipe directory");
+  }
+  for (const path of [...toolingClosure, ...toolingRecipes]) {
+    verifyToolingFile(path, Buffer.from(required(sources.tooling, path), "utf8"));
+  }
+  const {
+    DEFAULT_LIVE_RETRIES,
+    parseLaneSelection,
+    parseLiveMode,
+    parseProfile,
+    resolveDockerE2ePlan,
+  } = await import("./lib/docker-e2e-plan.mts");
+  const { classifyReleaseTrain, parseReleaseVersion } = await import("./lib/release-version.mjs");
+  const { resolveFrozenCodexCompatibility } = await import("./resolve-frozen-codex-live-suite.mjs");
+  const { resolveFsSafeNativeContract } = await import("./resolve-fs-safe-native-contract.mjs");
   if (allow && input.selected.sha === input.tooling.sha) {
     throw new Error("frozen omissions require distinct identities");
   }
@@ -514,13 +615,23 @@ function preflightFrozenTargetContracts(input) {
   return { ...record, digest: createHash("sha256").update(serialized).digest("hex") };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+let invokedAsMain = false;
+if (process.argv[1]) {
+  try {
+    invokedAsMain =
+      realpathSync.native(fileURLToPath(import.meta.url)) === realpathSync.native(process.argv[1]);
+  } catch {
+    // Inline and stdin importers need not have a filesystem entrypoint.
+  }
+}
+
+if (invokedAsMain) {
   try {
     const [file, ...extra] = process.argv.slice(2);
     if (!file || extra.length || !statSync(file).isFile() || statSync(file).size > 64 * 1024) {
       throw new Error("expected one bounded admission request file");
     }
-    const result = preflightFrozenTargetContracts(JSON.parse(readFileSync(file, "utf8")));
+    const result = await preflightFrozenTargetContracts(JSON.parse(readFileSync(file, "utf8")));
     process.stdout.write(`${JSON.stringify(result)}\n`);
   } catch (error) {
     console.error(`frozen admission: ${error.message}`);

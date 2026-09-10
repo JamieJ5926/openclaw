@@ -5,10 +5,13 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
 
@@ -126,10 +129,10 @@ function fixture(
     allowFrozenTargetScenarioOmissions: true,
     selection: {},
   };
-  function run(selection: object, overrides: object = {}) {
+  function run(selection: object, overrides: object = {}, entry = join(toolingRoot, entrypoint)) {
     const input = join(root, "request.json");
     writeFileSync(input, JSON.stringify({ ...request, selection, ...overrides }));
-    const result = spawnSync(process.execPath, [join(toolingRoot, entrypoint), input], {
+    const result = spawnSync(process.execPath, [entry, input], {
       cwd: selectedRoot,
       encoding: "utf8",
       timeout: 20_000,
@@ -140,6 +143,196 @@ function fixture(
   }
   return { root, selected, tooling, run, bin };
 }
+
+describe("frozen admission bootstrap repairs", () => {
+  const recipeDirectory = "scripts/e2e/lib/upgrade-survivor/config-recipe";
+  const reader = "scripts/lib/frozen-target-source.mjs";
+  const shell = "scripts/lib/frozen-target-compat.sh";
+
+  it.each([reader, "scripts/lib/docker-e2e-scenarios.mts", shell])(
+    "rejects dirty executable %s before any dependent code runs at unchanged HEAD",
+    (path) => {
+      const f = fixture({ "src/config/zod-schema.ts": "lastRunAt:" });
+      const sentinel = join(f.root, "dependent-code-executed");
+      const file = join(f.tooling.root, path);
+      const payload =
+        path === shell
+          ? `\nprintf executed > '${sentinel}'\n`
+          : `\n(await import("node:fs")).writeFileSync(${JSON.stringify(sentinel)}, "executed");\n`;
+      writeFileSync(file, readFileSync(file, "utf8") + payload);
+      expect(f.tooling.git("rev-parse", "HEAD")).toBe(f.tooling.sha);
+      const result = f.run({ consumers: ["onboard"] });
+      expect(existsSync(sentinel), result.stderr).toBe(false);
+      expect(result.status, result.stderr).toBe(1);
+      expect(result.stderr).toContain(`tooling closure does not match committed source: ${path}`);
+      expect(result.stdout).toBe("");
+    },
+  );
+
+  it.each([
+    entrypoint,
+    "scripts/lib/official-external-channel-catalog.json",
+    `${recipeDirectory}/agents.json`,
+    "package.json",
+    "pnpm-lock.yaml",
+  ])("rejects dirty closure data %s at unchanged HEAD", (path) => {
+    const f = fixture();
+    const file = join(f.tooling.root, path);
+    writeFileSync(file, readFileSync(file, "utf8") + "\n");
+    expect(f.tooling.git("rev-parse", "HEAD")).toBe(f.tooling.sha);
+    const result = f.run({});
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toContain(`tooling closure does not match committed source: ${path}`);
+    expect(result.stdout).toBe("");
+  });
+
+  it.each(["file", "parent directory"] as const)(
+    "rejects a tooling %s symlink even when its bytes match",
+    (shape) => {
+      const f = fixture();
+      const path = shape === "file" ? reader : "scripts/e2e/lib/upgrade-survivor/config-recipe";
+      const original = join(f.tooling.root, path);
+      const outside = join(f.root, "borrowed");
+      cpSync(original, outside, { recursive: true });
+      rmSync(original, { recursive: true });
+      symlinkSync(outside, original);
+      const result = f.run({});
+      expect(result.status, result.stderr).toBe(1);
+      expect(result.stderr).toContain("tooling closure requires an owned regular file:");
+      expect(result.stdout).toBe("");
+    },
+  );
+
+  it("records the verified closure while ignoring unrelated dirt and selected working bytes", () => {
+    const source = "src/config/zod-schema.ts";
+    const f = fixture({ [source]: "lastRunAt:" });
+    writeFileSync(join(f.tooling.root, "unrelated.txt"), "committed");
+    f.tooling.git("add", "unrelated.txt");
+    f.tooling.git("commit", "-qm", "unrelated file");
+    const sha = f.tooling.git("rev-parse", "HEAD");
+    const overrides = { tooling: { root: f.tooling.root, sha } };
+    const clean = f.run({ consumers: ["onboard"] }, overrides);
+    expect(clean.status, clean.stderr).toBe(0);
+    writeFileSync(join(f.tooling.root, "unrelated.txt"), "dirty");
+    writeFileSync(join(f.selected.root, source), "unrecognized working copy");
+    const dirty = f.run({ consumers: ["onboard"] }, overrides);
+    expect(dirty.status, dirty.stderr).toBe(0);
+    expect(dirty.stdout).toBe(clean.stdout);
+    const paths = [
+      ...closure,
+      ...readdirSync(join(f.tooling.root, recipeDirectory)).map(
+        (file) => `${recipeDirectory}/${file}`,
+      ),
+    ];
+    expect(JSON.parse(dirty.stdout).sources.tooling).toEqual(
+      paths
+        .toSorted((a, b) => a.localeCompare(b))
+        .map((path) => ({ path, oid: f.tooling.git("rev-parse", `${sha}:${path}`) })),
+    );
+  });
+
+  it("retains the existing tooling HEAD mismatch rejection", () => {
+    const f = fixture();
+    f.tooling.git("commit", "--allow-empty", "-qm", "different HEAD");
+    const result = f.run({});
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toContain("checkout does not match OPENCLAW_SELECTED_SHA");
+    expect(result.stdout).toBe("");
+  });
+
+  it.each([entrypoint, reader, `${recipeDirectory}/agents.json`])(
+    "rejects a missing committed tooling object %s without hydration",
+    (path) => {
+      const f = fixture();
+      const oid = f.tooling.git("rev-parse", `${f.tooling.sha}:${path}`);
+      f.tooling.git("config", "remote.origin.url", "fixture::unavailable");
+      f.tooling.git("config", "remote.origin.promisor", "true");
+      rmSync(join(f.tooling.root, ".git/objects", oid.slice(0, 2), oid.slice(2)));
+      const result = f.run({});
+      expect(result.status, result.stderr).toBe(1);
+      expect(result.stdout).toBe("");
+    },
+  );
+
+  it.each([
+    entrypoint,
+    "scripts/resolve-frozen-codex-live-suite.mjs",
+    "scripts/resolve-fs-safe-native-contract.mjs",
+  ])("runs %s through a symlink and stays inert when imported", (path) => {
+    const f = fixture();
+    const alias = join(f.root, "entry-alias.mjs");
+    symlinkSync(join(f.tooling.root, path), alias);
+    const output = join(f.root, "github-output");
+    const env = {
+      PATH: `${f.bin}:${process.env.PATH}`,
+      HOME: f.root,
+      GITHUB_OUTPUT: output,
+      OPENCLAW_FROZEN_CODEX_SUITE_ID: "live-codex-harness-docker",
+      OPENCLAW_SELECTED_SHA: f.selected.sha,
+      OPENCLAW_WORKFLOW_SHA: f.tooling.sha,
+    };
+    const run = (args: string[], environment = env) =>
+      spawnSync(process.execPath, args, {
+        cwd: f.selected.root,
+        encoding: "utf8",
+        timeout: 20_000,
+        env: environment,
+      });
+    const valid =
+      path === entrypoint ? f.run({}, {}, alias) : run([alias, f.selected.sha, f.tooling.sha, "0"]);
+    expect(valid.status, valid.stderr).toBe(0);
+    if (path === entrypoint) {
+      expect(JSON.parse(valid.stdout).toolingSha).toBe(f.tooling.sha);
+    } else if (path.includes("codex")) {
+      expect(existsSync(output)).toBe(true);
+      expect(readFileSync(output, "utf8")).toBe("run_lane=true\n");
+      rmSync(output);
+    } else {
+      expect(valid.stdout).toBe("required\n");
+    }
+    const invalid = run([alias], { ...env, GITHUB_OUTPUT: "" });
+    expect(invalid.status, invalid.stderr).not.toBe(0);
+    expect(invalid.stdout).toBe("");
+    const imported = run([
+      "--input-type=module",
+      "-e",
+      `await import(${JSON.stringify(pathToFileURL(alias).href)});`,
+    ]);
+    expect(imported.status, imported.stderr).toBe(0);
+    expect(imported.stdout).toBe("");
+    expect(imported.stderr).toBe("");
+    expect(existsSync(output)).toBe(false);
+  });
+
+  it.each([
+    "scripts/resolve-frozen-codex-live-suite.mjs",
+    "scripts/resolve-fs-safe-native-contract.mjs",
+  ])("preserves standalone sparse execution of %s without shared helpers", (path) => {
+    const root = temps.make("openclaw-frozen-standalone-");
+    const entry = join(root, "resolver.mjs");
+    copyFileSync(join(repo, path), entry);
+    const output = join(root, "github-output");
+    const sha = "a".repeat(40);
+    const result = spawnSync(process.execPath, [entry, sha, sha, "0"], {
+      cwd: root,
+      encoding: "utf8",
+      timeout: 20_000,
+      env: {
+        PATH: process.env.PATH,
+        GITHUB_OUTPUT: output,
+        OPENCLAW_FROZEN_CODEX_SUITE_ID: "live-codex-harness-docker",
+        OPENCLAW_SELECTED_SHA: sha,
+        OPENCLAW_WORKFLOW_SHA: sha,
+      },
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(path.includes("codex") ? readFileSync(output, "utf8") : result.stdout).toBe(
+      path.includes("codex") ? "run_lane=true\n" : "required\n",
+    );
+    expect(existsSync(join(root, "node_modules"))).toBe(false);
+    expect(existsSync(join(root, "scripts"))).toBe(false);
+  });
+});
 
 describe("frozen admission entry", () => {
   it.each(["nested-tooling", "nested-selected"] as const)(
