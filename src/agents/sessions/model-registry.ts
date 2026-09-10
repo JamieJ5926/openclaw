@@ -813,7 +813,7 @@ export class ModelRegistry {
   }
 
   private getModelRequestKey(provider: string, modelId: string): string {
-    return `${provider}:${modelId}`;
+    return JSON.stringify([provider, modelId]);
   }
 
   private storeProviderRequestConfig(
