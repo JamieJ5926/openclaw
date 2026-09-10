@@ -7,7 +7,10 @@ import { normalizeProviderId } from "@openclaw/model-catalog-core/provider-id";
 import { asPositiveFiniteNumber } from "@openclaw/normalization-core/number-coercion";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { mergeModelCost } from "../config/model-cost.js";
-import type { ModelDefinitionConfig } from "../config/types.models.js";
+import type {
+  ModelDefinitionConfig,
+  ModelProviderConfig as ProviderConfig,
+} from "../config/types.models.js";
 import { isNonSecretApiKeyMarker } from "./model-auth-markers.js";
 import { resolveCatalogOwnedModelCompat } from "./model-compat-catalog.js";
 import {
@@ -15,7 +18,6 @@ import {
   createConfiguredProviderCatalogModelIdNormalizer,
   type ModelManifestNormalizationContext,
 } from "./model-ref-shared.js";
-import type { ProviderConfig } from "./models-config.providers.secrets.js";
 
 export function normalizeProviderMapKeys<T>(
   providers: Record<string, T> | null | undefined,

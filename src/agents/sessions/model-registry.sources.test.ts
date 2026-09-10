@@ -77,6 +77,36 @@ function createRegistry(
 }
 
 describe("ModelRegistry source composition", () => {
+  it.each([false, true])(
+    "keeps the authored request route when generated model routing conflicts (model pin: %s)",
+    (modelPin) => {
+      const expectedApi = modelPin ? "openai-responses" : "openai-completions";
+      const expectedUrl = modelPin ? "https://model-pin.example.test/v1" : rootUrl;
+      const registry = createRegistry({
+        authored: {
+          ...authored,
+          models: [
+            { id: "shared", ...(modelPin ? { api: expectedApi, baseUrl: expectedUrl } : {}) },
+          ],
+        },
+        generated: {
+          ...generated,
+          models: [
+            {
+              id: "shared",
+              api: "anthropic-messages",
+              baseUrl: "https://conflicting.example.test/v1",
+            },
+          ],
+        },
+      });
+      expect(registry.find(provider, "shared")).toMatchObject({
+        api: expectedApi,
+        baseUrl: expectedUrl,
+      });
+    },
+  );
+
   it("composes exact root and generated identities before filling runtime defaults", () => {
     const registry = createRegistry();
     expect(registry.getError()).toBeUndefined();
