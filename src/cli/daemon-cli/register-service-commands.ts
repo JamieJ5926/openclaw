@@ -90,19 +90,19 @@ export function addGatewayServiceCommands(parent: Command, opts?: { statusDescri
 
   parent
     .command("install")
-    .description("Install the Gateway service (launchd/systemd/schtasks)")
-    .addOption(
-      new Option("--update-executor <mode>", "Private update executor")
-        .choices(["check", "run"])
-        .hideHelp(),
-    )
+    .description("Install and start the Gateway service (launchd/systemd/schtasks)")
     .addOption(new Option("--defer-activation", "Updater service-load handoff").hideHelp())
     .option("--port <port>", "Gateway port")
     .option("--runtime <runtime>", "Daemon runtime (node|bun). Default: node")
     .option("--token <token>", "Gateway token (token auth)")
     .option("--wrapper <path>", "Executable wrapper for generated service ProgramArguments")
-    .option("--force", "Reinstall/overwrite if already installed", false)
+    .option("--force", "Reinstall if already installed (may restart a running Gateway)", false)
     .option("--json", "Output JSON", false)
+    .addOption(
+      new Option("--update-executor <mode>", "Private update executor")
+        .choices(["check", "run"])
+        .hideHelp(),
+    )
     .action(async (cmdOpts, command) => {
       const invoke = async () => {
         const { runDaemonInstall } = await daemonInstallModuleLoader.load();
