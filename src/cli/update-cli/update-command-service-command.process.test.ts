@@ -8,6 +8,7 @@ it.each([
   "stop",
   "missing candidate",
   "unregistered executor",
+  "missing executor",
   "restart revoked",
   "install revoked",
   "stop revoked",
@@ -59,7 +60,7 @@ it.each([
           await fs.mkdir(dist);
           const params = {
             result: { root, mode: "npm" },
-            opts: { json: true, ...(scenario === "unregistered executor" ? {
+            opts: { json: true, ...(scenario === "missing executor" ? { run: { runId: "original", env: process.env } } : scenario === "unregistered executor" ? {
               run: { runId: "original", env: process.env, executorFence: {
                 assertCurrent() { if (existsSync(receipt)) { throw new Error("Update authority revoked during native command"); } },
               } },
@@ -86,7 +87,12 @@ it.each([
               '  compileCacheDisabled: process.env.NODE_DISABLE_COMPILE_CACHE,',
               '}));',
             ].join("\n"));
-            if (scenario === "unregistered executor") {
+            if (scenario === "missing executor") {
+              await assert.rejects(runUpdatedInstallGatewayCommand(params, action, true), {
+                message: "Native command requires its original update executor.",
+              });
+              assert.equal(existsSync(receipt), false);
+            } else if (scenario === "unregistered executor") {
               await assert.rejects(runUpdatedInstallGatewayCommand(params, action, true), {
                 message: "Child continuation requires its live executor.",
               });
@@ -98,7 +104,7 @@ it.each([
             } else {
               assert.equal(await runUpdatedInstallGatewayCommand(params, action, true), "unverified");
             }
-            if (scenario !== "unregistered executor") {
+            if (scenario !== "unregistered executor" && scenario !== "missing executor") {
               const observed = JSON.parse(await fs.readFile(receipt, "utf8"));
               assert.deepEqual(observed, {
                 args: ["gateway", action, action === "restart" ? "--preserve-definition" : "--force", "--json"],
