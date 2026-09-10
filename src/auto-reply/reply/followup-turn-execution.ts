@@ -17,10 +17,7 @@ import type { InternalGetReplyOptions } from "./get-reply.types.js";
 import { drainPendingToolTasks } from "./pending-tool-task-drain.js";
 import { recordReplyOperationAgentTurn } from "./reply-operation-run-state.js";
 import { hasReplyOperationExecutionStarted } from "./reply-run-registry.js";
-import {
-  createFollowupRunToolAuthorityProjector,
-  resolveFollowupRunToolAuthorityFingerprint,
-} from "./reply-tool-authority.js";
+import { prepareReplyToolAuthority } from "./reply-tool-authority.js";
 import { createTypingSignaler, type TypingSignaler } from "./typing-mode.js";
 
 export type FollowupExecutionResult = {
@@ -359,12 +356,7 @@ export async function executeFollowupTurn(params: {
     };
   } else {
     try {
-      turn.operation.bindToolAuthorityProjector(
-        createFollowupRunToolAuthorityProjector(turn.queued),
-      );
-      turn.operation.bindToolAuthorityFingerprint(
-        resolveFollowupRunToolAuthorityFingerprint(turn.queued),
-      );
+      turn.operation.bindToolAuthoritySnapshot(prepareReplyToolAuthority(turn.queued));
       const execute = () =>
         executeAgentTurn({
           commandBody: turn.queued.prompt,
