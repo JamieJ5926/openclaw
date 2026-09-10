@@ -240,7 +240,7 @@ type RegistryProviderSources = Record<
 
 function captureInventoryProvider(
   provider: ProviderModelCatalog,
-  maxTokensSource?: MaxTokensSource,
+  source: "static" | "composed",
 ): RegistryProviderSources[string] {
   return {
     api: provider.api,
@@ -250,7 +250,8 @@ function captureInventoryProvider(
       ...model,
       api: model.api ?? provider.api,
       baseUrl: model.baseUrl ?? provider.baseUrl,
-      maxTokensSource: maxTokensSource ?? model.maxTokensSource,
+      maxTokensSource: source === "static" ? "discovered" : model.maxTokensSource,
+      compat: source === "static" ? mergeCompat(provider.compat, model.compat) : model.compat,
     })),
   };
 }
@@ -530,7 +531,7 @@ export class ModelRegistry {
         : Object.fromEntries(
             Object.entries(this.staticProviderConfigs ?? {}).map(([provider, config]) => [
               provider,
-              captureInventoryProvider(config, "discovered"),
+              captureInventoryProvider(config, "static"),
             ]),
           ),
       capturedPluginResult.providers,
@@ -557,7 +558,7 @@ export class ModelRegistry {
         })),
       };
       providers[providerId] = inherited
-        ? mergeProviderModels(captureInventoryProvider(inherited), current, {
+        ? mergeProviderModels(captureInventoryProvider(inherited, "composed"), current, {
             providerId,
             modelIdMatching: "exact",
             sourceModelFields: sourceFields,
@@ -703,11 +704,12 @@ export class ModelRegistry {
             : providerConfig),
           models: providerConfig.models?.map((model) => {
             const { headers: _headers, ...inventory } = model;
-            // Capture each source's route before its provider defaults are merged.
+            // Capture route and effective compatibility before provider defaults merge.
             return Object.assign(generated ? inventory : model, {
               maxTokensSource,
               api: model.api ?? providerConfig.api,
               baseUrl: model.baseUrl ?? providerConfig.baseUrl,
+              compat: mergeCompat(providerConfig.compat, model.compat),
             });
           }),
         };
@@ -817,7 +819,6 @@ export class ModelRegistry {
           continue;
         }
 
-        const compat = mergeCompat(providerConfig.compat, modelDef.compat);
         this.storeModelHeaders(providerName, modelDef.id, modelDef.headers);
         models.push({
           id: modelDef.id,
@@ -836,7 +837,7 @@ export class ModelRegistry {
             : {}),
           params: modelDef.params,
           headers: undefined,
-          compat,
+          compat: modelDef.compat,
         } as Model);
       }
     }

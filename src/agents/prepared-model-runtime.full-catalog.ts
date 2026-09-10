@@ -100,12 +100,8 @@ export async function prepareFullCatalogFacts(
     staticEntries:
       input.config.models?.mode === "replace"
         ? []
-        : dedupeByKey(
-            [
-              ...configuredRuntimeModels.map(({ model }) => modelCatalogRowToEntry(model)),
-              ...providerStaticModels.map(modelCatalogRowToEntry),
-            ],
-            resolveModelCatalogIdentityKey,
+        : dedupeByKey(providerStaticModels, resolveModelCatalogIdentityKey).map(
+            modelCatalogRowToEntry,
           ),
     ...(providerOutcomes.length > 0 ? { providerOutcomes } : {}),
   };

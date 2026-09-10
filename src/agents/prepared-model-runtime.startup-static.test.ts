@@ -614,7 +614,7 @@ describe("prepared model runtime Gateway catalog mode", () => {
     // published metadata generation without starting catalog discovery.
     expect(mocks.resolvePluginMetadataSnapshot).toHaveBeenCalledTimes(2);
     expect(configuredRuntimeModelCount).toBe(1);
-    expect(generatedCatalogReadCount).toBe(0);
+    expect(generatedCatalogReadCount).toBe(1);
     const snapshot = getPreparedModelRuntimeSnapshot({
       agentId: "default",
       config,

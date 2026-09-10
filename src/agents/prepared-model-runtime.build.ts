@@ -166,6 +166,10 @@ function createFullModelCatalogAccess(params: {
       catalog,
       params.agentFacts.runtimeCapabilityModels,
     );
+    projected.staticEntries = dedupeByKey(
+      [...(current.staticEntries ?? []), ...(projected.staticEntries ?? [])],
+      resolveModelCatalogIdentityKey,
+    );
     projected.entries = dedupeByKey(
       [...projected.entries, ...current.entries],
       resolveModelCatalogIdentityKey,

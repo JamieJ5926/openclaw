@@ -87,6 +87,8 @@ describe("prepared catalog source composition", () => {
         modelId: "runtime-only",
         model: {
           ...model("runtime-only"),
+          input: ["text"],
+          contextWindow: 32000,
           provider: providerId,
           api: "openai-completions",
           baseUrl: endpoint,
@@ -243,7 +245,7 @@ describe("prepared catalog source composition", () => {
         .toSorted(),
     ).toEqual(["authored-only", "configured-only", "curated-only", "generated-only", "shared"]);
     const generated = registry.find(providerId, "generated-only")!;
-    expect(generated.maxTokensSource).toBe("discovered");
+    expect(generated).toMatchObject({ maxTokensSource: "discovered" });
     await expect(registry.getApiKeyAndHeaders(generated)).resolves.toEqual({
       ok: true,
       apiKey: undefined,
