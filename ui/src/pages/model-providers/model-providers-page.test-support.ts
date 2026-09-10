@@ -107,8 +107,6 @@ export function createHarness(initialScopeId: string) {
           throw new Error("usage.status unavailable");
         }
         return usageStatus;
-      case "models.authUsage":
-        return { updatedAt: 1, providers: [] };
       case "sessions.usage":
         return { aggregates: { byProvider: [] } };
       default:
