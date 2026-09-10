@@ -13,86 +13,98 @@ import {
 } from "./chat-metadata-runtime.test-support.js";
 
 describe("gateway chat metadata native session ownership", () => {
-  test("keeps runtime-only startup projections scoped to their runtime and provider", async () => {
-    const config: OpenClawConfig = {
-      plugins: { entries: { copilot: { enabled: true } } },
-      agents: {
-        defaults: {
-          model: { primary: "github-copilot/fixture-model" },
-          models: { "github-copilot/fixture-model": { agentRuntime: { id: "openclaw" } } },
+  test.each([false, true])(
+    "keeps runtime-only startup projections scoped to their provider (default model: %s)",
+    async (defaultModel) => {
+      const config: OpenClawConfig = {
+        plugins: { entries: { copilot: { enabled: true } } },
+        agents: {
+          defaults: {
+            model: { primary: "github-copilot/fixture-model" },
+            models: { "github-copilot/fixture-model": { agentRuntime: { id: "openclaw" } } },
+          },
+          list: [{ id: "main", default: true }],
         },
-        list: [{ id: "main", default: true }],
-      },
-    };
-    const harness = createChatMetadataHarness(config, { useDefaultProjection: true });
-    const registry = createEmptyPluginRegistry();
-    registry.agentHarnesses.push({
-      pluginId: "copilot",
-      source: "fixture",
-      harness: {
-        id: "copilot",
-        label: "Copilot",
-        supports: () => ({ supported: true }),
-        async runAttempt() {
-          throw new Error("Chat metadata must not execute a model");
+      };
+      const harness = createChatMetadataHarness(config, { useDefaultProjection: true });
+      const registry = createEmptyPluginRegistry();
+      registry.agentHarnesses.push({
+        pluginId: "copilot",
+        source: "fixture",
+        harness: {
+          id: "copilot",
+          label: "Copilot",
+          supports: () => ({ supported: true }),
+          async runAttempt() {
+            throw new Error("Chat metadata must not execute a model");
+          },
         },
-      },
-    });
-    const owner = createChatMetadataOwner(config, "fixture-model", {}, "github-copilot");
-    harness.setOwner({
-      ...owner,
-      pluginRegistry: registry,
-      metadataSnapshot: createPluginMetadataSnapshotFixture({
-        plugins: [{ id: "github-copilot", providers: ["github-copilot"] }, { id: "copilot" }],
-      }),
-    });
-    harness.setAuthStore({
-      version: 1,
-      profiles: {
-        "github-copilot:work": {
-          type: "token",
-          provider: "github-copilot",
-          token: "fixture-token",
+      });
+      const owner = createChatMetadataOwner(config, "fixture-model", {}, "github-copilot");
+      harness.setOwner({
+        ...owner,
+        pluginRegistry: registry,
+        metadataSnapshot: createPluginMetadataSnapshotFixture({
+          plugins: [{ id: "github-copilot", providers: ["github-copilot"] }, { id: "copilot" }],
+        }),
+      });
+      harness.setAuthStore({
+        version: 1,
+        profiles: {
+          "github-copilot:work": {
+            type: "token",
+            provider: "github-copilot",
+            token: "fixture-token",
+          },
         },
-      },
-    });
-    const native = { providerOverride: "github-copilot", agentRuntimeOverride: "copilot" };
-    const host = { providerOverride: "github-copilot", agentRuntimeOverride: "openclaw" };
-    const otherProvider = { providerOverride: "unrelated", agentRuntimeOverride: "copilot" };
-    try {
-      await harness.runtime.refresh();
-      await expect(
-        harness.runtime.readStartup({ agentId: "main", sessionEntry: native, readPolicy: "ready" }),
-      ).resolves.toBeUndefined();
-      const nativeStartup = await harness.runtime.readStartup({
-        agentId: "main",
-        sessionEntry: native,
       });
-      expect(nativeStartup?.metadata?.models?.[0]?.agentRuntime?.id).toBe("copilot");
-      const hostStartup = await harness.runtime.readStartup({
-        agentId: "main",
-        sessionEntry: host,
-      });
-      expect(hostStartup?.metadata?.models?.[0]?.agentRuntime?.id).toBe("openclaw");
-      const otherStartup = await harness.runtime.readStartup({
-        agentId: "main",
-        sessionEntry: otherProvider,
-      });
-      expect(otherStartup?.metadata?.models?.[0]?.agentRuntime?.id).toBe("openclaw");
-      await expect(
-        harness.runtime.readStartup({ agentId: "main", sessionEntry: native, readPolicy: "ready" }),
-      ).resolves.toEqual({
-        sessionModelCatalog: nativeStartup?.sessionModelCatalog,
-        defaultModelCatalog: nativeStartup?.defaultModelCatalog,
-      });
-      expect(
-        (await harness.runtime.read({ agentId: "main", sessionEntry: native })).models?.[0]
-          ?.agentRuntime?.id,
-      ).toBe("copilot");
-    } finally {
-      await harness.runtime.stop();
-    }
-  });
+      const provider = defaultModel ? {} : { providerOverride: "github-copilot" };
+      const native = { ...provider, agentRuntimeOverride: "copilot" };
+      const host = { ...provider, agentRuntimeOverride: "openclaw" };
+      const otherProvider = { providerOverride: "unrelated", agentRuntimeOverride: "copilot" };
+      try {
+        await harness.runtime.refresh();
+        await expect(
+          harness.runtime.readStartup({
+            agentId: "main",
+            sessionEntry: native,
+            readPolicy: "ready",
+          }),
+        ).resolves.toBeUndefined();
+        const nativeStartup = await harness.runtime.readStartup({
+          agentId: "main",
+          sessionEntry: native,
+        });
+        expect(nativeStartup?.metadata?.models?.[0]?.agentRuntime?.id).toBe("copilot");
+        const hostStartup = await harness.runtime.readStartup({
+          agentId: "main",
+          sessionEntry: host,
+        });
+        expect(hostStartup?.metadata?.models?.[0]?.agentRuntime?.id).toBe("openclaw");
+        const otherStartup = await harness.runtime.readStartup({
+          agentId: "main",
+          sessionEntry: otherProvider,
+        });
+        expect(otherStartup?.metadata?.models?.[0]?.agentRuntime?.id).toBe("openclaw");
+        await expect(
+          harness.runtime.readStartup({
+            agentId: "main",
+            sessionEntry: native,
+            readPolicy: "ready",
+          }),
+        ).resolves.toEqual({
+          sessionModelCatalog: nativeStartup?.sessionModelCatalog,
+          defaultModelCatalog: nativeStartup?.defaultModelCatalog,
+        });
+        expect(
+          (await harness.runtime.read({ agentId: "main", sessionEntry: native })).models?.[0]
+            ?.agentRuntime?.id,
+        ).toBe("copilot");
+      } finally {
+        await harness.runtime.stop();
+      }
+    },
+  );
 
   test("keeps native-owned model auth scoped across pending and materialized chat metadata", async () => {
     const config = {

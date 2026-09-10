@@ -282,7 +282,7 @@ export function createGatewayChatMetadataRuntime(params: {
   ): Promise<PreparedAgentProjection> => {
     assertOpen();
     assertCurrent?.();
-    const profiles = resolveSessionCatalogProfiles(sessionEntry);
+    const profiles = resolveSessionCatalogProfiles(sessionEntry, agent.owner.config, agent.agentId);
     const neutral = !hasSessionCatalogContext(profiles);
     const defaultProfileId = useRequesterDefaults ? requesterProfileId : undefined;
     // Personal selections and credentials can change without publishing a shared auth
@@ -611,7 +611,11 @@ export function createGatewayChatMetadataRuntime(params: {
   const readStartup = async (
     readParams: ChatStartupProjectionReadParams,
   ): Promise<ChatStartupProjectionResult | undefined> => {
-    const profiles = resolveSessionCatalogProfiles(readParams.sessionEntry);
+    const profiles = resolveSessionCatalogProfiles(
+      readParams.sessionEntry,
+      deps.getConfig(),
+      readParams.agentId,
+    );
     const hasSessionContext = hasSessionCatalogContext(profiles);
     const assemble = (
       neutral: PreparedAgentProjection,
