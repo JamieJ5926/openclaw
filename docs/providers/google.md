@@ -194,6 +194,7 @@ the Gateway already runs inside a managed Google Cloud environment.
         ```
       </Step>
     </Steps>
+
   </Tab>
 </Tabs>
 
