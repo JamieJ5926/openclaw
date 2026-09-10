@@ -1,6 +1,8 @@
 // Discord tests cover probe.intents plugin behavior.
+import { createServer, type Server } from "node:http";
 import { withFetchPreconnect } from "openclaw/plugin-sdk/test-env";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { installDiscordEndpointRuntime, type DiscordEndpointLease } from "./endpoint-runtime.js";
 import {
   fetchDiscordApplicationId,
   fetchDiscordApplicationSummary,
@@ -11,6 +13,29 @@ import {
 import { jsonResponse } from "./test-http-helpers.js";
 
 const DISCORD_PROBE_JSON_CAP_BYTES = 16 * 1024 * 1024;
+let endpointLease: DiscordEndpointLease | undefined;
+let endpointServer: Server | undefined;
+
+async function listenLoopbackServer(server: Server): Promise<number> {
+  return await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        reject(new Error("expected loopback TCP address"));
+        return;
+      }
+      resolve(address.port);
+    });
+  });
+}
+
+async function closeServer(server: Server): Promise<void> {
+  await new Promise<void>((resolve) => {
+    server.close(() => resolve());
+  });
+}
 
 function oversizedDiscordProbeJsonResponse(onCancel: () => void): Response {
   const response = new Response(
@@ -109,8 +134,14 @@ describe("resolveDiscordPrivilegedIntentsFromFlags", () => {
     vi.useRealTimers();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.useRealTimers();
+    endpointLease?.close();
+    endpointLease = undefined;
+    if (endpointServer) {
+      await closeServer(endpointServer);
+      endpointServer = undefined;
+    }
   });
 
   it("reports disabled when no bits set", () => {
@@ -222,6 +253,30 @@ describe("resolveDiscordPrivilegedIntentsFromFlags", () => {
       fetchDiscordApplicationSummary("unparseable.token", 1_000, fetcher),
     ).resolves.toBeUndefined();
     expect(calls).toBe(1);
+  });
+
+  it("does not deliver a retained probe credential to a replacement endpoint", async () => {
+    let requestCount = 0;
+    endpointServer = createServer((_req, res) => {
+      requestCount += 1;
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ id: "replacement-app" }));
+    });
+    const port = await listenLoopbackServer(endpointServer);
+    const descriptor = {
+      restApiBaseUrl: `http://127.0.0.1:${port}/api/v10`,
+      gatewayBotUrl: `http://127.0.0.1:${port}/api/v10/gateway/bot`,
+      gatewayOrigin: `ws://127.0.0.1:${port}`,
+    };
+    endpointLease = installDiscordEndpointRuntime(descriptor);
+    const retainedRuntime = endpointLease.runtime;
+    endpointLease.close();
+    endpointLease = installDiscordEndpointRuntime(descriptor);
+
+    await expect(
+      fetchDiscordApplicationSummary("unparseable.token", 1_000, fetch, retainedRuntime),
+    ).resolves.toBeUndefined();
+    expect(requestCount).toBe(0);
   });
 
   it("cancels failed getMe probe response bodies", async () => {

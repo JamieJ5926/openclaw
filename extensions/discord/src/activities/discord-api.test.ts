@@ -1,8 +1,15 @@
 import type { fetchWithSsrFGuard } from "openclaw/plugin-sdk/ssrf-runtime";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { installDiscordEndpointRuntime, type DiscordEndpointLease } from "../endpoint-runtime.js";
 import { fetchDiscordJson } from "./discord-api.js";
 
 describe("Discord Activity API", () => {
+  let endpointLease: DiscordEndpointLease | undefined;
+
+  afterEach(() => {
+    endpointLease?.close();
+  });
+
   it("cancels non-OK response bodies before releasing the dispatcher", async () => {
     const lifecycle: string[] = [];
     const response = new Response(
@@ -58,5 +65,32 @@ describe("Discord Activity API", () => {
       }),
     ).resolves.toEqual({ ok: false, status: 429 });
     expect(release).toHaveBeenCalledOnce();
+  });
+
+  it("rejects retained multi-request work instead of switching endpoint generations", async () => {
+    endpointLease = installDiscordEndpointRuntime({
+      restApiBaseUrl: "http://127.0.0.1:43210/api/v10",
+      gatewayBotUrl: "http://127.0.0.1:43210/api/v10/gateway/bot",
+      gatewayOrigin: "ws://127.0.0.1:43210",
+    });
+    const retainedRuntime = endpointLease.runtime;
+    endpointLease.close();
+    endpointLease = installDiscordEndpointRuntime({
+      restApiBaseUrl: "http://127.0.0.1:43211/api/v10",
+      gatewayBotUrl: "http://127.0.0.1:43211/api/v10/gateway/bot",
+      gatewayOrigin: "ws://127.0.0.1:43211",
+    });
+    const fetchGuard = vi.fn();
+
+    await expect(
+      fetchDiscordJson({
+        fetchGuard,
+        url: "https://discord.com/api/v10/users/@me",
+        init: { headers: { Authorization: "Bearer test-token" } },
+        auditContext: "discord.activities.oauth.user",
+        endpointRuntime: retainedRuntime,
+      }),
+    ).rejects.toThrow("lease has been retired");
+    expect(fetchGuard).not.toHaveBeenCalled();
   });
 });

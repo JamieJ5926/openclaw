@@ -8,6 +8,7 @@ import type { fetchWithSsrFGuard } from "openclaw/plugin-sdk/ssrf-runtime";
 import { postRawWebhook } from "openclaw/plugin-sdk/test-env";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildDiscordActivityCustomId } from "../component-custom-id.js";
+import { installDiscordEndpointRuntime, type DiscordEndpointLease } from "../endpoint-runtime.js";
 import { createDiscordActivityHttpHandler } from "./http.js";
 import { DiscordActivitiesRuntime } from "./runtime.js";
 import {
@@ -16,8 +17,11 @@ import {
 } from "./test-helpers.test-support.js";
 
 const servers: Server[] = [];
+let endpointLease: DiscordEndpointLease | undefined;
 
 afterEach(async () => {
+  endpointLease?.close();
+  endpointLease = undefined;
   for (const server of servers.splice(0)) {
     await new Promise<void>((resolve) => {
       server.close(() => resolve());
@@ -342,6 +346,63 @@ describe("Discord Activity HTTP OAuth", () => {
       id: widgetId,
       title: "Activity status",
     });
+  });
+
+  it("does not deliver OAuth credentials when endpoint replacement occurs during body read", async () => {
+    let endpointRequests = 0;
+    const endpointServer = createServer((_req, res) => {
+      endpointRequests += 1;
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ access_token: "replacement-token" }));
+    });
+    servers.push(endpointServer);
+    await new Promise<void>((resolve) => {
+      endpointServer.listen(0, "127.0.0.1", resolve);
+    });
+    const endpointAddress = endpointServer.address();
+    if (!endpointAddress || typeof endpointAddress === "string") {
+      throw new Error("expected loopback TCP address");
+    }
+    const descriptor = {
+      restApiBaseUrl: `http://127.0.0.1:${endpointAddress.port}/api/v10`,
+      gatewayBotUrl: `http://127.0.0.1:${endpointAddress.port}/api/v10/gateway/bot`,
+      gatewayOrigin: `ws://127.0.0.1:${endpointAddress.port}`,
+    };
+    endpointLease = installDiscordEndpointRuntime(descriptor);
+    const runtime = createActivityTestRuntime();
+    const accountLookup = vi.spyOn(runtime, "resolveHttpAccount");
+    const base = await startServer(runtime);
+    let finishBody: (() => void) | undefined;
+    const response = new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const request = createHttpRequest(`${base}/discord/activity/api/token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      request.on("error", reject);
+      request.on("response", (incoming) => {
+        const chunks: Buffer[] = [];
+        incoming.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+        incoming.on("end", () => {
+          resolve({ status: incoming.statusCode ?? 0, body: Buffer.concat(chunks).toString() });
+        });
+      });
+      request.write('{"code":"');
+      finishBody = () => request.end('oauth-code"}');
+    });
+    await vi.waitFor(() => expect(accountLookup).toHaveBeenCalledOnce());
+
+    endpointLease.close();
+    endpointLease = installDiscordEndpointRuntime(descriptor);
+    finishBody?.();
+
+    await expect(response).resolves.toEqual({
+      status: 503,
+      body: `${JSON.stringify({ error: "Discord token exchange unavailable" })}\n`,
+    });
+    expect(endpointRequests).toBe(0);
+    console.log(
+      `[discord activity retirement proof] replaced_during_body=true credential_requests_after_replacement=${endpointRequests}`,
+    );
   });
 
   it("routes Discord API calls through the resolved account proxy fetch", async () => {

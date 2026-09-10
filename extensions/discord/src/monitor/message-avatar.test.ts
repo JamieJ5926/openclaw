@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { installDiscordEndpointRuntime, type DiscordEndpointLease } from "../endpoint-runtime.js";
 import type { Client, User } from "../internal/discord.js";
 
 const mocks = vi.hoisted(() => ({
@@ -31,10 +32,16 @@ function discordUser(id: string, avatar: string | null): User {
 }
 
 const emptyClient = { fetchGuild: vi.fn() } as unknown as Client;
+let endpointLease: DiscordEndpointLease | undefined;
 
 beforeEach(() => {
   mocks.saveRemoteMedia.mockReset();
   mocks.logDebug.mockReset();
+});
+
+afterEach(() => {
+  endpointLease?.close();
+  endpointLease = undefined;
 });
 
 describe("createDiscordAvatarResolver", () => {
@@ -120,6 +127,38 @@ describe("createDiscordAvatarResolver", () => {
       ).toBe("/media/inbound/guild-icon.png"),
     );
     expect(fetchGuild).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fall back to the public CDN when a guild lookup outlives its endpoint", async () => {
+    const guildLookup = deferred<{ icon: string }>();
+    const client = { fetchGuild: vi.fn(() => guildLookup.promise) } as unknown as Client;
+    endpointLease = installDiscordEndpointRuntime({
+      restApiBaseUrl: "http://127.0.0.1:43210/api/v10",
+      gatewayBotUrl: "http://127.0.0.1:43210/api/v10/gateway/bot",
+      gatewayOrigin: "ws://127.0.0.1:43210",
+    });
+    const resolver = createDiscordAvatarResolver();
+
+    resolver.resolve({
+      client,
+      conversationId: "channel-1",
+      author: discordUser("user-1", "sender-hash"),
+      guildId: "guild-1",
+    });
+    endpointLease.close();
+    endpointLease = installDiscordEndpointRuntime({
+      restApiBaseUrl: "http://127.0.0.1:43211/api/v10",
+      gatewayBotUrl: "http://127.0.0.1:43211/api/v10/gateway/bot",
+      gatewayOrigin: "ws://127.0.0.1:43211",
+    });
+    guildLookup.resolve({ icon: "guild-hash" });
+
+    await vi.waitFor(() =>
+      expect(mocks.logDebug).toHaveBeenCalledWith(
+        expect.stringContaining("lease has been retired"),
+      ),
+    );
+    expect(mocks.saveRemoteMedia).not.toHaveBeenCalled();
   });
 
   it("swallows download failures and retries on the next message", async () => {

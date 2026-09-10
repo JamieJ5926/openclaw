@@ -2,8 +2,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { withServer } from "openclaw/plugin-sdk/test-env";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { cancelTrackedTextResponse } from "../../test-support/streaming-error-response.js";
+import { installDiscordEndpointRuntime, type DiscordEndpointLease } from "./endpoint-runtime.js";
 import { DiscordError, type RequestClient } from "./internal/discord.js";
 import { DISCORD_ATTACHMENT_TOTAL_TIMEOUT_MS } from "./monitor/timeouts.js";
 import { hasDiscordMessageCreateAmbiguity, type DiscordRetryRunner } from "./retry.js";
@@ -25,7 +26,10 @@ const fetchWithSsrFGuardMock = vi.hoisted(() =>
       policy?: { allowRfc2544BenchmarkRange?: boolean; allowIpv6UniqueLocalRange?: boolean };
       auditContext?: string;
     }) => {
-      if (!Number.isFinite(params.timeoutMs) || (params.timeoutMs ?? 0) <= 0) {
+      if (
+        params.auditContext !== "discord.endpoint-runtime" &&
+        (!Number.isFinite(params.timeoutMs) || (params.timeoutMs ?? 0) <= 0)
+      ) {
         throw new Error("guarded voice upload fetch requires a finite timeout");
       }
       return {
@@ -61,14 +65,21 @@ vi.mock("openclaw/plugin-sdk/media-runtime", async () => {
   };
 });
 
-vi.mock("openclaw/plugin-sdk/ssrf-runtime", async () => {
+vi.mock("openclaw/plugin-sdk/ssrf-runtime", async (importOriginal) => {
   return {
+    ...(await importOriginal<typeof import("openclaw/plugin-sdk/ssrf-runtime")>()),
     fetchWithSsrFGuard: fetchWithSsrFGuardMock,
   };
 });
 
 let ensureOggOpus: typeof import("./voice-message.js").ensureOggOpus;
 let sendDiscordVoiceMessage: typeof import("./voice-message.js").sendDiscordVoiceMessage;
+let endpointLease: DiscordEndpointLease | undefined;
+
+afterEach(() => {
+  endpointLease?.close();
+  endpointLease = undefined;
+});
 
 describe("ensureOggOpus", () => {
   beforeAll(async () => {
@@ -371,6 +382,55 @@ describe("sendDiscordVoiceMessage", () => {
         ],
       },
     });
+  });
+
+  it("does not reroute a voice retry after its endpoint lease is replaced", async () => {
+    endpointLease = installDiscordEndpointRuntime({
+      restApiBaseUrl: "http://127.0.0.1:43210/api/v10",
+      gatewayBotUrl: "http://127.0.0.1:43210/api/v10/gateway/bot",
+      gatewayOrigin: "ws://127.0.0.1:43210",
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ message: "Slow down", retry_after: 0, global: false }), {
+        status: 429,
+      }),
+    );
+    const request: DiscordRetryRunner = async (run) => {
+      try {
+        return await run();
+      } catch {
+        endpointLease?.close();
+        endpointLease = installDiscordEndpointRuntime({
+          restApiBaseUrl: "http://127.0.0.1:43211/api/v10",
+          gatewayBotUrl: "http://127.0.0.1:43211/api/v10/gateway/bot",
+          gatewayOrigin: "ws://127.0.0.1:43211",
+        });
+        return await run();
+      }
+    };
+
+    await expect(
+      sendDiscordVoiceMessage(
+        createRest(),
+        "channel-1",
+        Buffer.from("ogg"),
+        metadata,
+        undefined,
+        request,
+        false,
+        "must-not-leak",
+      ),
+    ).rejects.toThrow(/lease has been retired/);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const firstInput = fetchMock.mock.calls[0]?.[0];
+    const firstUrl =
+      firstInput instanceof Request
+        ? firstInput.url
+        : firstInput instanceof URL
+          ? firstInput.href
+          : firstInput;
+    expect(firstUrl).toContain("127.0.0.1:43210");
   });
 
   it("reuses the voice-message nonce across an ambiguous create retry", async () => {
