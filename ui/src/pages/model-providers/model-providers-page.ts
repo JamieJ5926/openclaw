@@ -647,8 +647,9 @@ export class ModelProvidersPage extends OpenClawLightDomElement {
         .map((provider) => provider.provider) ?? []),
     ]);
     const advertised = isGatewayMethodAdvertised(gatewaySnapshot, "models.probe");
+    const usageAvailable = isGatewayMethodAdvertised(gatewaySnapshot, "codex.accountUsage");
     const body = renderModelProviders({
-      usageClient: this.mutationBlockedReason() === null ? gatewaySnapshot.client : null,
+      usageClient: !this.mutationBlockedReason() && usageAvailable ? gatewaySnapshot.client : null,
       usageAgentId: this.selectedAgentId,
       connected: gatewaySnapshot.phase === "connected",
       loading: gatewaySnapshot.phase === "connected" && this.data === null && !rosterError,

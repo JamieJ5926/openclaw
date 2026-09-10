@@ -17,11 +17,11 @@ export class ModelAccountUsage extends OpenClawLightDomElement {
 
   private readonly usage = new Task(this, {
     args: () => [this.client, this.agentId, this.profileId, this.refresh] as const,
-    task: ([client, agentId, profileId, refresh], { signal }) =>
+    task: ([client, agentId, profileId], { signal }) =>
       client && agentId && profileId
         ? client.request<UsageSummary>(
-            "models.authUsage",
-            { agentId, profileId, refresh: refresh > 0 },
+            "codex.accountUsage",
+            { agentId, profileId },
             { signal, timeoutMs: 30_000 },
           )
         : initialState,

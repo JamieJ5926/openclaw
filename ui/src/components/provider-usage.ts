@@ -38,7 +38,7 @@ function groupCompactWindows(windows: UsageWindow[]): CompactWindowGroup[] {
   const groups = new Map<string, CompactWindowGroup>();
   for (const window of windows) {
     const scope = window.groupLabel ?? "";
-    const cadence = window.windowLabel ?? window.label;
+    const cadence = window.label;
     const group = groups.get(scope) ?? { scope, windows: [] };
     group.windows.push({ cadence, window });
     groups.set(scope, group);

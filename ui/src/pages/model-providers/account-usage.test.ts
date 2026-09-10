@@ -40,11 +40,10 @@ it("loads automatically, renders remaining quota and balance, and refreshes that
   expect(view.textContent).toContain("Pro");
   expect(view.querySelector('[role="progressbar"]')?.getAttribute("aria-valuenow")).toBe("75");
   expect(request).toHaveBeenCalledExactlyOnceWith(
-    "models.authUsage",
+    "codex.accountUsage",
     {
       agentId: "main",
       profileId: "openai:account",
-      refresh: false,
     },
     expect.objectContaining({ signal: expect.any(AbortSignal) }),
   );
@@ -57,7 +56,6 @@ it("loads automatically, renders remaining quota and balance, and refreshes that
   expect(request.mock.lastCall?.[1]).toEqual({
     agentId: "main",
     profileId: "openai:account",
-    refresh: true,
   });
 });
 

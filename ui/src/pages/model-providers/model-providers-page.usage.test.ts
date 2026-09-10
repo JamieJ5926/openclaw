@@ -26,6 +26,7 @@ describe("ModelProvidersPage usage convergence", () => {
     snapshot.hello = {
       type: "hello-ok",
       protocol: 3,
+      features: { methods: ["codex.accountUsage"] },
       auth: { role: "operator", scopes: ["operator.admin"] },
     };
     const original = request.getMockImplementation()!;
@@ -48,7 +49,7 @@ describe("ModelProvidersPage usage convergence", () => {
           },
         ]);
       }
-      if (method === "models.authUsage") {
+      if (method === "codex.accountUsage") {
         accountRequests.push(params);
         return {
           updatedAt: 1,
@@ -62,8 +63,8 @@ describe("ModelProvidersPage usage convergence", () => {
     const page = appendPage(context);
     await vi.waitFor(() => expect(page.textContent).toContain("90% left"));
     expect(accountRequests).toEqual([
-      { agentId: "main", profileId: "openai:one", refresh: false },
-      { agentId: "main", profileId: "openai:two", refresh: false },
+      { agentId: "main", profileId: "openai:one" },
+      { agentId: "main", profileId: "openai:two" },
     ]);
     expect(
       page.querySelector('[data-profile-id="anthropic:one"] openclaw-model-account-usage'),
