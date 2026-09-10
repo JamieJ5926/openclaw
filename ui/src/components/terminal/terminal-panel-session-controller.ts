@@ -276,9 +276,6 @@ export class TerminalPanelSessionController
         this.persistSessions();
       }
     } catch {
-      if (!this.isTerminalOperationCurrent(operation, restore)) {
-        return;
-      }
       // terminal.list failed (older gateway, surface flapping): fall through
       // to a fresh session below.
     } finally {
@@ -714,10 +711,8 @@ export class TerminalPanelSessionController
         .filter((tab) => tab.status === "live" && tab.gatewaySessionId)
         .map((tab) => tab.gatewaySessionId),
     );
-    if (restore) {
-      for (const sessionId of restore.pending.keys()) {
-        ids.add(sessionId);
-      }
+    for (const sessionId of restore?.pending.keys() ?? []) {
+      ids.add(sessionId);
     }
     persistTerminalSessionIds([...ids]);
   }
