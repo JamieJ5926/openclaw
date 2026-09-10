@@ -327,6 +327,7 @@ export async function executeFollowupTurn(params: {
       turn.operation.bindToolAuthorityFingerprint(
         resolveFollowupRunToolAuthorityFingerprint(turn.queued),
       );
+      turn.operation.setPhase("running");
       execution = await executeAgentTurn({
         commandBody: turn.queued.prompt,
         transcriptCommandBody: turn.queued.transcriptPrompt,
