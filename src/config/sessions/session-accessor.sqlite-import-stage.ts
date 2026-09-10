@@ -67,7 +67,7 @@ export class SqliteSessionImportStage {
   constructor(private readonly database: DatabaseSync) {
     this.insert = database.prepare("INSERT INTO rows VALUES (?, ?, ?, ?)");
     this.read = database.prepare(
-      "SELECT seq, event_json AS eventJson, created_at AS createdAt FROM rows WHERE source = ? ORDER BY seq",
+      "SELECT seq, event_json AS eventJson, created_at AS createdAt FROM rows WHERE source = ? AND seq > ? ORDER BY seq LIMIT 1",
     );
     this.findSeen = database.prepare(
       "SELECT 1 FROM seen WHERE hash = ? AND event_json = ? LIMIT 1",
@@ -79,9 +79,18 @@ export class SqliteSessionImportStage {
     this.insert.run(source, seq, eventJson, createdAt);
   }
 
-  rows(source: number): Iterable<StagedTranscriptRow> {
-    // SAFETY: this private table is written only by append; the projection preserves its row types.
-    return this.read.iterate(source) as Iterable<StagedTranscriptRow>;
+  *rows(source: number): Iterable<StagedTranscriptRow> {
+    let afterSeq = -1;
+    for (;;) {
+      // Repair rewrites row payloads; finish each lookup before yielding so a live cursor cannot revisit one.
+      // SAFETY: append owns this private table and the projection preserves its row types.
+      const row = this.read.get(source, afterSeq) as StagedTranscriptRow | undefined;
+      if (!row) {
+        return;
+      }
+      afterSeq = row.seq;
+      yield row;
+    }
   }
 
   resetSeen(): void {
