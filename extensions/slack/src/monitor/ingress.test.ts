@@ -215,12 +215,12 @@ function createReceiverEventWithBody(body: Record<string, unknown>): ReceiverEve
 function attachIngress(
   queue: ChannelIngressQueue<SlackIngressPayload>,
   processEvent: (event: ReceiverEvent) => Promise<void>,
-  options: { adoptionStallTimeoutMs?: number } = {},
+  options: { adoptionStallTimeoutMs?: number; pollIntervalMs?: number } = {},
 ) {
   const ingress = createSlackDurableIngress({
     accountId: "default",
     queue,
-    pollIntervalMs: 60_000,
+    pollIntervalMs: options.pollIntervalMs ?? 60_000,
     adoptionStallTimeoutMs: options.adoptionStallTimeoutMs ?? 5_000,
   });
   const harness = createReceiverHarness();
@@ -361,6 +361,66 @@ describe("Slack durable ingress", () => {
         expect(await queue.listClaims()).toEqual([]);
       } finally {
         settleDuplicate();
+        await ingress.stop();
+      }
+    });
+  });
+
+  it("readmits a released twin before reclaiming dispatch and rearms its watchdog", async () => {
+    await withQueue(async (queue) => {
+      let rejectOwner = (_error: Error) => {};
+      const pending = new Promise<boolean>((_resolve, reject) => {
+        rejectOwner = reject;
+      });
+      const handle = { commit: vi.fn(async () => true), release: vi.fn() };
+      const claim = vi
+        .fn()
+        .mockResolvedValueOnce({ kind: "inflight", pending })
+        .mockResolvedValue({ kind: "claimed", handle });
+      let attempts = 0;
+      let retrySignal: AbortSignal | undefined;
+      const starts: string[] = [];
+      const processEvent = vi.fn(async (event: ReceiverEvent) => {
+        const id = (event.body as { event_id: string }).event_id;
+        const lifecycle = resolveSlackIngressTurnLifecycle(event.customProperties)!;
+        if (id !== "Ev-released-twin") {
+          starts.push(id);
+          await lifecycle.onAdopted();
+          return;
+        }
+        attempts += 1;
+        await claimSlackMessageDispatchReplay({
+          guard: { claim } as unknown as Parameters<
+            typeof claimSlackMessageDispatchReplay
+          >[0]["guard"],
+          key: "logical-message",
+          onWaiting: lifecycle.onDispatchWaiting,
+        });
+        retrySignal = lifecycle.abortSignal;
+        // A newly admitted owner must still be covered while routing stalls.
+        await new Promise<void>((resolve) => {
+          lifecycle.abortSignal.addEventListener("abort", () => resolve(), { once: true });
+        });
+        handle.release();
+        lifecycle.abortSignal.throwIfAborted();
+      });
+      const { ingress, receive } = attachIngress(queue, processEvent, {
+        adoptionStallTimeoutMs: 160,
+        pollIntervalMs: 10,
+      });
+      ingress.start();
+      try {
+        await receive(createReceiverEvent("Ev-released-twin"));
+        await vi.waitFor(() => expect(claim).toHaveBeenCalledOnce());
+        rejectOwner(new Error("original dispatch failed"));
+        await vi.waitFor(() => expect(attempts).toBe(2), { timeout: 2_000 });
+        expect(claim).toHaveBeenCalledTimes(2);
+        await receive(createReceiverEvent("Ev-later", undefined, { ts: "1700000002.000100" }));
+        expect(starts).toEqual([]);
+        await vi.waitFor(() => expect(retrySignal?.aborted).toBe(true));
+        const [row] = await queue.listPending();
+        expect(row).toMatchObject({ id: "Ev-released-twin", attempts: 2 });
+      } finally {
         await ingress.stop();
       }
     });

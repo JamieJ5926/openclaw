@@ -973,6 +973,51 @@ describe("createSlackMessageHandler", () => {
     await Promise.all([handledFailure, flushFailure]);
   });
 
+  it("requeues a released twin and releases other claims from its flush", async () => {
+    let rejectOwner = (_error: Error) => {};
+    const pending = new Promise<boolean>((_resolve, reject) => {
+      rejectOwner = reject;
+    });
+    const release = vi.fn();
+    const claim = vi
+      .fn()
+      .mockResolvedValueOnce({ kind: "claimed", handle: { commit: vi.fn(), release } })
+      .mockResolvedValueOnce({ kind: "inflight", pending });
+    const handler = createSlackMessageHandler({
+      ctx: createContext(),
+      account: { accountId: "default" } as Parameters<
+        typeof createSlackMessageHandler
+      >[0]["account"],
+      dispatchReplayGuard: { claim } as unknown as NonNullable<
+        Parameters<typeof createSlackMessageHandler>[0]["dispatchReplayGuard"]
+      >,
+    });
+    for (const ts of ["1709000000.000701", "1709000000.000702"]) {
+      await handler(
+        { type: "message", channel: "C111", user: "U111", ts, text: "retry me" } as never,
+        { source: "message" },
+      );
+    }
+    const entries = enqueueMock.mock.calls.map((call) => call[0]) as Array<Record<string, unknown>>;
+    const flushing = runOnFlush(entries);
+    const failure = expect(flushing).rejects.toThrow("Slack dispatch owner released");
+    await vi.waitFor(() => expect(claim).toHaveBeenCalledTimes(2));
+    vi.useFakeTimers();
+    try {
+      rejectOwner(new Error("original dispatch failed"));
+      await failure;
+      expect(release).toHaveBeenCalledOnce();
+      expect(claim).toHaveBeenCalledTimes(2);
+      expect(prepareSlackMessageMock).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(enqueueMock).toHaveBeenCalledTimes(4);
+      expect(enqueueMock.mock.calls[2]?.[0]).toMatchObject({ opts: { retryAttempt: 1 } });
+      expect(enqueueMock.mock.calls[3]?.[0]).toMatchObject({ opts: { retryAttempt: 1 } });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("retries native session initialization conflicts", async () => {
     dispatchPreparedSlackMessageMock.mockRejectedValueOnce(
       new Error("Slack dispatch failed", {
