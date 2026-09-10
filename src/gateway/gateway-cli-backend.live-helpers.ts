@@ -73,6 +73,15 @@ export type CliBackendLiveProviderSkipDecision = {
   message: string;
 };
 
+export type ClaudeCliResumeContinuityProbe = {
+  firstTurnMarker: string;
+  firstTurnPrompt: string;
+  injectedContext: string;
+  resumePrompt: string;
+  expectedFirstReply: string;
+  expectedResumeMarker: string;
+};
+
 function normalizeCliRuntimeModelTarget(raw: string | undefined): string | undefined {
   if (!raw) {
     return undefined;
@@ -270,6 +279,47 @@ export function matchesCliBackendReply(text: string, expected: string): boolean 
     normalized.includes(target) ||
     normalized.includes(targetWithoutPeriod)
   );
+}
+
+export function buildClaudeCliResumeContinuityProbe(params: {
+  firstTurnNonce: string;
+  resumeNonce: string;
+  memoryToken: string;
+}): ClaudeCliResumeContinuityProbe {
+  const firstTurnMarker = `CLI-BACKEND-${params.firstTurnNonce}`;
+  return {
+    firstTurnMarker,
+    firstTurnPrompt:
+      "This is a synthetic session-memory test. Remember the random public test label " +
+      "provided in runtime context; it is not a credential. " +
+      `Do not inspect files or run tools. Reply with exactly: ${firstTurnMarker}.`,
+    injectedContext:
+      `The random public test label for this session-memory test is ${params.memoryToken}. ` +
+      "Remember it for the follow-up, without including it in this turn's reply.",
+    resumePrompt:
+      "Do not inspect files or run tools. " +
+      `Return exactly two whitespace-separated tokens: CLI-RESUME-${params.resumeNonce} followed by ` +
+      "the exact public test label from the earlier turn. Do not add prose.",
+    expectedFirstReply: `${firstTurnMarker}.`,
+    expectedResumeMarker: `CLI-RESUME-${params.resumeNonce}`,
+  };
+}
+
+export function resolveImportedClaudeCliSessionId(messages: unknown[]): string | undefined {
+  for (const message of messages) {
+    const metadata =
+      typeof message === "object" && message !== null
+        ? (message as Record<string, unknown>)["__openclaw"]
+        : undefined;
+    if (typeof metadata !== "object" || metadata === null) {
+      continue;
+    }
+    const imported = metadata as { cliSessionId?: unknown; importedFrom?: unknown };
+    if (imported.importedFrom === "claude-cli" && typeof imported.cliSessionId === "string") {
+      return imported.cliSessionId;
+    }
+  }
+  return undefined;
 }
 
 export function withClaudeMcpConfigOverrides(args: string[], mcpConfigPath: string): string[] {

@@ -198,6 +198,42 @@ describe("gateway cli backend live helpers", () => {
     });
   });
 
+  it("builds Claude continuity prompts without revealing the public label", () => {
+    const { buildClaudeCliResumeContinuityProbe } = liveHelpers;
+    const memoryToken = "test-memory-token";
+
+    const probe = buildClaudeCliResumeContinuityProbe({
+      firstTurnNonce: "112233",
+      resumeNonce: "445566",
+      memoryToken,
+    });
+
+    expect(probe.firstTurnPrompt).toContain("public test label");
+    expect(probe.firstTurnPrompt).toContain("not a credential");
+    expect(probe.firstTurnPrompt).toContain("CLI-BACKEND-112233");
+    expect(probe.resumePrompt).toContain("public test label");
+    expect(probe.resumePrompt).toContain("CLI-RESUME-445566");
+    expect(probe.firstTurnPrompt).not.toContain(memoryToken);
+    expect(probe.resumePrompt).not.toContain(memoryToken);
+    expect(probe.injectedContext).toContain(memoryToken);
+    expect(probe.expectedResumeMarker).toBe("CLI-RESUME-445566");
+  });
+
+  it("finds only Claude-imported native session ids", () => {
+    const { resolveImportedClaudeCliSessionId } = liveHelpers;
+
+    expect(
+      resolveImportedClaudeCliSessionId([
+        null,
+        { __openclaw: "invalid" },
+        { __openclaw: { importedFrom: "codex-cli", cliSessionId: "wrong-provider" } },
+        { __openclaw: { importedFrom: "claude-cli", cliSessionId: 42 } },
+        { __openclaw: { importedFrom: "claude-cli", cliSessionId: "claude-session" } },
+      ]),
+    ).toBe("claude-session");
+    expect(resolveImportedClaudeCliSessionId([])).toBeUndefined();
+  });
+
   it("retries Codex CLI timeout payloads only before the final attempt", async () => {
     const { isCliBackendLiveTimeoutPayload, shouldRetryCliBackendLiveTimeout } =
       await import("./gateway-cli-backend.live-helpers.js");

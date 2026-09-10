@@ -135,6 +135,18 @@ export function resetClaudeLiveSessionsForTest(): void {
   liveSessionCreates.clear();
 }
 
+/** Closes all live Claude CLI sessions and waits briefly for their children to exit. */
+export async function closeClaudeLiveSessionsForTest(): Promise<void> {
+  const sessions = [...liveSessions.values()];
+  resetClaudeLiveSessionsForTest();
+  await Promise.all(sessions.map((session) => waitForManagedRunExit(session.managedRun)));
+}
+
+/** Returns managed-run identities for live-session continuity assertions. */
+export function getClaudeLiveSessionRunIdsForTest(): string[] {
+  return [...liveSessions.values()].map((session) => session.managedRun.runId).toSorted();
+}
+
 async function waitForManagedRunExit(managedRun: ManagedRun): Promise<void> {
   let timeout: NodeJS.Timeout | null = null;
   try {
