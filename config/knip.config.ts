@@ -50,6 +50,8 @@ const repositoryScriptEntries = [
   "scripts/docker/verify-fs-safe-native.mjs!",
   // Reusable Docker workflows invoke this selector from a trusted sparse checkout.
   "scripts/resolve-fs-safe-native-contract.mjs!",
+  // The live Docker launcher executes this runner by path inside the package image.
+  "scripts/e2e/anthropic-cache-live.mts!",
   "scripts/e2e/lib/browser-cdp-snapshot/assert-snapshot.mjs!",
   "scripts/e2e/lib/browser-cdp-snapshot/fixture-server.mjs!",
   "scripts/e2e/lib/bundled-plugin-install-uninstall/runtime-smoke.mjs!",
@@ -129,8 +131,12 @@ const repositoryScriptEntries = [
   "scripts/mantis/observe-request-web-ui.mts!",
   "scripts/mantis/telegram-proof-bridge.mjs!",
   "scripts/mcp-code-mode-gateway-e2e.ts!",
+  // Existing explicit Linux proof driver imports the inactive capsule adapter.
+  // Reachability for auditing is not registration or permission to execute it.
   "scripts/openclaw-release-clawhub-plan.ts!",
   "scripts/openclaw-release-clawhub-runtime-state.ts!",
+  // Protected preparation/button workflows invoke this coordinator by path.
+  "scripts/openclaw-release-ready.mjs!",
   // Plugin Prerelease builds immutable package artifacts, then scans them in a bounded child.
   "scripts/plugin-npm-security-prepare.mts!",
   "scripts/plugin-npm-security-scan-runner.mjs!",
