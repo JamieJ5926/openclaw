@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { stableStringify } from "@openclaw/normalization-core";
+import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import type {
   WorkerTranscriptCommitParams,
   WorkerTranscriptMessage,
@@ -36,7 +37,7 @@ type CommittedAgentMessage = SemanticAgentMessage & { idempotencyKey: string };
 
 type AppliedTranscriptMessage = {
   appended: boolean;
-  message: CommittedAgentMessage;
+  message: AgentMessage;
   messageId: string;
   messageSeq?: number;
 };
@@ -93,7 +94,7 @@ function buildCommittedMessage(
       content,
       timestamp: message.timestamp,
       idempotencyKey,
-    } as CommittedAgentMessage;
+    } as CommittedAgentMessage; // SAFETY: The user schema admits text/image content; cloning preserves those variants.
   }
   if (message.role === "toolResult") {
     return {
@@ -105,7 +106,7 @@ function buildCommittedMessage(
       isError: message.isError,
       timestamp: message.timestamp,
       idempotencyKey,
-    } as CommittedAgentMessage;
+    } as CommittedAgentMessage; // SAFETY: The tool-result schema admits text/image content; cloning preserves those variants.
   }
   return {
     role: "assistant",
@@ -162,7 +163,7 @@ function buildCommittedMessage(
     ...(message.errorBody === undefined ? {} : { errorBody: message.errorBody }),
     timestamp: message.timestamp,
     idempotencyKey,
-  } as CommittedAgentMessage;
+  } as CommittedAgentMessage; // SAFETY: The assistant schema admits text/thinking/toolCall content; cloning preserves those variants.
 }
 
 function requestHash(request: WorkerTranscriptCommitParams): string {
@@ -189,18 +190,18 @@ function messageIdempotencyKey(params: {
 }
 
 function readMessageIdempotencyKey(message: unknown): string | undefined {
-  if (!message || typeof message !== "object" || Array.isArray(message)) {
+  if (!isRecord(message)) {
     return undefined;
   }
-  const value = (message as { idempotencyKey?: unknown }).idempotencyKey;
+  const value = message.idempotencyKey;
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function isCommittedAgentMessage(message: unknown): message is CommittedAgentMessage {
-  if (!message || typeof message !== "object" || Array.isArray(message)) {
+  if (!isRecord(message)) {
     return false;
   }
-  const role = (message as { role?: unknown }).role;
+  const role = message.role;
   return (
     (role === "user" || role === "assistant" || role === "toolResult") &&
     readMessageIdempotencyKey(message) !== undefined
@@ -210,7 +211,7 @@ function isCommittedAgentMessage(message: unknown): message is CommittedAgentMes
 function resolveActiveCommitPrefix(params: {
   baseLeafId: string | null;
   manager: SessionManager;
-  messages: readonly CommittedAgentMessage[];
+  messages: readonly AgentMessage[];
 }):
   | {
       activeVisibleEntryCount: number;
@@ -262,7 +263,7 @@ function resolveActiveCommitPrefix(params: {
 function resolvePersistedCommitAcrossDag(params: {
   baseLeafId: string | null;
   manager: SessionManager;
-  messages: readonly CommittedAgentMessage[];
+  messages: readonly AgentMessage[];
 }): PersistedCommitResolution {
   const childrenByParent = new Map<string | null, ReturnType<SessionManager["getEntries"]>>();
   for (const entry of params.manager.getEntries()) {
@@ -325,10 +326,7 @@ async function applyWorkerTranscriptCommit(params: {
   target: ResolvedWorkerSessionTarget;
 }): Promise<ApplyTranscriptCommitResult> {
   const redactedMessages = params.messages.map((message) =>
-    attachSessionTranscriptRunId(
-      redactTranscriptMessage(message, params.config) as CommittedAgentMessage,
-      params.runId,
-    ),
+    attachSessionTranscriptRunId(redactTranscriptMessage(message, params.config), params.runId),
   );
   const expectedState = {
     sessionId: params.sessionId,
