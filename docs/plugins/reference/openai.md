@@ -20,7 +20,7 @@ Adds OpenAI model provider support to OpenClaw.
 ## Surface
 
 - Providers: `openai`
-- Contracts: `accountUsageProviders`, `embeddingProviders`, `imageGenerationProviders`, `mediaUnderstandingProviders`, `realtimeTranscriptionProviders`, `realtimeVoiceProviders`, `speechProviders`, `usageProviders`, `videoGenerationProviders`
+- Contracts: `embeddingProviders`, `imageGenerationProviders`, `mediaUnderstandingProviders`, `realtimeTranscriptionProviders`, `realtimeVoiceProviders`, `speechProviders`, `usageProviders`, `videoGenerationProviders`
 
 ## Related docs
 

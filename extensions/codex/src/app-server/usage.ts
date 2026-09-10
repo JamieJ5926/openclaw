@@ -36,9 +36,5 @@ export async function fetchCodexAppServerUsageSnapshot(
   });
   const snapshot = buildCodexAppServerUsageSnapshot(usage.rateLimits);
   const accountEmail = ctx.email ?? usage.accountEmail;
-  return {
-    ...snapshot,
-    usageScope: "account",
-    ...(accountEmail && !snapshot.error ? { accountEmail } : {}),
-  };
+  return accountEmail && !snapshot.error ? { ...snapshot, accountEmail } : snapshot;
 }

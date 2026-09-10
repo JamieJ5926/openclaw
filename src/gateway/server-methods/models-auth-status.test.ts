@@ -5,7 +5,6 @@ import { expectDefined } from "@openclaw/normalization-core";
 import { MAX_DATE_TIMESTAMP_MS } from "@openclaw/normalization-core/number-coercion";
 import { createRequireRecord } from "openclaw/plugin-sdk/test-fixtures";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createDeferred } from "../../../test/helpers/promise.js";
 import type { AuthHealthSummary } from "../../agents/auth-health.js";
 import {
   replaceRuntimeAuthProfileStoreSnapshots,
@@ -74,12 +73,8 @@ const mocks = vi.hoisted(() => ({
     profiles: [],
     providers: [],
   })),
-  loadProviderUsageSummary: vi.fn<
-    typeof import("../../infra/provider-usage.load.js").loadProviderUsageSummary
-  >(async () => emptyUsageSummary()),
-  listProviderUsagePluginDescriptors: vi.fn<
-    typeof import("../../plugins/provider-runtime.js").listProviderUsagePluginDescriptors
-  >(() => [
+  loadProviderUsageSummary: vi.fn(async (): Promise<UsageSummary> => emptyUsageSummary()),
+  listProviderUsagePluginDescriptors: vi.fn(() => [
     { provider: "anthropic", displayName: "Claude" },
     { provider: "deepseek", displayName: "DeepSeek" },
     { provider: "openai", displayName: "OpenAI" },
@@ -282,7 +277,6 @@ function createPreparedOwnerSnapshot(agentId: string) {
     authModes: {},
     authStore: preparedAuthStore,
     authMaterializations: [],
-    isCurrent: () => true,
     metadataSnapshot: preparedMetadataSnapshot as never,
   };
 }
@@ -3000,214 +2994,3 @@ describe("aggregateRefreshableAuthStatus", () => {
   });
 });
 /* oxlint-disable max-lines -- TODO: split this grandfathered oversized file. */
-
-describe("models.authUsage", () => {
-  const profileId = "openai:account";
-  const usageHandler = expectDefined(
-    modelsAuthStatusHandlers["models.authUsage"],
-    "account usage handler",
-  );
-  const usage: UsageSummary = {
-    updatedAt: 123,
-    providers: [
-      {
-        provider: "openai",
-        displayName: "OpenAI",
-        usageScope: "account",
-        windows: [{ label: "5h", usedPercent: 25, resetAt: 100_000 }],
-        plan: "Pro",
-        accountEmail: "account@example.com",
-        billing: [{ type: "balance", amount: 12, unit: "credits" }],
-      },
-    ],
-  };
-  async function readUsage(params: Record<string, unknown> = { profileId }) {
-    const options = createOptions(params);
-    await usageHandler(options);
-    const [ok, payload, error] = firstRespondCall(options) ?? [];
-    expect(ok, JSON.stringify(error)).toBe(true);
-    return payload as UsageSummary;
-  }
-  beforeEach(() => {
-    resetAuthStatusMocks();
-    setPreparedAuthStore({
-      version: 1,
-      profiles: {
-        [profileId]: { type: "token", provider: "openai", token: "synthetic-account" },
-        "openai:other": { type: "token", provider: "openai", token: "synthetic-other" },
-      },
-    });
-    mocks.listProviderUsagePluginDescriptors.mockReturnValue([
-      { provider: "openai", displayName: "OpenAI", supportsAccountUsage: true },
-      { provider: "anthropic", displayName: "Claude" },
-    ]);
-    mocks.loadProviderUsageSummary.mockResolvedValue(usage);
-  });
-
-  it("reads only the requested account and keeps its data while refreshing", async () => {
-    expect(await readUsage()).toEqual(usage);
-    expect(await readUsage()).toEqual(usage);
-    expect(mocks.loadProviderUsageSummary).toHaveBeenCalledOnce();
-    expect(mocks.loadProviderUsageSummary).toHaveBeenCalledWith(
-      expect.objectContaining({
-        authProfile: { provider: "openai", profileId },
-        authStore: preparedAuthStore,
-        agentDir: "/tmp/agent",
-        workspaceDir: "/tmp/workspace",
-      }),
-    );
-    const refresh = createDeferred<UsageSummary>();
-    mocks.loadProviderUsageSummary.mockReturnValueOnce(refresh.promise);
-    const refreshing = readUsage({ profileId, refresh: true });
-    await waitForFast(() => expect(mocks.loadProviderUsageSummary).toHaveBeenCalledTimes(2));
-    expect(await readUsage()).toEqual(usage);
-    refresh.resolve({
-      ...usage,
-      providers: [
-        {
-          ...expectDefined(usage.providers[0], "usage snapshot"),
-          windows: [],
-          error: "Usage unavailable",
-        },
-      ],
-    });
-    expect((await refreshing).providers[0]?.error).toBe("Usage unavailable");
-  });
-
-  it.each(["claude-cli", "openai"])(
-    "loads external Codex accounts and leaves other providers unsupported (%s)",
-    async (provider) => {
-      const id = `${provider}:external`;
-      setPreparedAuthStore({
-        version: 1,
-        profiles: {
-          [id]: {
-            type: "oauth",
-            provider,
-            access: "synthetic-access",
-            refresh: "synthetic-refresh",
-            expires: Date.now() + 60_000,
-          },
-        },
-        runtimeExternalProfileIds: [id],
-      });
-      const result = await readUsage({ profileId: id });
-      if (provider === "claude-cli") {
-        expect(result.providers).toEqual([]);
-        expect(mocks.loadProviderUsageSummary).not.toHaveBeenCalled();
-        return;
-      }
-      expect(mocks.loadProviderUsageSummary).toHaveBeenCalledWith(
-        expect.objectContaining({
-          authProfile: {
-            provider,
-            profileId: id,
-          },
-        }),
-      );
-    },
-  );
-
-  it.each([
-    {},
-    { profileId: "missing" },
-    { profileId, refresh: "yes" },
-    { profileId, provider: "anthropic" },
-    { profileId, agentId: "missing" },
-  ])("rejects invalid account request %j before loading usage", async (params) => {
-    const options = createOptions(params);
-    await usageHandler(options);
-    expect(firstRespondCall(options)?.[0]).toBe(false);
-    expect(mocks.loadProviderUsageSummary).not.toHaveBeenCalled();
-  });
-
-  it("reports an unavailable prepared owner without discovering credentials", async () => {
-    mocks.readPreparedCatalog.mockResolvedValueOnce(null);
-    const options = createOptions({ profileId });
-    await usageHandler(options);
-    expect(firstRespondCall(options)?.[0]).toBe(false);
-    expect(mocks.loadProviderUsageSummary).not.toHaveBeenCalled();
-    expect(mocks.loadDeferredCatalog).not.toHaveBeenCalled();
-  });
-
-  it.each([false, true])("does not load unsupported account usage (legacy: %s)", async (legacy) => {
-    mocks.listProviderUsagePluginDescriptors.mockReturnValue(
-      legacy ? [{ provider: "openai", displayName: "OpenAI" }] : [],
-    );
-    expect((await readUsage()).providers).toEqual([]);
-    expect(mocks.loadProviderUsageSummary).not.toHaveBeenCalled();
-  });
-
-  it.each(["credential", "directory"])(
-    "does not reuse usage after prepared owner %s changes",
-    async (change) => {
-      await readUsage();
-      await waitForFast(async () => expect(await readUsage()).toEqual(usage));
-      if (change === "credential") {
-        // Prepared publication can precede the ambient store revision.
-        preparedAuthStore = {
-          version: 1,
-          profiles: {
-            [profileId]: { type: "token", provider: "openai", token: "synthetic-replacement" },
-          },
-        };
-      } else {
-        mocks.resolveAgentDir.mockReturnValue("/tmp/rebound-agent");
-      }
-      mocks.loadProviderUsageSummary.mockResolvedValueOnce({ ...usage, updatedAt: 456 });
-      expect((await readUsage()).updatedAt).toBe(456);
-      expect(mocks.loadProviderUsageSummary).toHaveBeenCalledTimes(2);
-      expect(mocks.loadProviderUsageSummary).toHaveBeenLastCalledWith(
-        expect.objectContaining({
-          authStore: preparedAuthStore,
-          agentDir: change === "directory" ? "/tmp/rebound-agent" : "/tmp/agent",
-        }),
-      );
-    },
-  );
-
-  it.each(["before", "during"])("revokes account usage admitted %s logout", async (admission) => {
-    const removal = createDeferred<AuthProfileStore | null>();
-    const blocked = createDeferred();
-    let providerFetches = 0;
-    mocks.ensureAuthProfileStoreWithoutExternalProfiles.mockReturnValue(preparedAuthStore);
-    mocks.listProfilesForProvider.mockReturnValue([profileId]);
-    mocks.removeProviderAuthProfilesWithLock.mockReturnValueOnce(removal.promise);
-    mocks.loadProviderUsageSummary.mockImplementationOnce(async (options) => {
-      await blocked.promise;
-      if (options?.isAuthProfileCurrent?.()) {
-        providerFetches += 1;
-      }
-      return usage;
-    });
-    const options = createOptions({ profileId });
-    let pending: Promise<void> | undefined;
-    const start = async () => {
-      pending = Promise.resolve(usageHandler(options));
-      await waitForFast(() => expect(mocks.loadProviderUsageSummary).toHaveBeenCalledOnce());
-    };
-    if (admission === "before") {
-      await start();
-    }
-    const logout = logoutHandler(createLogoutOptions({ provider: "openai" }));
-    await waitForFast(() =>
-      expect(mocks.removeProviderAuthProfilesWithLock).toHaveBeenCalledOnce(),
-    );
-    if (admission === "during") {
-      await start();
-      removal.resolve({ version: 1, profiles: {} });
-      await logout;
-    }
-    blocked.resolve();
-    await pending;
-    expect(providerFetches).toBe(0);
-    expect(firstRespondCall(options)?.[0]).toBe(false);
-    expect(firstRespondCall(options)?.[1]).toBeUndefined();
-    if (admission === "before") {
-      removal.resolve({ version: 1, profiles: {} });
-      await logout;
-    }
-    await readUsage();
-    expect(mocks.loadProviderUsageSummary).toHaveBeenCalledTimes(2);
-  });
-});

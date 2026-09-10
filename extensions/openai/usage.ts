@@ -224,9 +224,7 @@ async function fetchOpenAIAdminUsage(params: {
 export async function resolveOpenAIUsageAuth(
   ctx: ProviderResolveUsageAuthContext,
 ): Promise<ProviderResolvedUsageAuth> {
-  const explicitAdminKey = ctx.authProfileId
-    ? undefined
-    : cleanProviderUsageCredential(ctx.env.OPENAI_ADMIN_KEY);
+  const explicitAdminKey = cleanProviderUsageCredential(ctx.env.OPENAI_ADMIN_KEY);
   if (explicitAdminKey) {
     return { token: encodeAdminToken(explicitAdminKey) };
   }
@@ -245,7 +243,6 @@ export async function fetchOpenAIUsage(
   const adminKey = decodeAdminToken(ctx.token);
   if (!adminKey) {
     const snapshot = await fetchCodexUsage(ctx.token, ctx.accountId, ctx.timeoutMs, ctx.fetchFn);
-    snapshot.usageScope = "account";
     if (snapshot.error) {
       return snapshot;
     }
@@ -257,11 +254,10 @@ export async function fetchOpenAIUsage(
       profileEmail;
     return accountEmail ? { ...snapshot, accountEmail } : snapshot;
   }
-  const snapshot = await fetchOpenAIAdminUsage({
+  return await fetchOpenAIAdminUsage({
     apiKey: adminKey,
     projectId: cleanProviderUsageCredential(ctx.env.OPENAI_PROJECT_ID),
     timeoutMs: ctx.timeoutMs,
     fetchFn: ctx.fetchFn,
   });
-  return { ...snapshot, usageScope: "provider" };
 }

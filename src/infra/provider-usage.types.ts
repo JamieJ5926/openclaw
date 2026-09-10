@@ -1,10 +1,7 @@
 /** One quota window reported by a provider usage endpoint. */
 export type UsageWindow = {
   label: string;
-  /** Provider-owned family label for grouped quota presentation. */
   groupLabel?: string;
-  /** Provider-owned label for this window within its family. */
-  windowLabel?: string;
   usedPercent: number;
   resetAt?: number;
 };
@@ -77,8 +74,6 @@ export type ProviderUsageCostHistory = {
 export type ProviderUsageSnapshot = {
   provider: UsageProviderId;
   displayName: string;
-  /** Endpoint-owned scope; absent means unknown. Does not identify a saved auth profile. */
-  usageScope?: "account" | "provider";
   windows: UsageWindow[];
   billing?: ProviderUsageBilling[];
   costHistory?: ProviderUsageCostHistory;

@@ -1,12 +1,6 @@
 // Stale-while-revalidate cache for models.authStatus provider usage enrichment.
-import { isDeepStrictEqual } from "node:util";
-import type { AuthProfileCredential, AuthProfileStore } from "../../agents/auth-profiles.js";
-import { getRuntimeAuthProfileStoreCredentialsRevision } from "../../agents/auth-profiles/runtime-snapshots.js";
-import { fingerprintAuthProfileCredential } from "../../agents/execution-auth-binding.js";
-import { getPreparedModelRuntimeAuthStore } from "../../agents/prepared-model-runtime-auth.js";
-import type { PreparedModelRuntimeSnapshot } from "../../agents/prepared-model-runtime.types.js";
+import type { AuthProfileStore } from "../../agents/auth-profiles.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import { coerceSecretRef } from "../../config/types.secrets.js";
 import { loadProviderUsageSummary } from "../../infra/provider-usage.load.js";
 import { PROVIDER_USAGE_TIMEOUT_MS } from "../../infra/provider-usage.shared.js";
 import type {
@@ -27,15 +21,8 @@ const USAGE_CACHE_TTL_MS = 60_000;
 
 export type ProviderUsageStatus = Pick<
   ProviderUsageSnapshot,
-  | "windows"
-  | "summary"
-  | "plan"
-  | "billing"
-  | "costHistory"
-  | "accountEmail"
-  | "error"
-  | "usageScope"
-> & { providerId: UsageProviderId; refreshedAt: number };
+  "windows" | "summary" | "plan" | "billing" | "accountEmail"
+>;
 
 type ProviderUsageCacheEntry = {
   agentDir: string;
@@ -44,12 +31,10 @@ type ProviderUsageCacheEntry = {
   providerKey: string;
   refreshedAt: number;
   summary: UsageSummary;
-  isCurrent?: () => boolean;
   usageByProvider: Map<string, ProviderUsageStatus>;
 };
 
 type ProviderUsageRefresh = {
-  ownerToken: object;
   agentDir: string;
   configRef: OpenClawConfig;
   credentialKey: string;
@@ -72,9 +57,9 @@ function scopeProviderUsageCredentialKey(
   credentialKey: string,
   providerIds: readonly UsageProviderId[],
 ): string {
-  // Scope prepared credential evidence to this fetch set so unrelated provider
-  // credentials do not invalidate its snapshot.
-  // SAFETY: the provider-usage runtime always serializes this shape.
+  // models.authStatus fingerprints every direct provider. Scope that evidence to
+  // this fetch set so usage.status can share the same credential-bound snapshot.
+  // SAFETY: fingerprintProviderUsageCredentials always serializes this shape.
   const parsed = JSON.parse(credentialKey) as {
     direct: Array<[string, string | null]>;
     [key: string]: unknown;
@@ -92,23 +77,14 @@ function mapProviderUsage(usage: Awaited<ReturnType<typeof loadProviderUsageSumm
   const usageByProvider = new Map<string, ProviderUsageStatus>();
   for (const snap of usage.providers) {
     usageByProvider.set(snap.provider, {
-      providerId: snap.provider,
-      refreshedAt: usage.updatedAt,
       windows: snap.windows,
-      ...(snap.usageScope ? { usageScope: snap.usageScope } : {}),
       ...(snap.summary ? { summary: snap.summary } : {}),
       ...(snap.plan ? { plan: snap.plan } : {}),
       ...(snap.billing?.length ? { billing: snap.billing } : {}),
-      ...(snap.costHistory ? { costHistory: snap.costHistory } : {}),
       ...(snap.accountEmail ? { accountEmail: snap.accountEmail } : {}),
-      ...(snap.error ? { error: snap.error } : {}),
     });
   }
   return usageByProvider;
-}
-
-function isTransientUsageTimeout(error: string | undefined): boolean {
-  return error === "Timeout" || error === "Refresh queue timeout";
 }
 
 function retainLastGoodOnTimeout(
@@ -124,14 +100,13 @@ function retainLastGoodOnTimeout(
       .map((provider) => [provider.provider, provider]),
   );
   const retainedLastGood = summary.providers.some(
-    (provider) =>
-      isTransientUsageTimeout(provider.error) && lastGoodByProvider.has(provider.provider),
+    (provider) => provider.error === "Timeout" && lastGoodByProvider.has(provider.provider),
   );
   return {
     ...summary,
     updatedAt: retainedLastGood ? lastGood.updatedAt : summary.updatedAt,
     providers: summary.providers.map((provider) =>
-      isTransientUsageTimeout(provider.error)
+      provider.error === "Timeout"
         ? (lastGoodByProvider.get(provider.provider) ?? provider)
         : provider,
     ),
@@ -139,20 +114,16 @@ function retainLastGoodOnTimeout(
 }
 
 function scheduleProviderUsageRefresh(params: {
-  cacheOwnerKey: string;
-  agentId?: string;
+  agentId: string;
   agentDir: string;
-  workspaceDir?: string;
   authStore?: AuthProfileStore;
-  authProfile?: { provider: UsageProviderId; profileId: string };
   configRef: OpenClawConfig;
   credentialKey: string;
   providerIds: UsageProviderId[];
   providerKey: string;
   lastGood?: UsageSummary;
-  isCurrent?: () => boolean;
 }): Promise<UsageSummary> {
-  const active = usageRefreshByAgentId.get(params.cacheOwnerKey);
+  const active = usageRefreshByAgentId.get(params.agentId);
   if (
     active?.agentDir === params.agentDir &&
     active.configRef === params.configRef &&
@@ -162,144 +133,63 @@ function scheduleProviderUsageRefresh(params: {
     return active.promise;
   }
   const publishGeneration = cacheGeneration;
-  const ownerToken = {};
-  let credentialsRevision = getRuntimeAuthProfileStoreCredentialsRevision();
-  let isOwnerCurrent = params.isCurrent;
-  const isCacheCurrent = () =>
-    publishGeneration === cacheGeneration &&
-    usageRefreshByAgentId.get(params.cacheOwnerKey)?.ownerToken === ownerToken;
-  let credential = params.authProfile
-    ? params.authStore?.profiles[params.authProfile.profileId]
-    : undefined;
-  let readOwner: (() => PreparedModelRuntimeSnapshot | undefined) | undefined;
-  const rebindOwner = (owner: PreparedModelRuntimeSnapshot | undefined) => {
-    if (
-      !owner?.isCurrent() ||
-      owner.config !== params.configRef ||
-      !params.authProfile ||
-      !credential ||
-      // A reference alone cannot prove that its externally resolved secret is unchanged.
-      (credential.type === "token" &&
-        (credential.tokenRef ||
-          coerceSecretRef(credential.token, params.configRef.secrets?.defaults))) ||
-      !isDeepStrictEqual(
-        getPreparedModelRuntimeAuthStore(owner)?.profiles[params.authProfile.profileId],
-        credential,
-      )
-    ) {
-      return false;
-    }
-    isOwnerCurrent = owner.isCurrent;
-    credentialsRevision = getRuntimeAuthProfileStoreCredentialsRevision();
-    return true;
-  };
-  const isAuthCurrent = () => {
-    if (credentialsRevision === getRuntimeAuthProfileStoreCredentialsRevision()) {
-      return isOwnerCurrent?.() !== false;
-    }
-    // Sibling OAuth settlement can retire the generation without changing this account.
-    // Every transport, publication, and cached read must use the current published owner.
-    return rebindOwner(readOwner?.());
-  };
-  const isCurrent = () => isCacheCurrent() && (!params.authProfile || isAuthCurrent());
-  const load = async () => {
-    const runtime = params.authProfile
-      ? await import("../../agents/prepared-model-runtime.js")
-      : undefined;
-    const ownerInput = {
-      agentId: params.agentId,
-      agentDir: params.agentDir,
-      workspaceDir: params.workspaceDir,
-      config: params.configRef,
-    };
-    readOwner = runtime ? () => runtime.getPreparedModelRuntimeSnapshot(ownerInput) : undefined;
-    return loadProviderUsageSummary({
+  // SWR replies and invalidation must retain publication and finalization ownership.
+  const promise = trackAsyncWork(() =>
+    loadProviderUsageSummary({
       providers: params.providerIds,
-      ...(params.authProfile ? { authProfile: params.authProfile } : {}),
-      ...(params.authProfile
-        ? {
-            isAuthProfileCurrent: isCurrent,
-            onAuthProfileResolved: async (resolvedCredential: AuthProfileCredential) => {
-              credential = resolvedCredential;
-              if (credentialsRevision === getRuntimeAuthProfileStoreCredentialsRevision()) {
-                return;
-              }
-              if (!isCacheCurrent() || !params.authProfile || !runtime) {
-                return;
-              }
-              // Own OAuth settlement must finish publication before accepting its new credential.
-              const owner = await runtime.prepareModelRuntimeSnapshot(ownerInput);
-              if (!isCacheCurrent() || !rebindOwner(owner)) {
-                return;
-              }
-              const profileId = params.authProfile.profileId;
-              params.credentialKey =
-                fingerprintAuthProfileCredential({ profileId, credential: resolvedCredential }) ??
-                params.credentialKey;
-              const refresh = usageRefreshByAgentId.get(params.cacheOwnerKey);
-              if (refresh) {
-                refresh.credentialKey = params.credentialKey;
-              }
-            },
-          }
-        : {}),
       agentDir: params.agentDir,
-      workspaceDir: params.workspaceDir,
       authStore: params.authStore,
       config: params.configRef,
       timeoutMs: PROVIDER_USAGE_TIMEOUT_MS,
-    });
-  };
-  // Track publication and finalization after the stale-while-revalidate reply.
-  const promise = trackAsyncWork(() =>
-    load()
+    })
       .then((freshUsage) => {
         const usage = retainLastGoodOnTimeout(freshUsage, params.lastGood);
-        if (isCurrent()) {
-          usageCacheByAgentId.set(params.cacheOwnerKey, {
+        if (
+          publishGeneration === cacheGeneration &&
+          usageRefreshByAgentId.get(params.agentId) === refresh
+        ) {
+          usageCacheByAgentId.set(params.agentId, {
             agentDir: params.agentDir,
             configRef: params.configRef,
             credentialKey: params.credentialKey,
             providerKey: params.providerKey,
             refreshedAt: Date.now(),
             summary: usage,
-            ...(params.authProfile ? { isCurrent: isAuthCurrent } : {}),
             usageByProvider: mapProviderUsage(usage),
           });
         }
         return usage;
       })
       .catch((err: unknown) => {
+        // Usage is auxiliary and stale data remains valid. A failed refresh
+        // publishes nothing, so a capable client keeps seeing the incomplete
+        // marker and reports it once its retry budget is spent.
         log.debug(
           `usage refresh failed: providers=${params.providerIds.join(",")} error=${formatForLog(err)}`,
         );
         throw err;
       })
       .finally(() => {
-        if (usageRefreshByAgentId.get(params.cacheOwnerKey)?.ownerToken === ownerToken) {
-          usageRefreshByAgentId.delete(params.cacheOwnerKey);
+        if (usageRefreshByAgentId.get(params.agentId) === refresh) {
+          usageRefreshByAgentId.delete(params.agentId);
         }
       }),
   );
   const refresh: ProviderUsageRefresh = {
-    ownerToken,
     agentDir: params.agentDir,
     configRef: params.configRef,
     credentialKey: params.credentialKey,
     providerKey: params.providerKey,
     promise,
   };
-  usageRefreshByAgentId.set(params.cacheOwnerKey, refresh);
+  usageRefreshByAgentId.set(params.agentId, refresh);
   return promise;
 }
 
 type ProviderUsageCacheParams = {
   agentId: string;
   agentDir: string;
-  workspaceDir?: string;
   authStore?: AuthProfileStore;
-  authProfile?: { provider: UsageProviderId; profileId: string };
-  cacheOwnerKey?: string;
   configRef: OpenClawConfig;
   credentialKey: string;
   coldRead?: "refresh-marker";
@@ -309,34 +199,29 @@ type ProviderUsageCacheParams = {
 };
 
 function resolveProviderUsageCacheRead(params: ProviderUsageCacheParams) {
-  const cacheOwnerKey = params.cacheOwnerKey ?? params.agentId;
   const providerIds = params.providerIds.toSorted();
   const providerKey = providerIds.join("\0");
-  const credentialKey = params.authProfile
-    ? params.credentialKey
-    : scopeProviderUsageCredentialKey(params.credentialKey, providerIds);
-  const cached = usageCacheByAgentId.get(cacheOwnerKey);
+  const credentialKey = scopeProviderUsageCredentialKey(params.credentialKey, providerIds);
+  const cached = usageCacheByAgentId.get(params.agentId);
   const matching =
     cached?.agentDir === params.agentDir &&
     cached.configRef === params.configRef &&
     cached.credentialKey === credentialKey &&
-    cached.providerKey === providerKey &&
-    cached.isCurrent?.() !== false
+    cached.providerKey === providerKey
       ? cached
       : undefined;
   const needsRefresh =
     params.forceRefresh === true ||
     !matching ||
     params.now - matching.refreshedAt >= USAGE_CACHE_TTL_MS;
-  return { cacheOwnerKey, credentialKey, matching, needsRefresh, providerIds, providerKey };
+  return { credentialKey, matching, needsRefresh, providerIds, providerKey };
 }
 
 export function readProviderUsageStaleWhileRevalidate(
   params: ProviderUsageCacheParams,
 ): Map<string, ProviderUsageStatus> {
-  const cacheOwnerKey = params.cacheOwnerKey ?? params.agentId;
   if (params.providerIds.length === 0) {
-    usageCacheByAgentId.delete(cacheOwnerKey);
+    usageCacheByAgentId.delete(params.agentId);
     return new Map();
   }
   const { credentialKey, matching, needsRefresh, providerIds, providerKey } =
@@ -345,11 +230,9 @@ export function readProviderUsageStaleWhileRevalidate(
     // Never couple the RPC deadline to provider HTTP. A cold call returns auth
     // without usage; stale calls return the last snapshot while one refresh runs.
     void scheduleProviderUsageRefresh({
-      cacheOwnerKey,
+      agentId: params.agentId,
       agentDir: params.agentDir,
-      workspaceDir: params.workspaceDir,
       authStore: params.authStore,
-      authProfile: params.authProfile,
       configRef: params.configRef,
       credentialKey,
       providerIds,
@@ -358,67 +241,6 @@ export function readProviderUsageStaleWhileRevalidate(
     }).catch(() => {});
   }
   return matching?.usageByProvider ?? new Map();
-}
-
-export async function loadProfileUsage(params: {
-  agentId: string;
-  agentDir: string;
-  workspaceDir: string;
-  authStore: AuthProfileStore;
-  configRef: OpenClawConfig;
-  profileCredentialKeys: ReadonlyMap<string, string>;
-  forceRefresh?: boolean;
-  profileId: string;
-  providerId: UsageProviderId;
-  now: number;
-  isCurrent?: () => boolean;
-}): Promise<UsageSummary> {
-  if (params.isCurrent?.() === false) {
-    throw new Error("Account credentials changed while loading usage. Refresh the account.");
-  }
-  const ownerPrefix = `${params.agentId}\0profile\0`;
-  // A read of any account revokes work for removed or replaced credentials,
-  // including accounts whose rows are no longer displayed.
-  for (const entries of [usageCacheByAgentId, usageRefreshByAgentId]) {
-    for (const [ownerKey, entry] of entries) {
-      if (
-        ownerKey.startsWith(ownerPrefix) &&
-        (entry.agentDir !== params.agentDir ||
-          entry.configRef !== params.configRef ||
-          entry.credentialKey !==
-            params.profileCredentialKeys.get(ownerKey.slice(ownerPrefix.length)))
-      ) {
-        entries.delete(ownerKey);
-      }
-    }
-  }
-  const cacheParams = {
-    ...params,
-    authProfile: { provider: params.providerId, profileId: params.profileId },
-    cacheOwnerKey: `${ownerPrefix}${params.profileId}`,
-    credentialKey: params.profileCredentialKeys.get(params.profileId) ?? "",
-    providerIds: [params.providerId],
-  };
-  const read = resolveProviderUsageCacheRead(cacheParams);
-  if (read.matching && !read.needsRefresh) {
-    return read.matching.summary;
-  }
-  const generation = cacheGeneration;
-  const summary = await scheduleProviderUsageRefresh({
-    ...cacheParams,
-    credentialKey: read.credentialKey,
-    providerKey: read.providerKey,
-    lastGood: read.matching?.summary,
-  });
-  // Publication and delivery both require the same live owner after provider I/O.
-  if (
-    generation !== cacheGeneration ||
-    usageCacheByAgentId.get(cacheParams.cacheOwnerKey)?.isCurrent?.() === false ||
-    usageCacheByAgentId.get(cacheParams.cacheOwnerKey)?.summary !== summary
-  ) {
-    throw new Error("Account credentials changed while loading usage. Refresh the account.");
-  }
-  return summary;
 }
 
 /** Shares the models.authStatus cache contract with the unscoped usage.status RPC. */
@@ -438,9 +260,8 @@ export async function loadUsageStatusStaleWhileRevalidate(options: {
     coldRead: options.coldRead,
     now: options.now ?? Date.now(),
   };
-  const cacheOwnerKey = params.agentId;
   if (params.providerIds.length === 0) {
-    usageCacheByAgentId.delete(cacheOwnerKey);
+    usageCacheByAgentId.delete(params.agentId);
     return { updatedAt: params.now, providers: [] };
   }
   const { credentialKey, matching, needsRefresh, providerIds, providerKey } =
@@ -449,11 +270,9 @@ export async function loadUsageStatusStaleWhileRevalidate(options: {
     return matching.summary;
   }
   const refresh = scheduleProviderUsageRefresh({
-    cacheOwnerKey,
+    agentId: params.agentId,
     agentDir: params.agentDir,
-    workspaceDir: params.workspaceDir,
     authStore: params.authStore,
-    authProfile: params.authProfile,
     configRef: params.configRef,
     credentialKey,
     providerIds,

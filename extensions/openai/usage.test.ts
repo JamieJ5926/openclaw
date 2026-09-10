@@ -81,7 +81,6 @@ describe("OpenAI provider usage", () => {
     expect(result).toEqual({
       provider: "openai",
       displayName: "OpenAI",
-      usageScope: "provider",
       windows: [],
       plan: "Admin API · proj_test",
       billing: [
@@ -141,7 +140,6 @@ describe("OpenAI provider usage", () => {
       fetchFn: vi.fn(async () => new Response("", { status: 403 })) as typeof fetch,
     });
     expect(result.error).toBe("Admin API key required");
-    expect(result.usageScope).toBe("provider");
   });
 
   it("prefers an explicit admin key over ChatGPT OAuth", async () => {
@@ -166,25 +164,10 @@ describe("OpenAI provider usage", () => {
     });
   });
 
-  it("keeps exact-profile usage on the selected OAuth account", async () => {
-    const resolveOAuthToken = vi.fn(async () => ({ token: "selected-oauth-token" }));
-    const result = await resolveOpenAIUsageAuth({
-      config: {},
-      env: { OPENAI_ADMIN_KEY: "sk-admin-global" },
-      provider: "openai",
-      authProfileId: "openai:selected",
-      resolveApiKeyFromConfigAndStore: () => "sk-project-global",
-      resolveOAuthToken,
-    });
-
-    expect(result).toEqual({ token: "selected-oauth-token" });
-    expect(resolveOAuthToken).toHaveBeenCalledOnce();
-  });
-
-  it.each(["codex@example.com", undefined])("account scope: email %s", async (email) => {
+  it("attaches the ChatGPT account email from the access-token claims", async () => {
     // Assembled parts keep the fixture from reading as a real credential.
     const claims = Buffer.from(
-      JSON.stringify({ "https://api.openai.com/profile": { email } }),
+      JSON.stringify({ "https://api.openai.com/profile": { email: "codex@example.com" } }),
       "utf8",
     ).toString("base64url");
     const accessToken = ["fake-header", claims, "fake-sig"].join(".");
@@ -206,22 +189,8 @@ describe("OpenAI provider usage", () => {
       timeoutMs: 5_000,
       fetchFn,
     });
-    expect(snapshot.accountEmail).toBe(email);
-    expect(snapshot.usageScope).toBe("account");
+    expect(snapshot.accountEmail).toBe("codex@example.com");
     expect(snapshot.windows.length).toBeGreaterThan(0);
-  });
-
-  it("keeps rejected ChatGPT quota account-scoped without identity metadata", async () => {
-    const snapshot = await fetchOpenAIUsage({
-      config: {},
-      env: {},
-      provider: "openai",
-      token: "synthetic-opaque-token",
-      timeoutMs: 5_000,
-      fetchFn: vi.fn(async () => new Response("", { status: 401 })),
-    });
-    expect(snapshot).toMatchObject({ usageScope: "account", error: "Token expired", windows: [] });
-    expect(snapshot.accountEmail).toBeUndefined();
   });
 
   it("does not repurpose inference credentials for organization usage", async () => {

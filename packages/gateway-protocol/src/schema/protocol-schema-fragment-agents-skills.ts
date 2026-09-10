@@ -52,7 +52,6 @@ export const AgentSkillProtocolSchemas = {
   ModelChoice: agentsModelsSkills.ModelChoiceSchema,
   ModelsAuthLogoutParams: agentsModelsSkills.ModelsAuthLogoutParamsSchema,
   ModelsAuthOrderSetParams: agentsModelsSkills.ModelsAuthOrderSetParamsSchema,
-  ModelsAuthUsageParams: agentsModelsSkills.ModelsAuthUsageParamsSchema,
   ModelsAuthStatusParams: agentsModelsSkills.ModelsAuthStatusParamsSchema,
   ModelsListParams: agentsModelsSkills.ModelsListParamsSchema,
   ModelsListResult: agentsModelsSkills.ModelsListResultSchema,

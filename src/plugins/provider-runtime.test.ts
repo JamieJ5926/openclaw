@@ -541,75 +541,27 @@ describe("provider-runtime", () => {
 
   it("auto-discovers only usage providers declared by their owning plugin", () => {
     resolveUsageHookProviderPluginContractsMock.mockReturnValue([
-      {
-        pluginId: "multi-provider",
-        providerIds: ["declared", "legacy"],
-        accountUsageProviderIds: ["declared"],
-      },
+      { pluginId: "multi-provider", providerIds: ["declared"] },
+    ]);
+    const usageHooks = {
+      auth: [],
+      resolveUsageAuth: vi.fn(async () => ({ token: "usage-token" })),
+      fetchUsageSnapshot: vi.fn(async () => ({
+        provider: "declared",
+        displayName: "Declared",
+        windows: [],
+      })),
+    };
+    resolvePluginProvidersMock.mockReturnValue([
+      { ...usageHooks, id: "declared", label: "Declared" },
+      { ...usageHooks, id: "undeclared", label: "Undeclared" },
     ]);
 
     expect(listProviderUsagePluginDescriptors({ env: process.env })).toEqual([
-      { provider: "declared", displayName: "declared", supportsAccountUsage: true },
-      { provider: "legacy", displayName: "legacy" },
+      { provider: "declared", displayName: "declared" },
     ]);
     // Manifest contracts answer discovery; descriptor listing must not load plugin runtime.
     expect(resolvePluginProvidersMock).not.toHaveBeenCalled();
-  });
-
-  it("does not lend a bundled account capability to a legacy override", async () => {
-    const resolveUsageAuth = vi.fn(async () => ({ token: "synthetic-organization" }));
-    const fetchUsageSnapshot = vi.fn(async () => ({
-      provider: "openai",
-      displayName: "Legacy",
-      windows: [],
-    }));
-    resolvePluginProvidersMock.mockReturnValue([
-      {
-        id: "openai",
-        pluginId: "zz-legacy-usage",
-        label: "Legacy",
-        auth: [],
-        resolveUsageAuth,
-        fetchUsageSnapshot,
-      },
-    ]);
-    resolveUsageHookProviderPluginContractsMock.mockReturnValue([
-      {
-        pluginId: "openai",
-        providerIds: ["openai"],
-        accountUsageProviderIds: ["openai"],
-      },
-      { pluginId: "zz-legacy-usage", providerIds: ["openai"] },
-    ]);
-    const context = {
-      config: {},
-      env: {},
-      provider: "openai",
-      authProfileId: "openai:login",
-      resolveApiKeyFromConfigAndStore: () => undefined,
-      resolveOAuthToken: async () => null,
-    };
-    expect(await resolveProviderUsageAuthWithPlugin({ provider: "openai", context })).toEqual({
-      handled: true,
-    });
-    expect(resolveUsageAuth).not.toHaveBeenCalled();
-    await resolveProviderUsageSnapshotWithPlugin({
-      provider: "openai",
-      context: {
-        ...context,
-        token: "synthetic-selected",
-        timeoutMs: 1000,
-        fetchFn: vi.fn(),
-        isAuthProfileCurrent: () => true,
-      },
-    });
-    expect(fetchUsageSnapshot).not.toHaveBeenCalled();
-    expect(
-      await resolveProviderUsageAuthWithPlugin({
-        provider: "openai",
-        context: { ...context, authProfileId: undefined },
-      }),
-    ).toEqual({ token: "synthetic-organization" });
   });
 
   it("matches providers by hook alias for runtime hook lookup", () => {

@@ -825,7 +825,6 @@ export function describeOpenAIProviderRuntimeContract(
       ).resolves.toEqual({
         provider: "openai",
         displayName: "OpenAI",
-        usageScope: "account",
         windows: [{ label: "3h", usedPercent: 12, resetAt: 1_705_000_000 }],
         plan: "Plus",
       });

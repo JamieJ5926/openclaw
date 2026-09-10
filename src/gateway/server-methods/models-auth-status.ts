@@ -66,7 +66,6 @@ import type {
   ModelAuthStatusResult,
   ModelProviderCapability,
 } from "./models-auth-status.types.js";
-import { modelsAuthUsageHandlers } from "./models-auth-usage.js";
 import { getProviderUsageRuntimeSnapshot } from "./provider-usage-runtime.js";
 import { respondUnavailableOnThrow } from "./response.js";
 import type { GatewayRequestContext, GatewayRequestHandlers } from "./types.js";
@@ -469,7 +468,6 @@ function resolveConfiguredProviders(
 }
 
 export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
-  ...modelsAuthUsageHandlers,
   "models.authLogout": async ({ params, respond, context }) => {
     const provider = readProviderParam(params);
     if (!provider) {
@@ -521,30 +519,18 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
         );
         return;
       }
-      // Revoke captured usage authority before the durable mutation starts.
-      // Otherwise usage work can finish while the auth store is being updated
-      // and publish a result for credentials that logout is removing.
-      invalidateModelAuthStatusCache();
-      let removed: boolean;
-      try {
-        removed = selection.profileIds
-          ? await removeAuthProfilesAcrossOwnerStores({
-              cfg,
-              agentDir,
-              profileIds: removedProfiles,
-            })
-          : await removeProviderAuthProfilesAcrossOwnerStores({
-              cfg,
-              provider,
-              agentDir,
-              profileIds: removedProfiles,
-            });
-        await refreshActiveProviderAuthRuntimeSnapshot();
-      } finally {
-        // Status reads can admit new usage while removal or publication awaits.
-        // Revoke that generation before acknowledging either success or failure.
-        invalidateModelAuthStatusCache();
-      }
+      const removed = selection.profileIds
+        ? await removeAuthProfilesAcrossOwnerStores({
+            cfg,
+            agentDir,
+            profileIds: removedProfiles,
+          })
+        : await removeProviderAuthProfilesAcrossOwnerStores({
+            cfg,
+            provider,
+            agentDir,
+            profileIds: removedProfiles,
+          });
       if (!removed) {
         respond(
           false,
@@ -556,6 +542,10 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
         );
         return;
       }
+      // Fence auxiliary usage work that captured the removed profiles before
+      // logout. Its later completion must not repopulate the cache.
+      invalidateModelAuthStatusCache();
+      await refreshActiveProviderAuthRuntimeSnapshot();
       void warmCurrentProviderAuthStateOffMainThread(context.getRuntimeConfig()).catch(
         (err: unknown) => {
           log.warn(`provider auth state rewarm after logout failed: ${formatForLog(err)}`);
