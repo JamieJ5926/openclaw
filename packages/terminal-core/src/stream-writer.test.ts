@@ -1,7 +1,41 @@
+import { once } from "node:events";
+import { Writable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { createSafeStreamWriter } from "./stream-writer.js";
 
 describe("createSafeStreamWriter", () => {
+  it("closes when an output owner forwards an asynchronous stream error", async () => {
+    const failure = Object.assign(new Error("closed pipe"), { code: "EPIPE" });
+    const onBrokenPipe = vi.fn();
+    const writer = createSafeStreamWriter({ onBrokenPipe });
+    const stream = new Writable({
+      write(_chunk, _encoding, callback) {
+        setImmediate(() => callback(failure));
+      },
+    });
+    const errorHandled = once(stream, "error").then(([error]) => writer.handleError(error, stream));
+    try {
+      expect(writer.writeLine(stream, "hello")).toBe(true);
+      expect(writer.isClosed()).toBe(false);
+      expect(await errorHandled).toBe(false);
+      expect(writer.isClosed()).toBe(true);
+      expect(onBrokenPipe).toHaveBeenCalledExactlyOnceWith(failure, stream);
+      expect(writer.writeLine(stream, "after closure")).toBe(false);
+    } finally {
+      stream.destroy();
+    }
+  });
+
+  it("rethrows non-pipe errors from an output owner without closing", () => {
+    const failure = Object.assign(new Error("output unavailable"), { code: "ENOSPC" });
+    const onBrokenPipe = vi.fn();
+    const writer = createSafeStreamWriter({ onBrokenPipe });
+
+    expect(() => writer.handleError(failure, process.stderr)).toThrow(failure);
+    expect(writer.isClosed()).toBe(false);
+    expect(onBrokenPipe).not.toHaveBeenCalled();
+  });
+
   it("signals broken pipes and closes the writer", () => {
     let brokenPipeCount = 0;
     const writer = createSafeStreamWriter({
@@ -15,7 +49,7 @@ describe("createSafeStreamWriter", () => {
         err.code = "EPIPE";
         throw err;
       },
-    } as unknown as NodeJS.WriteStream;
+    };
 
     expect(writer.writeLine(stream, "hello")).toBe(false);
     expect(writer.isClosed()).toBe(true);
@@ -40,7 +74,7 @@ describe("createSafeStreamWriter", () => {
     });
     const stream = {
       write: () => true,
-    } as unknown as NodeJS.WriteStream;
+    };
 
     expect(writer.write(stream, "hi")).toBe(false);
     expect(writer.isClosed()).toBe(true);

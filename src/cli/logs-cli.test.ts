@@ -1,4 +1,5 @@
 // Logs CLI tests cover log command routing and runtime log output behavior.
+import { Writable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GatewayTransportError } from "../gateway/call.js";
 import type { RuntimeExitOptions } from "../runtime.js";
@@ -179,6 +180,8 @@ describe("logs cli", () => {
   });
 
   it("writes output directly to stdout/stderr", async () => {
+    const stdoutErrorListeners = process.stdout.listeners("error");
+    const stderrErrorListeners = process.stderr.listeners("error");
     callGatewayFromCli.mockResolvedValueOnce({
       file: "/tmp/openclaw.log",
       cursor: 1,
@@ -199,6 +202,8 @@ describe("logs cli", () => {
       "Log tail truncated (increase --limit or --max-bytes).",
     );
     expect(stderrWrites.join("")).toContain("Log cursor reset");
+    expect(process.stdout.listeners("error")).toEqual(stdoutErrorListeners);
+    expect(process.stderr.listeners("error")).toEqual(stderrErrorListeners);
   });
 
   it.each(["plain", "json"])(
@@ -244,6 +249,7 @@ describe("logs cli", () => {
         clientName: "gateway-client",
         mode: "backend",
         deviceIdentity: null,
+        signal: expect.any(AbortSignal),
       },
     );
   });
@@ -253,10 +259,14 @@ describe("logs cli", () => {
     ["--max-bytes", "250kb"],
     ["--interval", "1s"],
   ])("rejects partial numeric %s values", async (flag, value) => {
+    const stdoutErrorListeners = process.stdout.listeners("error");
+    const stderrErrorListeners = process.stderr.listeners("error");
     await expect(runLogsCli(["logs", flag, value])).rejects.toThrow(
       `${flag} must be a positive integer.`,
     );
     expect(callGatewayFromCli).not.toHaveBeenCalled();
+    expect(process.stdout.listeners("error")).toEqual(stdoutErrorListeners);
+    expect(process.stderr.listeners("error")).toEqual(stderrErrorListeners);
   });
 
   it("keeps explicit Gateway URLs on the normal CLI client identity", async () => {
@@ -273,7 +283,7 @@ describe("logs cli", () => {
       "logs.tail",
       expect.any(Object),
       { cursor: undefined, limit: 200, maxBytes: 250_000 },
-      { progress: true },
+      { progress: true, signal: expect.any(AbortSignal) },
     );
   });
 
@@ -351,6 +361,70 @@ describe("logs cli", () => {
     await runLogsCli(["logs"]);
 
     expect(stderrWrites.join("")).toContain("output stdout closed");
+  });
+
+  it("stops following after asynchronous output closure even when later batches are empty", async () => {
+    const failure = Object.assign(new Error("closed pipe"), { code: "EPIPE" });
+    let finishWrite: ((error?: Error | null) => void) | undefined;
+    const pipe = new Writable({
+      write(_chunk, _encoding, callback) {
+        finishWrite = callback;
+      },
+    });
+    const observeOutputError = vi.fn();
+    // The original command has no error listener; keep its missed event observable
+    // without turning the before-fix assertion into an uncaught Vitest failure.
+    process.stdout.on("error", observeOutputError);
+    const stdoutErrorListeners = process.stdout.listeners("error");
+    const stderrErrorListeners = process.stderr.listeners("error");
+    const outputError = new Promise<void>((resolve) => {
+      pipe.once("error", (error) => {
+        process.stdout.emit("error", error);
+        resolve();
+      });
+    });
+    const stderrWrites = captureStderrWrites();
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => {
+      return String(chunk).includes("first batch") ? pipe.write(String(chunk)) : true;
+    });
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
+    let followSignal: AbortSignal | undefined;
+    callGatewayFromCli.mockImplementation(
+      async (_method, _opts, _params, extra: { signal?: AbortSignal }) => {
+        const poll = callGatewayFromCli.mock.calls.length;
+        if (poll === 1) {
+          return { file: "/tmp/openclaw.log", cursor: 1, lines: ["first batch"] };
+        }
+        if (poll === 2) {
+          followSignal = extra.signal;
+          const failWrite = finishWrite;
+          if (!failWrite) {
+            throw new Error("Expected the first batch to reach the output pipe");
+          }
+          setImmediate(() => failWrite(failure));
+          await outputError;
+        }
+        if (poll <= 3) {
+          return { file: "/tmp/openclaw.log", cursor: 1, lines: [] };
+        }
+        throw new Error("Unexpected poll after asynchronous output closure");
+      },
+    );
+    try {
+      await runLogsCli(["logs", "--follow", "--plain", "--interval", "1"]);
+
+      expect(observeOutputError).toHaveBeenCalledExactlyOnceWith(failure);
+      expect(stderrWrites.join("")).toContain("output stdout closed (EPIPE). Stopping tail.");
+      expect(callGatewayFromCli).toHaveBeenCalledTimes(2);
+      expect(followSignal?.aborted).toBe(true);
+      expect(exitSpy).not.toHaveBeenCalled();
+      expect(process.stdout.listeners("error")).toEqual(stdoutErrorListeners);
+      expect(process.stderr.listeners("error")).toEqual(stderrErrorListeners);
+    } finally {
+      process.stdout.removeListener("error", observeOutputError);
+      pipe.destroy();
+      callGatewayFromCli.mockReset();
+    }
   });
 
   it("falls back to the local log file on loopback pairing-required errors", async () => {
@@ -592,12 +666,30 @@ describe("logs cli", () => {
         reason: "abnormal closure",
         message: "gateway closed (1006 abnormal closure): abnormal closure",
       });
-      const pendingProbe = new Promise<never>(() => {
-        // The broken-pipe path must cancel this unresolved recovery probe.
+      let recoverySettled = false;
+      let resolveRecoverySettled!: () => void;
+      const recoverySettlement = new Promise<void>((resolve) => {
+        resolveRecoverySettled = resolve;
       });
-      callGatewayFromCli
-        .mockRejectedValueOnce(closeError)
-        .mockImplementationOnce(() => pendingProbe);
+      callGatewayFromCli.mockRejectedValueOnce(closeError).mockImplementationOnce(
+        (_method, _opts, _params, extra: { signal?: AbortSignal }) =>
+          new Promise<never>((_resolve, reject) => {
+            if (!extra.signal) {
+              throw new Error("Expected a cancellable recovery probe");
+            }
+            extra.signal.addEventListener(
+              "abort",
+              () => {
+                setImmediate(() => {
+                  recoverySettled = true;
+                  reject(new Error("Recovery probe cancelled"));
+                  resolveRecoverySettled();
+                });
+              },
+              { once: true },
+            );
+          }),
+      );
       readSystemdServiceRuntime.mockResolvedValue({ status: "running", pid: 2557 });
       execFileUtf8Tail
         .mockResolvedValueOnce({
@@ -628,6 +720,9 @@ describe("logs cli", () => {
 
       await runLogsCli(["logs", "--follow", "--plain", "--interval", "1"]);
 
+      const settledBeforeReturn = recoverySettled;
+      await recoverySettlement;
+
       expect(stdoutWrites.join("")).toContain("second journal line");
       expect(callGatewayFromCli).toHaveBeenNthCalledWith(
         2,
@@ -640,6 +735,7 @@ describe("logs cli", () => {
       expect(execFileUtf8Tail).toHaveBeenCalledTimes(2);
       const probeExtra = callGatewayFromCli.mock.calls[1]?.[3] as { signal?: AbortSignal };
       expect(probeExtra.signal?.aborted).toBe(true);
+      expect(settledBeforeReturn).toBe(true);
       expect(stderrWrites.join("")).toContain("output stdout closed");
     });
 

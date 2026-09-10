@@ -1,15 +1,20 @@
 // Safe terminal stream writer that treats broken pipes as closed output.
 
+type OutputStream = {
+  write: (text: string) => unknown;
+};
+
 /** Hooks for safe stream writes. */
 export type SafeStreamWriterOptions = {
   beforeWrite?: () => void;
-  onBrokenPipe?: (err: NodeJS.ErrnoException, stream: NodeJS.WriteStream) => void;
+  onBrokenPipe?: (err: NodeJS.ErrnoException, stream: OutputStream) => void;
 };
 
 /** Writer facade that tracks closed/broken-pipe state. */
 export type SafeStreamWriter = {
-  write: (stream: NodeJS.WriteStream, text: string) => boolean;
-  writeLine: (stream: NodeJS.WriteStream, text: string) => boolean;
+  write: (stream: OutputStream, text: string) => boolean;
+  writeLine: (stream: OutputStream, text: string) => boolean;
+  handleError: (error: unknown, stream: OutputStream) => boolean;
   reset: () => void;
   isClosed: () => boolean;
 };
@@ -24,7 +29,7 @@ function isBrokenPipeError(err: unknown): err is NodeJS.ErrnoException {
 export function createSafeStreamWriter(options: SafeStreamWriterOptions = {}): SafeStreamWriter {
   let closed = false;
 
-  const handleError = (err: unknown, stream: NodeJS.WriteStream): boolean => {
+  const handleError = (err: unknown, stream: OutputStream): boolean => {
     if (!isBrokenPipeError(err)) {
       throw err;
     }
@@ -35,7 +40,7 @@ export function createSafeStreamWriter(options: SafeStreamWriterOptions = {}): S
     return false;
   };
 
-  const write = (stream: NodeJS.WriteStream, text: string): boolean => {
+  const write = (stream: OutputStream, text: string): boolean => {
     if (closed) {
       return false;
     }
@@ -52,12 +57,12 @@ export function createSafeStreamWriter(options: SafeStreamWriterOptions = {}): S
     }
   };
 
-  const writeLine = (stream: NodeJS.WriteStream, text: string): boolean =>
-    write(stream, `${text}\n`);
+  const writeLine = (stream: OutputStream, text: string): boolean => write(stream, `${text}\n`);
 
   return {
     write,
     writeLine,
+    handleError,
     reset: () => {
       closed = false;
     },

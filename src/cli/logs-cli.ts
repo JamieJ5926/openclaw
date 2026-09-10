@@ -27,6 +27,7 @@ import {
 } from "../gateway/call.js";
 import { projectGatewayConnectionDetailsForDiagnostics } from "../gateway/connection-details.js";
 import { isLoopbackHost } from "../gateway/net.js";
+import { isAbortError } from "../infra/abort-signal.js";
 import { computeBackoff } from "../infra/backoff.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { readConfiguredLogTail } from "../logging/log-tail.js";
@@ -183,7 +184,7 @@ async function fetchLogs(
   opts: LogsRequestOptions,
   cursors: LogCursorState,
   showProgress: boolean,
-  params: { limit: number; maxBytes: number },
+  params: { limit: number; maxBytes: number; signal?: AbortSignal },
 ): Promise<LogsTailPayload> {
   const { limit, maxBytes } = params;
   try {
@@ -452,11 +453,11 @@ function formatLogLine(
   return [head, messageValue].filter(Boolean).join(" ").trim();
 }
 
-function createLogWriters(onOutputClosed?: () => void) {
+function createLogWriters(onOutputClosed: () => void, disposeRecovery: () => Promise<void>) {
   const writer = createSafeStreamWriter({
     beforeWrite: () => clearActiveProgressLine(),
     onBrokenPipe: (err, stream) => {
-      onOutputClosed?.();
+      onOutputClosed();
       const code = err.code ?? "EPIPE";
       const target = stream === process.stdout ? "stdout" : "stderr";
       const message = `openclaw logs: output ${target} closed (${code}). Stopping tail.`;
@@ -469,7 +470,21 @@ function createLogWriters(onOutputClosed?: () => void) {
     },
   });
 
+  const onStdoutError = (error: Error) => writer.handleError(error, process.stdout);
+  const onStderrError = (error: Error) => writer.handleError(error, process.stderr);
+  process.stdout.on("error", onStdoutError);
+  process.stderr.on("error", onStderrError);
+
   return {
+    async [Symbol.asyncDispose]() {
+      try {
+        await disposeRecovery();
+      } finally {
+        process.stdout.off("error", onStdoutError);
+        process.stderr.off("error", onStderrError);
+      }
+    },
+    isClosed: writer.isClosed,
     logLine: (text: string) => writer.writeLine(process.stdout, text),
     errorLine: (text: string) => writer.writeLine(process.stderr, text),
     emitJsonLine: (payload: Record<string, unknown>, toStdErr = false) =>
@@ -544,6 +559,7 @@ export function registerLogsCli(program: Command) {
       connection: buildGatewayConnectionDetails({ url: rawOpts.url, localPortOverride }),
     };
     let gatewayRecovery: GatewayRecoveryState = { kind: "idle" };
+    let gatewayRecoveryPromise: Promise<GatewayRecoveryResult> | undefined;
     const abortGatewayRecoveryProbe = () => {
       if (gatewayRecovery.kind === "probing") {
         gatewayRecovery.abortController.abort();
@@ -562,10 +578,30 @@ export function registerLogsCli(program: Command) {
         gatewayRecovery = { kind: "idle" };
       }
     };
-    const { logLine, errorLine, emitJsonLine } = createLogWriters(abortGatewayRecoveryProbe);
     const interval = parsePositiveInt(opts.interval, 1000, "--interval");
     const limit = parsePositiveInt(opts.limit, 200, "--limit");
     const maxBytes = parsePositiveInt(opts.maxBytes, 250_000, "--max-bytes");
+    const outputAbort = new AbortController();
+    await using writers = createLogWriters(
+      () => {
+        outputAbort.abort();
+        abortGatewayRecoveryProbe();
+      },
+      async () => {
+        abortGatewayRecoveryProbe();
+        await gatewayRecoveryPromise;
+      },
+    );
+    const { logLine, errorLine, emitJsonLine } = writers;
+    const waitForPoll = async (ms: number) => {
+      try {
+        await delay(ms, undefined, { signal: outputAbort.signal });
+      } catch (error) {
+        if (!writers.isClosed() || !isAbortError(error)) {
+          throw error;
+        }
+      }
+    };
     let gatewayCursor: number | undefined;
     let journalCursor: string | undefined;
     let journalSince: string | undefined;
@@ -578,7 +614,7 @@ export function registerLogsCli(program: Command) {
     const localTime = !opts.utc;
 
     const startGatewayRecoveryProbe = () => {
-      if (!preferJournal || gatewayRecovery.kind !== "idle") {
+      if (writers.isClosed() || !preferJournal || gatewayRecovery.kind !== "idle") {
         return;
       }
       const startedAt = new Date().toISOString();
@@ -591,6 +627,7 @@ export function registerLogsCli(program: Command) {
         (payload): GatewayRecoveryResult => ({ ok: true, payload, startedAt }),
         (error: unknown): GatewayRecoveryResult => ({ ok: false, error }),
       );
+      gatewayRecoveryPromise = promise;
       gatewayRecovery = { kind: "probing", promise, abortController };
       void promise.then((result) => {
         if (gatewayRecovery.kind === "probing" && gatewayRecovery.promise === promise) {
@@ -638,7 +675,7 @@ export function registerLogsCli(program: Command) {
     };
 
     let followRetryAttempt = 0;
-    while (true) {
+    while (!writers.isClosed()) {
       let payload: LogsTailPayload;
       // Show progress spinner only on first fetch, not during follow polling
       const showProgress = first && !opts.follow;
@@ -654,10 +691,13 @@ export function registerLogsCli(program: Command) {
             opts,
             { gateway: gatewayCursor, journal: journalCursor, journalSince },
             showProgress,
-            { limit, maxBytes },
+            { limit, maxBytes, signal: outputAbort.signal },
           );
         }
       } catch (err) {
+        if (writers.isClosed() && isAbortError(err)) {
+          return;
+        }
         if (opts.follow && followRetryAttempt < MAX_FOLLOW_RETRIES && isTransientFollowError(err)) {
           followRetryAttempt += 1;
           const backoffMs = computeBackoff(FOLLOW_BACKOFF_POLICY, followRetryAttempt);
@@ -669,7 +709,7 @@ export function registerLogsCli(program: Command) {
           } else if (!errorLine(colorize(rich, theme.warn, message))) {
             return;
           }
-          await delay(backoffMs);
+          await waitForPoll(backoffMs);
           continue;
         }
         await emitGatewayError(
@@ -685,6 +725,9 @@ export function registerLogsCli(program: Command) {
         defaultRuntime.exit(1, {
           resetStream: jsonMode ? process.stderr : undefined,
         });
+        return;
+      }
+      if (writers.isClosed()) {
         return;
       }
       if (followRetryAttempt > 0) {
@@ -825,7 +868,7 @@ export function registerLogsCli(program: Command) {
       if (!opts.follow) {
         return;
       }
-      await delay(interval);
+      await waitForPoll(interval);
     }
   });
 }
