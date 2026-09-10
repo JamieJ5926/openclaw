@@ -88,6 +88,11 @@ describe("telegram custom commands schema", () => {
       { groups: { "*": { observeMessages: "true" } } },
       "groups.*.observeMessages",
     );
+    expect(
+      TelegramConfigSchema.safeParse({
+        direct: { "123": { topics: { "99": { observeMessages: true } } } },
+      }).success,
+    ).toBe(false);
   });
 
   it("accepts group join introduction overrides per account", () => {

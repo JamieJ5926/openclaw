@@ -131,7 +131,9 @@ const TelegramDirectSchema = z
     enabled: z.boolean().optional(),
     allowFrom: z.array(z.union([z.string(), z.number()])).optional(),
     systemPrompt: z.string().optional(),
-    topics: z.record(z.string(), TelegramTopicSchema.optional()).optional(),
+    topics: z
+      .record(z.string(), TelegramTopicSchema.omit({ observeMessages: true }).optional())
+      .optional(),
     errorPolicy: TelegramErrorPolicySchema,
     requireTopic: z.boolean().optional(),
     autoTopicLabel: AutoTopicLabelSchema,

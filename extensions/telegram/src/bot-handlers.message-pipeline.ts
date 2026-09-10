@@ -582,6 +582,7 @@ export function createTelegramMessagePipeline({
         params.promptContextMessageSelection,
         isGroupConversation &&
           (topicConfig?.observeMessages ??
+            // SAFETY: Group messages select TelegramGroupConfig from the shared chat-scope resolver.
             (groupConfig as TelegramGroupConfig | undefined)?.observeMessages)
           ? (node) =>
               shouldIncludeSupplementalContext(

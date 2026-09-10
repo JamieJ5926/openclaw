@@ -714,6 +714,7 @@ function createDirectDispatchContext(cfg: OpenClawConfig): TelegramDispatchParam
     msg,
     chatId: 123,
     isGroup: false,
+    observeMessages: false,
     threadSpec: { scope: "none" },
     isForum: false,
     historyLimit: 0,
