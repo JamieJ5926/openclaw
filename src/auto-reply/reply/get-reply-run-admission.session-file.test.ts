@@ -61,6 +61,8 @@ describe("prepared reply transcript identity", () => {
       baseBodyFinal: "Use the revised request",
       prefixedBodyBase: "Use the revised request",
       hasUserBody: true,
+      workspaceDir: "/tmp/workspace",
+      skillsWorkspaceDir: "/tmp/workspace",
       useFastReplyRuntime: false,
       thinkingRuntime: "embedded",
       getInboundContext: () => ({ inboundUserContext: "" }),
