@@ -174,6 +174,10 @@ requested reset or run its follow-up text; normal idle/daily rollover still
 applies. Ask your Gateway administrator to reset the session, or send your
 message without the command.
 
+Standalone `/new` and `/reset` acknowledgements do not start a model turn or
+look up model-derived thinking and reasoning defaults. Follow-up text still
+runs through the configured model and reasoning settings.
+
 ## Command list
 
 Commands come from three sources:
@@ -626,6 +630,9 @@ See [BTW side questions](/tools/btw) for the full behavior.
   </Card>
   <Card title="Steer" href="/tools/steer" icon="compass">
     Guide the agent mid-run with `/steer`.
+  </Card>
+  <Card title="Configuration reference" href="/gateway/configuration-reference" icon="sliders">
+    Settings that change how slash commands are resolved and gated.
   </Card>
   <Card title="OpenProse migration" href="/prose" icon="pen-nib">
     Where the removed `/prose` command went.
