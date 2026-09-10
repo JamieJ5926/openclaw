@@ -119,22 +119,19 @@ suite.define(() => {
         { locale: "en-US", serviceWorkers: "block", viewport: { width: 1280, height: 900 } },
         async ({ page }) => {
           page.on("websocket", (socket) => {
-            for (const [event, direction] of [
-              ["framesent", "sent"],
-              ["framereceived", "received"],
-            ] as const) {
-              socket.on(event, ({ payload }) => {
-                const frame: Record<string, unknown> = JSON.parse(payload.toString());
-                // Authentication is outside this observation; retain all subsequent product frames.
-                if (
-                  !(frame.type === "req" && frame.method === "connect") &&
-                  frame.event !== "connect.challenge" &&
-                  !(isRecord(frame.payload) && frame.payload.type === "hello-ok")
-                ) {
-                  frames.push({ direction, frame });
-                }
-              });
-            }
+            const recordFrame = (direction: "sent" | "received", payload: string | Buffer) => {
+              const frame: Record<string, unknown> = JSON.parse(payload.toString());
+              // Authentication is outside this observation; retain all subsequent product frames.
+              if (
+                !(frame.type === "req" && frame.method === "connect") &&
+                frame.event !== "connect.challenge" &&
+                !(isRecord(frame.payload) && frame.payload.type === "hello-ok")
+              ) {
+                frames.push({ direction, frame });
+              }
+            };
+            socket.on("framesent", ({ payload }) => recordFrame("sent", payload));
+            socket.on("framereceived", ({ payload }) => recordFrame("received", payload));
           });
           await page.goto(url.href);
           await waitForControlUiGatewayReady(page);
