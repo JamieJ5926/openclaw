@@ -60,7 +60,7 @@ function createContext() {
     app: { client: {} },
     runtime: {},
     rememberSlackChannelType: () => {},
-  } as Parameters<typeof createSlackMessageHandler>[0]["ctx"];
+  } as unknown as Parameters<typeof createSlackMessageHandler>[0]["ctx"];
 }
 
 beforeEach(() => {
