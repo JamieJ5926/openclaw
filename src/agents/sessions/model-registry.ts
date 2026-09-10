@@ -623,11 +623,12 @@ export class ModelRegistry {
             : providerConfig),
           models: providerConfig.models?.map((model) => {
             const { headers: _headers, ...inventory } = model;
-            // Capture each source's route before its provider defaults are merged.
+            // Capture route and effective compatibility before provider defaults merge.
             return Object.assign(generated ? inventory : model, {
               maxTokensSource,
               api: model.api ?? providerConfig.api,
               baseUrl: model.baseUrl ?? providerConfig.baseUrl,
+              compat: mergeCompat(providerConfig.compat, model.compat),
             });
           }),
         };
@@ -737,7 +738,6 @@ export class ModelRegistry {
           continue;
         }
 
-        const compat = mergeCompat(providerConfig.compat, modelDef.compat);
         this.storeModelHeaders(providerName, modelDef.id, modelDef.headers);
         const defaultCost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
         models.push({
@@ -757,7 +757,7 @@ export class ModelRegistry {
             : {}),
           params: modelDef.params,
           headers: undefined,
-          compat,
+          compat: modelDef.compat,
         } as Model);
       }
     }
