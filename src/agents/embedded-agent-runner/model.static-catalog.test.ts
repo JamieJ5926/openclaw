@@ -23,6 +23,16 @@ const providerMocks = vi.hoisted(() => ({
   runProviderStaticCatalog: vi.fn(),
 }));
 
+vi.mock("../../plugins/plugin-metadata-snapshot-readers.js", async (importOriginal) => {
+  const { snapshotReaderSlot } =
+    await importOriginal<typeof import("../../plugins/plugin-metadata-snapshot-readers.js")>();
+  return {
+    snapshotReaderSlot,
+    // Mocked discovery readers must not escape this suite into the shared worker.
+    registerPluginMetadataSnapshotReaders: vi.fn(),
+  };
+});
+
 vi.mock("../../plugins/manifest-metadata-scan.js", () => ({
   listOpenClawPluginManifestMetadata: manifestMocks.listOpenClawPluginManifestMetadata,
 }));

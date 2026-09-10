@@ -8,6 +8,7 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import * as loggingConfig from "../logging/config.js";
 import { createEmptyPluginRegistry } from "../plugins/registry-empty.js";
 import type { RuntimeEnv } from "../runtime.js";
+import { AsyncWorkScope } from "../shared/async-work-scope.js";
 import { withEnvAsync } from "../test-utils/env.js";
 import {
   redactSetupInferenceError,
@@ -151,46 +152,53 @@ async function observeScenario(scenario: Scenario, json: boolean) {
               };
             },
           };
-          await runSystemAgentWithInference(
-            json ? { json: true } : { message: "status", interactive: false },
-            renderedRuntime,
-            {},
-            {
-              verifyInference: async ({ runtime }) => {
-                let binding: typeof fixture.binding | undefined;
-                const result = await verifySetupInferenceConfig({
-                  config,
-                  agentId: "main",
-                  runtime,
-                  requireExecutionOwner: true,
-                  deps,
-                  onVerifiedExecution: (verified) => {
-                    phases.push("callback");
-                    callbackAttempts += 1;
-                    if (scenario === "callback") {
-                      faultReached += 1;
-                      // oxlint-disable-next-line typescript/only-throw-error -- Exercise non-Error failures at the verifier boundary.
-                      throw fault;
+          const work = new AsyncWorkScope();
+          try {
+            await work.track(() =>
+              runSystemAgentWithInference(
+                json ? { json: true } : { message: "status", interactive: false },
+                renderedRuntime,
+                {},
+                {
+                  verifyInference: async ({ runtime }) => {
+                    let binding: typeof fixture.binding | undefined;
+                    const result = await verifySetupInferenceConfig({
+                      config,
+                      agentId: "main",
+                      runtime,
+                      requireExecutionOwner: true,
+                      deps,
+                      onVerifiedExecution: (verified) => {
+                        phases.push("callback");
+                        callbackAttempts += 1;
+                        if (scenario === "callback") {
+                          faultReached += 1;
+                          // oxlint-disable-next-line typescript/only-throw-error -- Exercise non-Error failures at the verifier boundary.
+                          throw fault;
+                        }
+                        binding = verified;
+                      },
+                    });
+                    if (!result.ok) {
+                      return result;
                     }
-                    binding = verified;
+                    if (!binding) {
+                      throw new Error("successful verification lacked a binding");
+                    }
+                    return { ...result, binding };
                   },
-                });
-                if (!result.ok) {
-                  return result;
-                }
-                if (!binding) {
-                  throw new Error("successful verification lacked a binding");
-                }
-                return { ...result, binding };
-              },
-              runSystemAgent: async () => {
-                managedDispatches += 1;
-              },
-              runGuidedOnboarding: async () => {
-                onboardingDispatches += 1;
-              },
-            },
-          );
+                  runSystemAgent: async () => {
+                    managedDispatches += 1;
+                  },
+                  runGuidedOnboarding: async () => {
+                    onboardingDispatches += 1;
+                  },
+                },
+              ),
+            );
+          } finally {
+            await work.drain();
+          }
         });
       },
     );
