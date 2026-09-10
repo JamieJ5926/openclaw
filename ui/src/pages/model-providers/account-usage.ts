@@ -58,7 +58,7 @@ export class ModelAccountUsage extends OpenClawLightDomElement {
                     <div>
                       ${
                         snapshot.windows.length || snapshot.billing?.length
-                          ? renderProviderUsageDetails(snapshot, { compactWindowLabels: true })
+                          ? renderProviderUsageDetails(snapshot, { groupWindows: true })
                           : t("modelProviders.noStats")
                       }
                     </div>

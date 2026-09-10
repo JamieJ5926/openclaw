@@ -16,40 +16,31 @@ export type ProviderUsageDetails = Pick<
 >;
 
 type ProviderUsageDetailsOptions = {
-  compactWindowLabels?: boolean;
+  groupWindows?: boolean;
 };
 
-type CompactWindowGroup = {
-  scope: string;
-  windows: Array<{ cadence: string; window: UsageWindow }>;
-};
-
-function compactWindowRank(cadence: string): number {
-  if (/\b\d+(?:m|h)\b/iu.test(cadence) && !/\b168h\b/iu.test(cadence)) {
+function windowRank(label: string): number {
+  if (/\b\d+(?:m|h)\b/iu.test(label) && !/\b168h\b/iu.test(label)) {
     return 0;
   }
-  if (/\b(?:week|168h)\b/iu.test(cadence)) {
+  if (/\b(?:week|168h)\b/iu.test(label)) {
     return 1;
   }
   return 2;
 }
 
-function groupCompactWindows(windows: UsageWindow[]): CompactWindowGroup[] {
-  const groups = new Map<string, CompactWindowGroup>();
+function groupUsageWindows(windows: UsageWindow[]): Map<string, UsageWindow[]> {
+  const groups = new Map<string, UsageWindow[]>();
   for (const window of windows) {
-    const scope = window.groupLabel ?? "";
-    const cadence = window.label;
-    const group = groups.get(scope) ?? { scope, windows: [] };
-    group.windows.push({ cadence, window });
-    groups.set(scope, group);
+    const label = window.groupLabel ?? "";
+    const group = groups.get(label) ?? [];
+    group.push(window);
+    groups.set(label, group);
   }
-  const groupedWindows = [...groups.values()];
-  for (const group of groupedWindows) {
-    group.windows.sort(
-      (left, right) => compactWindowRank(left.cadence) - compactWindowRank(right.cadence),
-    );
+  for (const group of groups.values()) {
+    group.sort((left, right) => windowRank(left.label) - windowRank(right.label));
   }
-  return groupedWindows;
+  return groups;
 }
 
 function createProviderAmountFormatter(unit: string): (amount: number) => string {
@@ -231,7 +222,7 @@ function renderProviderCostHistory(snapshot: ProviderUsageDetails) {
   `;
 }
 
-function renderProviderUsageWindow(window: UsageWindow, cadence?: string) {
+function renderProviderUsageWindow(window: UsageWindow) {
   const used = Math.max(0, Math.min(100, window.usedPercent));
   const remaining = Math.max(0, 100 - used);
   const remainingTone = remaining <= 10 ? "danger" : remaining <= 25 ? "warn" : "ok";
@@ -242,13 +233,7 @@ function renderProviderUsageWindow(window: UsageWindow, cadence?: string) {
   return html`
     <div class="provider-usage-window">
       <div class="provider-usage-window__meta">
-        ${
-          cadence
-            ? html`<span class="provider-usage-window__cadence" aria-label=${window.label}
-                >${cadence}</span
-              >`
-            : html`<span>${window.label}</span>`
-        }
+        <span>${window.label}</span>
         <strong>${remainingLabel}</strong>
       </div>
       <div
@@ -288,21 +273,20 @@ export function renderProviderUsageDetails(
   return html`
     ${
       snapshot.windows.length > 0
-        ? options.compactWindowLabels
+        ? options.groupWindows
           ? html`
               <div class="provider-usage-windows provider-usage-windows--grouped">
-                ${groupCompactWindows(snapshot.windows).map(
-                  (group) => html`
+                ${Array.from(
+                  groupUsageWindows(snapshot.windows),
+                  ([label, windows]) => html`
                     <div
                       class="provider-usage-window-group"
                       role="group"
-                      aria-label=${group.scope || nothing}
+                      aria-label=${label || nothing}
                     >
-                      ${group.scope ? html`<div class="provider-usage-window-group__title">${group.scope}</div>` : nothing}
+                      ${label ? html`<div class="provider-usage-window-group__title">${label}</div>` : nothing}
                       <div class="provider-usage-window-group__windows">
-                        ${group.windows.map(({ cadence, window }) =>
-                          renderProviderUsageWindow(window, cadence),
-                        )}
+                        ${windows.map((window) => renderProviderUsageWindow(window))}
                       </div>
                     </div>
                   `,
