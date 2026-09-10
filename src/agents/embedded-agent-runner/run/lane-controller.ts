@@ -439,9 +439,19 @@ export function createEmbeddedRunLaneController<TParams extends LaneParams>(opti
         releaseQueuedContext("abandoned");
         throw error;
       }
-      return await queuedRun.finally(() => {
-        releaseQueuedContext("abandoned");
-      });
+      return await queuedRun
+        .finally(() => {
+          releaseQueuedContext("abandoned");
+        })
+        .catch((error: unknown) => {
+          if (isCommandLaneTaskTimeoutError(error)) {
+            // The queue race releases its slot before the underlying task settles.
+            // Retire that task's run signal so deferred maintenance cannot resume
+            // into global or writer admission after a successor takes the session.
+            laneTaskAbortController.abort(error);
+          }
+          throw error;
+        });
     } finally {
       releaseForeground?.();
     }

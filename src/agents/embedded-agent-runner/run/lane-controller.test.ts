@@ -120,6 +120,44 @@ describe("embedded run session lane", () => {
     },
   );
 
+  it("prevents timed-out session work from resuming into global admission", async () => {
+    const sessionLane = "test:session-timeout-late-resumption";
+    const globalLane = "test:global-timeout-late-resumption";
+    const maintenanceGate = createDeferred();
+    const lateTaskSettled = createDeferred();
+    let enteredGlobalAdmission = false;
+    const controller = createLaneController({
+      sessionLane,
+      globalLane,
+      runId: "session-timeout-late-resumption",
+    });
+
+    const timedOut = controller.enqueueSession(
+      async () => {
+        try {
+          await maintenanceGate.promise;
+          controller.throwIfAborted();
+          return await controller.enqueueGlobal(async () => {
+            enteredGlobalAdmission = true;
+            return { meta: { durationMs: 1 } };
+          });
+        } finally {
+          lateTaskSettled.resolve();
+        }
+      },
+      { taskTimeoutMs: 25 },
+    );
+
+    await expect(timedOut).rejects.toMatchObject({ name: "CommandLaneTaskTimeoutError" });
+    expect(controller.abortSignal.aborted).toBe(true);
+
+    maintenanceGate.resolve();
+    await lateTaskSettled.promise;
+    expect(enteredGlobalAdmission).toBe(false);
+    await expectLaneCounts(sessionLane, 0, 0);
+    await expectLaneCounts(globalLane, 0, 0);
+  });
+
   it("keeps the session lease alive until every concurrent global admission settles", async () => {
     const sessionLane = "test:session-concurrent-global-admission";
     const globalLane = "test:concurrent-global-admission";
