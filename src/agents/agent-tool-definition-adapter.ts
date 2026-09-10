@@ -4,6 +4,7 @@
  * logging for failed tool calls.
  */
 import { createHash } from "node:crypto";
+import { classifyGatewayStaleInstall } from "../gateway/stale-install.js";
 import { logDebug, logError } from "../logger.js";
 import { redactToolDetail } from "../logging/redact.js";
 import { isPlainObject } from "../utils.js";
@@ -260,7 +261,10 @@ async function executeAdaptedToolOperation(params: {
         runId: params.hookContext?.runId,
       });
     }
-    const described = describeToolExecutionError(err);
+    const staleInstall = classifyGatewayStaleInstall(err);
+    const described = staleInstall
+      ? { message: staleInstall.error.message }
+      : describeToolExecutionError(err);
     if (described.stack && described.stack !== described.message) {
       logDebug(`tools: ${params.normalizedToolName} failed stack:\n${described.stack}`);
     }

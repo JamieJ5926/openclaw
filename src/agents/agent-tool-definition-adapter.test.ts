@@ -5,6 +5,7 @@
  */
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { expectDefined } from "@openclaw/normalization-core";
 import type { AgentTool } from "openclaw/plugin-sdk/agent-core";
 import { Type } from "typebox";
@@ -164,6 +165,32 @@ describe("agent tool definition adapter", () => {
     expect(details?.status).toBe("error");
     expect(details?.tool).toBe("exec");
     expect(details?.error).toBe("nope");
+  });
+
+  it("turns stale install chunk failures into restart guidance", async () => {
+    const missingChunk = path.join(process.cwd(), "dist", "status-text-stale.mjs");
+    const error = Object.assign(new Error(`Cannot find module '${missingChunk}'`), {
+      code: "ERR_MODULE_NOT_FOUND",
+      url: pathToFileURL(missingChunk).href,
+    });
+    const tool = {
+      name: "session_status",
+      label: "Session Status",
+      description: "loads a lazy status runtime",
+      parameters: Type.Object({}),
+      execute: async () => {
+        throw error;
+      },
+    } satisfies AgentTool;
+
+    const result = await executeTool(tool, "stale-install");
+
+    expect(result.details).toMatchObject({
+      status: "error",
+      tool: "session_status",
+      error: expect.stringMatching(/installation may have changed.*gateway restart/i),
+    });
+    expect(JSON.stringify(result.details)).not.toContain(missingChunk);
   });
 
   it("preserves exec deny before prepared workdir failures", async () => {
