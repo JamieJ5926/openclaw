@@ -7342,6 +7342,34 @@ describe("package artifact reuse", () => {
     expect(result.status, result.stderr).toBe(0);
   });
 
+  it.each([1, 2, 3, 4])("selects only Gateway shard %s for a focused diagnostic", (shard) => {
+    const suiteId = `repo-e2e-gateway-${shard}`;
+    const result = runFocusedLiveSuiteValidation(suiteId, { INCLUDE_LIVE_SUITES: "false" });
+    expect(result.status, result.stderr).toBe(0);
+
+    const gateway = workflowJob(LIVE_E2E_WORKFLOW, "validate_repo_e2e_gateway");
+    const inputs = { include_repo_e2e: true, live_suite_filter: suiteId };
+    expect(runInNewContext(gateway.if ?? "false", { inputs })).toBe(true);
+    const suites = String(gateway.with?.suites);
+    const selected = runInNewContext(suites.slice(3, -2), { inputs }) as string;
+    expect(JSON.parse(selected)).toEqual([
+      {
+        name: `Gateway ${shard}/4`,
+        command: `env OPENCLAW_LOG_LEVEL=debug pnpm test:e2e:gateway --shard=${shard}/4 --silent=false --cache=false --reporter=verbose`,
+      },
+    ]);
+    expect(
+      runInNewContext(gateway.if ?? "false", {
+        inputs: { ...inputs, include_repo_e2e: false },
+      }),
+    ).toBe(false);
+    for (const jobName of ["validate_repo_e2e_runtime", "validate_special_e2e"]) {
+      expect(
+        runInNewContext(workflowJob(LIVE_E2E_WORKFLOW, jobName).if ?? "false", { inputs }),
+      ).toBe(false);
+    }
+  });
+
   it.each<{ suiteId: string; env?: Record<string, string> }>([
     { suiteId: "native-live-src-gateway-profiles-opencode-go-unknown" },
     { suiteId: "native-live-extensions-media-video-e" },
@@ -7363,6 +7391,13 @@ describe("package artifact reuse", () => {
       env: { LIVE_MODELS_ONLY: "true" },
     },
     { suiteId: "openshell-e2e", env: { INCLUDE_REPO_E2E: "false" } },
+    ...[1, 2, 3, 4].map((shard) => ({
+      suiteId: `repo-e2e-gateway-${shard}`,
+      env: { INCLUDE_REPO_E2E: "false" },
+    })),
+    { suiteId: "repo-e2e-gateway-0" },
+    { suiteId: "repo-e2e-gateway-5" },
+    { suiteId: "repo-e2e-gateway-3; echo unexpected" },
     { suiteId: "docker-live-models", env: { INCLUDE_LIVE_SUITES: "false" } },
   ])("rejects unavailable focused suite $suiteId with $env", ({ suiteId, env }) => {
     const result = runFocusedLiveSuiteValidation(suiteId, env);
@@ -7371,6 +7406,12 @@ describe("package artifact reuse", () => {
     expect(result.stderr).toContain(
       `live_suite_filter '${suiteId}' does not match any runnable suite`,
     );
+    const gateway = workflowJob(LIVE_E2E_WORKFLOW, "validate_repo_e2e_gateway");
+    const inputs = {
+      include_repo_e2e: env?.INCLUDE_REPO_E2E !== "false",
+      live_suite_filter: suiteId,
+    };
+    expect(runInNewContext(gateway.if ?? "false", { inputs })).toBe(false);
   });
 
   it("shards broad native live tests instead of one serial live-all job", () => {

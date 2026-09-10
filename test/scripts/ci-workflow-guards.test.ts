@@ -7368,7 +7368,13 @@ server.listen(0, "127.0.0.1", () => {
       OPENCLAW_SELECTED_SHA: "${{ needs.validate_selected_ref.outputs.selected_sha }}",
       OPENCLAW_TOOLING_SHA: "${{ needs.validate_selected_ref.outputs.workflow_sha }}",
     });
-    const repoE2eRows = pipelines.flatMap((pipeline) => JSON.parse(pipeline.with.suites)) as Array<{
+    const inputs = { include_repo_e2e: true, live_suite_filter: "" };
+    const repoE2eRows = pipelines.flatMap((pipeline) => {
+      const suites = pipeline.with.suites;
+      return JSON.parse(
+        suites.startsWith("${{") ? runInNewContext(suites.slice(3, -2), { inputs }) : suites,
+      );
+    }) as Array<{
       name: string;
       command: string;
       target_script?: string;
@@ -7380,7 +7386,15 @@ server.listen(0, "127.0.0.1", () => {
     for (const pipeline of pipelines) {
       // Each profile starts independently; a slow/full declaration build cannot hold up UI readers.
       expect(pipeline.needs).toBe("validate_selected_ref");
-      expect(pipeline.if).toBe("inputs.include_repo_e2e && inputs.live_suite_filter == ''");
+      expect(runInNewContext(pipeline.if, { inputs })).toBe(true);
+      expect(runInNewContext(pipeline.if, { inputs: { ...inputs, include_repo_e2e: false } })).toBe(
+        false,
+      );
+      expect(
+        runInNewContext(pipeline.if, {
+          inputs: { ...inputs, live_suite_filter: "unknown-suite" },
+        }),
+      ).toBe(false);
       expect(pipeline.uses).toBe("./.github/workflows/openclaw-repo-e2e-reusable.yml");
       expect(pipeline.with.ref).toBe("${{ needs.validate_selected_ref.outputs.selected_sha }}");
       expect(pipeline.with.advisory).toBe("${{ inputs.advisory }}");
