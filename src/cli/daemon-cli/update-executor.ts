@@ -4,6 +4,7 @@ import {
   withGatewayServiceUpdateAuthority,
 } from "../../daemon/service-update-authority.js";
 import { resolveOpenClawPackageRoot } from "../../infra/openclaw-root.js";
+import { resolveUpdateInstallRoot } from "../../infra/update-install-root.js";
 import {
   withDelegatedUpdateCommandExecutor,
   type UpdateCommandChildGrant,
@@ -23,7 +24,9 @@ export async function runGatewayServiceUpdateCommand(
     return;
   }
   if (mode === "check") {
-    process.stdout.write(JSON.stringify({ updateExecutor: GATEWAY_UPDATE_EXECUTOR_CONTRACT }));
+    process.stdout.write(
+      JSON.stringify({ updateExecutor: GATEWAY_UPDATE_EXECUTOR_CONTRACT, targetRootBinding: true }),
+    );
     return;
   }
   if (mode !== "run") {
@@ -44,6 +47,7 @@ export async function runGatewayServiceUpdateCommand(
     if (
       !isRecord(input) ||
       input.action !== action ||
+      typeof input.targetRoot !== "string" ||
       !isRecord(input.executor) ||
       typeof input.executor.runId !== "string" ||
       typeof input.executor.root !== "string" ||
@@ -57,10 +61,12 @@ export async function runGatewayServiceUpdateCommand(
     // SAFETY: Partial transport data is validated against live lease rows before effects.
     const grant = input.executor as UpdateCommandChildGrant;
     const root = await resolveOpenClawPackageRoot({ moduleUrl: import.meta.url });
-    if (!root) {
-      throw new Error("Native update receiver installation is unavailable.");
+    const targetRoot = input.targetRoot;
+    if (!root || resolveUpdateInstallRoot(root) !== targetRoot) {
+      throw new Error("Native update receiver installation binding does not match its target.");
     }
-    await withDelegatedUpdateCommandExecutor(grant, grant.runId, root, async (fence) =>
+    // Destination admission never replaces the original installation's live authority.
+    await withDelegatedUpdateCommandExecutor(grant, grant.runId, grant.root, async (fence) =>
       withGatewayServiceUpdateAuthority(fence.assertCurrent, async () => {
         await operation();
       }),

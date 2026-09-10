@@ -1,6 +1,8 @@
 import { safeParseJsonRecord } from "@openclaw/normalization-core/json-coercion";
 import { resolveGatewayInstallEntrypoint } from "../../daemon/gateway-entrypoint.js";
 import { GATEWAY_UPDATE_EXECUTOR_CONTRACT } from "../../daemon/service-update-authority.js";
+import { resolveUpdateInstallRoot } from "../../infra/update-install-root.js";
+import type { UpdateRecoveryFence } from "../../infra/update-run-recovery.js";
 import type { UpdateRunResult } from "../../infra/update-runner.js";
 import { runCommandWithTimeout } from "../../process/exec.js";
 import { resolveNodeRunner, type UpdateCommandOptions } from "./shared.js";
@@ -36,6 +38,60 @@ function formatCommandFailure(stdout: string, stderr: string): string {
     `${stderr}\n${stdout}`.match(DEFINITION_DENIAL)?.[0] ??
     (typeof error === "string" ? error : stderr || stdout).trim();
   return detail ? detail.split("\n").slice(-3).join("\n") : "command returned a non-zero exit code";
+}
+
+/** Probe the staged target before activation, retaining the original child owner. */
+export async function isUpdatedInstallGatewayExecutorSupported(params: {
+  root: string;
+  env: NodeJS.ProcessEnv;
+  executor: UpdateRecoveryFence;
+  nodeRunner?: string;
+  signal?: AbortSignal;
+}): Promise<boolean> {
+  params.signal?.throwIfAborted();
+  params.executor.assertCurrent();
+  const entrypoint = await resolveGatewayInstallEntrypoint(params.root);
+  params.executor.assertCurrent();
+  if (!entrypoint) {
+    return false;
+  }
+  const check = await withUpdateCommandExecutorChild(params.executor, (_grant, beforeInput) =>
+    runCommandWithTimeout(
+      [
+        params.nodeRunner ?? resolveNodeRunner(),
+        entrypoint,
+        "gateway",
+        "install",
+        "--update-executor",
+        "check",
+      ],
+      {
+        input: "",
+        beforeInput,
+        baseEnv: {},
+        cwd: params.root,
+        env: { ...params.env, OPENCLAW_NO_RESPAWN: "1" },
+        timeoutMs: 30_000,
+        killProcessTree: true,
+        requireProcessTreeExtinction: true,
+        ...(params.signal ? { signal: params.signal } : {}),
+        maxOutputBytes: 64 * 1024,
+      },
+    ),
+  );
+  params.signal?.throwIfAborted();
+  params.executor.assertCurrent();
+  const capability = safeParseJsonRecord(check.stdout);
+  return (
+    check.code === 0 &&
+    check.termination === "exit" &&
+    check.cleanup === "normal" &&
+    !check.stdoutTruncatedBytes &&
+    !check.outputLimitExceeded &&
+    !check.outputErrorStream &&
+    capability?.updateExecutor === GATEWAY_UPDATE_EXECUTOR_CONTRACT &&
+    capability.targetRootBinding === true
+  );
 }
 
 // Loaded before package replacement: activation dependencies must stay eager.
@@ -120,46 +176,39 @@ export async function runUpdatedInstallGatewayCommand(
     );
   }
   if (executor) {
-    const check = await withUpdateCommandExecutorChild(executor, (_grant, beforeInput) =>
-      runCommandWithTimeout(
-        [nodeRunner, entrypoint, "gateway", action, "--update-executor", "check"],
-        {
-          // Probe lifetime is owned, but it never receives an execution grant.
-          input: "",
-          beforeInput,
-          baseEnv: {},
-          cwd: params.result.root,
-          env: commandEnv,
-          timeoutMs: 30_000,
-          killProcessTree: true,
-          requireProcessTreeExtinction: true,
-          ...(params.signal ? { signal: params.signal } : {}),
-          maxOutputBytes: 64 * 1024,
-        },
-      ),
-    );
-    assertCurrent();
     if (
-      check.code !== 0 ||
-      check.termination !== "exit" ||
-      check.cleanup !== "normal" ||
-      check.stdoutTruncatedBytes ||
-      check.outputLimitExceeded ||
-      check.outputErrorStream ||
-      safeParseJsonRecord(check.stdout)?.updateExecutor !== GATEWAY_UPDATE_EXECUTOR_CONTRACT
+      !params.result.root ||
+      !(await isUpdatedInstallGatewayExecutorSupported({
+        root: params.result.root,
+        env: commandEnv,
+        executor,
+        nodeRunner,
+        signal: params.signal,
+      }))
     ) {
       throw new UpdateCommandRecoveryPendingError(
         "Target runtime cannot fence update-owned native commands.",
       );
     }
+    assertCurrent();
   }
+
   const runChild = (grant?: UpdateCommandChildGrant, beforeInput?: (pid: number) => void) =>
     runCommandWithTimeout(
       [nodeRunner, entrypoint, ...args, ...(grant ? ["--update-executor", "run"] : [])],
       {
         // The complete owned env must not regain selectors removed during capture.
         baseEnv: {},
-        ...(grant ? { input: JSON.stringify({ executor: grant, action }), beforeInput } : {}),
+        ...(grant
+          ? {
+              input: JSON.stringify({
+                executor: grant,
+                action,
+                targetRoot: resolveUpdateInstallRoot(params.result.root!),
+              }),
+              beforeInput,
+            }
+          : {}),
         cwd: params.result.root,
         env: commandEnv,
         // Restart owns migration-aware readiness; only refresh has the fixed watchdog.

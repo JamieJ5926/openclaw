@@ -96,7 +96,9 @@ describe("addGatewayServiceCommands", () => {
       await createGatewayParentLikeCommand().parseAsync([action, "--update-executor", "check"], {
         from: "user",
       });
-      expect(output).toHaveBeenCalledWith(JSON.stringify({ updateExecutor: "root-spawner-v1" }));
+      expect(output).toHaveBeenCalledWith(
+        JSON.stringify({ updateExecutor: "root-spawner-v1", targetRootBinding: true }),
+      );
       expect(runDaemonInstall).not.toHaveBeenCalled();
       expect(runDaemonRestart).not.toHaveBeenCalled();
       expect(runDaemonStop).not.toHaveBeenCalled();

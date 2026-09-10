@@ -12,11 +12,19 @@ import { runUpdatedInstallGatewayCommand } from "./update-command-service-comman
 const dirs = useAutoCleanupTempDirTracker(afterEach);
 afterEach(() => vi.restoreAllMocks());
 
-it.each([true, false])(
-  "native command admits only a capable target receiver: supported=%s",
-  async (supported) => {
+it.each([
+  { supported: true, destination: "same" },
+  { supported: false, destination: "same" },
+  { supported: "legacy", destination: "same" },
+  { supported: true, destination: "changed" },
+  { supported: true, destination: "foreign" },
+])(
+  "native command admits only the bound receiver: $supported / $destination",
+  async ({ supported, destination }) => {
     const scratch = dirs.make("native-command-custody-");
-    const root = await fs.realpath(process.cwd());
+    const receiverRoot = await fs.realpath(process.cwd());
+    const root = destination === "same" ? receiverRoot : scratch;
+    const targetRoot = destination === "foreign" ? scratch : receiverRoot;
     const control = path.join(scratch, "control");
     await fs.mkdir(control);
     vi.spyOn(tempRoot, "resolvePreferredOpenClawTmpDir").mockReturnValue(control);
@@ -27,6 +35,7 @@ it.each([true, false])(
     await fs.writeFile(
       entrypoint,
       `
+    process.chdir(${JSON.stringify(receiverRoot)});
     await import(${JSON.stringify(new URL("../../../scripts/tsx.mjs", import.meta.url).href)});
     const {runGatewayServiceUpdateCommand}=await import(${JSON.stringify(new URL("../daemon-cli/update-executor.ts", import.meta.url).href)});
     const {execFileUtf8}=await import(${JSON.stringify(new URL("../../daemon/exec-file.ts", import.meta.url).href)});
@@ -46,13 +55,16 @@ it.each([true, false])(
         owner:row?.owner,helper:lease?.helper.pid,boundStart:lease?.executor.startIdentity,
         actualStart:store.readProcessStartIdentity(process.pid)}));
     }
-    if(!${supported}) { process.stderr.write("unknown option --update-executor"); process.exitCode=1; }
-    else await runGatewayServiceUpdateCommand(mode,"stop",async()=>{
+    if(!${JSON.stringify(supported)}) { process.stderr.write("unknown option --update-executor"); process.exitCode=1; }
+    else if(mode==="check" && ${JSON.stringify(supported)}==="legacy") {
+      process.stdout.write(JSON.stringify({updateExecutor:"root-spawner-v1"}));
+    }
+    else try { await runGatewayServiceUpdateCommand(mode,"stop",async()=>{
       fs.writeFileSync(${JSON.stringify(receipt)},JSON.stringify({pid:process.pid,parent:process.ppid,noRespawn:process.env.OPENCLAW_NO_RESPAWN}));
       const result=await execFileUtf8(process.execPath,["-e",${JSON.stringify(`require("node:fs").writeFileSync(${JSON.stringify(effect)},"owned")`)}]);
       if(result.code!==0)throw new Error(result.stderr);
       process.stdout.write(JSON.stringify({action:"stop",ok:true,result:"stopped"}));
-    });
+    }); } catch(error) { process.stderr.write(error.message); process.exitCode=1; }
   `,
     );
     vi.spyOn(entrypoints, "resolveGatewayInstallEntrypoint").mockResolvedValue(entrypoint);
@@ -61,7 +73,7 @@ it.each([true, false])(
       const fence = await executor.enter(root);
       return await runUpdatedInstallGatewayCommand(
         {
-          result: { root },
+          result: { root: targetRoot },
           opts: { json: true, run: { runId, env: process.env, executorFence: fence } },
           invocationEnv: process.env,
           timeoutMs: 20_000,
@@ -69,14 +81,16 @@ it.each([true, false])(
         "stop",
       );
     });
-    if (supported) {
+    if (supported === true && destination !== "foreign") {
       expect(await work).toBe("accepted");
       expect(await fs.readFile(effect, "utf8")).toBe("owned");
       const observed = JSON.parse(await fs.readFile(receipt, "utf8"));
       expect(observed).toMatchObject({ parent: process.pid, noRespawn: "1" });
       expect(observed.pid).not.toBe(process.pid);
     } else {
-      await expect(work).rejects.toThrow("cannot fence");
+      await expect(work).rejects.toThrow(
+        destination === "foreign" ? /installation|binding/ : "cannot fence",
+      );
       await expect(fs.stat(effect)).rejects.toMatchObject({ code: "ENOENT" });
       await expect(fs.stat(receipt)).rejects.toMatchObject({ code: "ENOENT" });
     }

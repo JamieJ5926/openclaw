@@ -102,9 +102,11 @@ loses its lease cannot start another native mutation or commit its pending confi
 changes. A new update remains excluded while a registered child or its process
 group is still alive.
 
-The target runtime must support this ownership handoff. A missing target CLI or an
-older target without that support is refused; the updater does not invoke the old
-runtime installer as a substitute. Update-owned commands also refuse unmanaged
+The target runtime must support this ownership handoff. Candidate validation checks
+that support before stopping the Gateway or activating its replacement. A missing
+target CLI or an older target without support is refused; the updater does not
+invoke the old runtime installer as a substitute. Authorized installation-root
+changes bind the destination CLI separately while retaining the original update owner. Update-owned commands also refuse unmanaged
 restart/stop and detached restart or Windows Startup-folder fallbacks that cannot
 retain this ownership. Ordinary user-invoked `openclaw gateway` commands keep their
 existing behavior.
