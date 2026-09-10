@@ -159,5 +159,6 @@ export function normalizeSidebarLayout(value: unknown): SidebarLayout {
     dock: value.dock === "bottom" || value.dock === "left" ? value.dock : "right",
     open: typeof value.open === "boolean" ? value.open : columns.length > 0,
     expanded: value.expanded === true,
+    ...(value.resourceAutoOpenDismissed === true ? { resourceAutoOpenDismissed: true } : {}),
   };
 }

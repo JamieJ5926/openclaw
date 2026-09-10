@@ -26,4 +26,6 @@ export type SidebarLayout = {
   dock?: SidebarDock;
   open?: boolean;
   expanded?: boolean;
+  /** Explicit panel dismissal suppresses automatic resource reveals for this session. */
+  resourceAutoOpenDismissed?: boolean;
 };

@@ -317,11 +317,12 @@ suite.define(() => {
       });
       await installDesktopClientFake(panel);
       const requestCount = (await gateway.getRequests()).length;
+      const inventoryCount = (await gateway.getRequests("environments.list")).length;
       await panel.getByRole("button", { name: "Retry", exact: true }).click();
 
       await expect
         .poll(async () => (await gateway.getRequests("environments.list")).length)
-        .toBe(2);
+        .toBe(inventoryCount + 1);
       const observeRequest = await gateway.waitForRequest("desktop.observe");
       expect(observeRequest.params).toEqual({
         source: { kind: "environment", environmentId: "worker-desktop-1" },
