@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReplyPayload } from "../types.js";
 import type { AgentTurnParams } from "./agent-runner-execution.types.js";
 import type { AdmittedFollowupTurn } from "./followup-turn-admission.js";
+import { resolveReplyQueueAdmissionState } from "./queue-policy.js";
 import {
   beginReplyMessageInjectionTarget,
   createReplyOperation,
@@ -102,6 +103,7 @@ describe("executeFollowupTurn", () => {
     const operation = createReplyOperation({
       sessionKey: "main",
       sessionId: "session",
+      turnKind: "queued_followup",
       resetTriggered: false,
     });
     const turn = createTurn({ operation });
@@ -110,6 +112,12 @@ describe("executeFollowupTurn", () => {
       operation.bindToolAuthorityRoute({ provider: "anthropic", model: "claude" });
       operation.attachBackend({ kind: "embedded", cancel: vi.fn(), queueMessage });
       operation.setPhase("running");
+      expect(
+        resolveReplyQueueAdmissionState(
+          { items: [turn.queued], inFlight: new Set([turn.queued]), droppedCount: 0 },
+          operation,
+        ),
+      ).toBe("steering");
       const target = replyRunRegistry.resolveCurrentMessageInjectionTarget("main");
       expect(target).toBeDefined();
       const overlay = {
