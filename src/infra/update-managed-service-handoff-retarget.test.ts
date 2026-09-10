@@ -7,6 +7,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { resolveServiceManagerEnv } from "../daemon/service-process-env.js";
 import * as pidIdentity from "../shared/pid-alive.js";
 import * as nodeSqlite from "./node-sqlite.js";
+import * as tmpDir from "./tmp-openclaw-dir.js";
 import { createManagedHandoffLeaseStore as createStore } from "./update-managed-service-handoff-lease.js";
 import type {
   createManagedHandoffLeaseStore,
@@ -610,6 +611,11 @@ unix(
     const { createManagedHandoffLeaseStore, resolveManagedUpdateLeaseDatabasePath } =
       await import("./update-managed-service-handoff-lease.js");
     const { to } = fixture();
+    // The ordinary parent/helper coordinator is independent of OPENCLAW_STATE_DIR.
+    // Keep its legacy-row admission window private to this fixture.
+    vi.spyOn(tmpDir, "resolvePreferredOpenClawTmpDir").mockReturnValue(
+      path.join(path.dirname(to), "common-coordinator"),
+    );
     const store = createManagedHandoffLeaseStore();
     const reserved = store.acquire(to, "legacy-owner", { kind: "update" });
     expect(reserved.kind).toBe("acquired");
