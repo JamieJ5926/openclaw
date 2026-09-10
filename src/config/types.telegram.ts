@@ -160,6 +160,8 @@ export type TelegramAccountConfig = CommonChannelMessagingConfig<
 
 export type TelegramTopicConfig = {
   requireMention?: boolean;
+  /** Include retained observed chat context without changing mention activation. */
+  observeMessages?: boolean;
   /** Emit internal message hooks for mention-skipped topic messages. */
   ingest?: boolean;
   /** Per-topic override for group message policy (open|disabled|allowlist). */
@@ -182,6 +184,8 @@ export type TelegramTopicConfig = {
 
 export type TelegramGroupConfig = {
   requireMention?: boolean;
+  /** Include retained observed chat context without changing mention activation. Default: false. */
+  observeMessages?: boolean;
   /** Emit internal message hooks for mention-skipped group messages. */
   ingest?: boolean;
   /** Per-group override for group message policy (open|disabled|allowlist). */

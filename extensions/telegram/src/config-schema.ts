@@ -88,6 +88,7 @@ const TelegramErrorPolicySchema = z.enum(["always", "once", "silent"]).optional(
 const TelegramTopicSchema = z
   .object({
     requireMention: z.boolean().optional(),
+    observeMessages: z.boolean().optional(),
     ingest: z.boolean().optional(),
     disableAudioPreflight: z.boolean().optional(),
     groupPolicy: GroupPolicySchema.optional(),
@@ -101,6 +102,7 @@ const TelegramTopicSchema = z
   .strict();
 
 const TelegramGroupSchema = buildGroupEntrySchema({
+  observeMessages: z.boolean().optional(),
   ingest: z.boolean().optional(),
   disableAudioPreflight: z.boolean().optional(),
   groupPolicy: GroupPolicySchema.optional(),
