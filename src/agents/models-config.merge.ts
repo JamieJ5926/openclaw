@@ -180,8 +180,6 @@ export function mergeProviderModels(
       explicitMaxTokens === undefined
         ? implicitModel.maxTokensSource
         : explicitModel.maxTokensSource;
-    const api = explicitModel.api ?? implicitModel.api;
-    const baseUrl = explicitModel.baseUrl ?? implicitModel.baseUrl;
     const compat = resolveCatalogOwnedModelCompat({
       catalogRoute: {
         api: implicitModel.api ?? implicit.api,
@@ -189,13 +187,16 @@ export function mergeProviderModels(
       },
       catalogCompat: implicitModel.compat,
       configuredRoute: {
-        api: api ?? explicit.api ?? implicit.api,
-        baseUrl: baseUrl ?? explicit.baseUrl ?? implicit.baseUrl,
+        api: explicitModel.api ?? explicit.api ?? implicitModel.api ?? implicit.api,
+        baseUrl:
+          explicitModel.baseUrl ?? explicit.baseUrl ?? implicitModel.baseUrl ?? implicit.baseUrl,
       },
       configuredCompat: explicitModel.compat,
     });
 
     const {
+      api: _api,
+      baseUrl: _baseUrl,
       headers: _headers,
       maxTokensSource: _maxTokensSource,
       ...implicitMetadata
@@ -209,8 +210,6 @@ export function mergeProviderModels(
         cost,
         reasoning: `reasoning` in explicitModel ? explicitModel.reasoning : implicitModel.reasoning,
       },
-      api === undefined ? {} : { api },
-      baseUrl === undefined ? {} : { baseUrl },
       contextWindow === undefined ? {} : { contextWindow },
       contextTokens === undefined ? {} : { contextTokens },
       maxTokens === undefined ? {} : { maxTokens },
@@ -226,11 +225,7 @@ export function mergeProviderModels(
         continue;
       }
       seen.add(id);
-      mergedModels.push({
-        ...implicitModel,
-        api: implicitModel.api ?? implicit.api,
-        baseUrl: implicitModel.baseUrl ?? implicit.baseUrl,
-      });
+      mergedModels.push(implicitModel);
     }
   }
 

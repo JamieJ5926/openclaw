@@ -621,11 +621,8 @@ export class ModelRegistry {
             : providerConfig),
           models: providerConfig.models?.map((model) => {
             const { headers: _headers, ...inventory } = model;
-            if (generated) {
-              return Object.assign(inventory, { maxTokensSource });
-            }
-            // Capture the authored request route before lower-trust model fields merge.
-            return Object.assign(model, {
+            // Capture each source's route before its provider defaults are merged.
+            return Object.assign(generated ? inventory : model, {
               maxTokensSource,
               api: model.api ?? providerConfig.api,
               baseUrl: model.baseUrl ?? providerConfig.baseUrl,
