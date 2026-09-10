@@ -418,8 +418,13 @@ describe("Slack durable ingress", () => {
         await receive(createReceiverEvent("Ev-later", undefined, { ts: "1700000002.000100" }));
         expect(starts).toEqual([]);
         await vi.waitFor(() => expect(retrySignal?.aborted).toBe(true));
-        const [row] = await queue.listPending();
-        expect(row).toMatchObject({ id: "Ev-released-twin", attempts: 2 });
+        await vi.waitFor(async () => {
+          expect(await queue.listPending()).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({ id: "Ev-released-twin", attempts: 2 }),
+            ]),
+          );
+        });
       } finally {
         await ingress.stop();
       }

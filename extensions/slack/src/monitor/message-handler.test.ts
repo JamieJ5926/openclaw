@@ -981,6 +981,7 @@ describe("createSlackMessageHandler", () => {
     const release = vi.fn();
     const claim = vi
       .fn()
+      .mockResolvedValue({ kind: "claimed", handle: { commit: vi.fn(), release: vi.fn() } })
       .mockResolvedValueOnce({ kind: "claimed", handle: { commit: vi.fn(), release } })
       .mockResolvedValueOnce({ kind: "inflight", pending });
     const handler = createSlackMessageHandler({
