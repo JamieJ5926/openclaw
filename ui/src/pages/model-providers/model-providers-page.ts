@@ -613,7 +613,6 @@ export class ModelProvidersPage extends OpenClawLightDomElement {
     const agents = agentsState.agentsList?.agents ?? [];
     const rosterError = agentsState.agentsList ? null : agentsState.agentsError;
     const selected = agents.find((agent) => normalizeAgentId(agent.id) === this.selectedAgentId);
-    const selectedAgentLabel = selected ? normalizeAgentLabel(selected) : this.selectedAgentId;
     const data = this.data ?? EMPTY_MODEL_PROVIDERS_DATA;
     const config = readModelProviderConfig(data.config);
     const runtimeState = this.context.runtimeConfig.state;
@@ -659,7 +658,7 @@ export class ModelProvidersPage extends OpenClawLightDomElement {
       supplementalLoading: this.loaderPending || this.supplemental.loading,
       updatedAt: data.updatedAt,
       costDays: MODEL_PROVIDERS_COST_DAYS,
-      credentialAgentLabel: selectedAgentLabel,
+      credentialAgentLabel: selected ? normalizeAgentLabel(selected) : this.selectedAgentId,
       cards,
       configuredModels: buildSelectableDefaultModels(data.models, defaults),
       defaultModels: defaults,

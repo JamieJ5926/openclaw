@@ -503,6 +503,7 @@ openclaw-model-account-usage,
 }
 
 .model-providers__account-usage > strong {
+  text-transform: capitalize;
   grid-column: 4;
   grid-row: 1;
   justify-self: start;
