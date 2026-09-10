@@ -351,7 +351,7 @@ async function applyWorkerTranscriptCommit(params: {
         const recovered = resolvePersistedCommitAcrossDag({
           baseLeafId: params.requestedBaseLeafId,
           manager,
-          messages: redactedMessages,
+          messages: params.messages,
         });
         if (recovered.kind === "found") {
           return { ok: true as const, messages: recovered.messages };
@@ -363,15 +363,21 @@ async function applyWorkerTranscriptCommit(params: {
       const prefix = resolveActiveCommitPrefix({
         baseLeafId: params.requestedBaseLeafId,
         manager,
-        messages: redactedMessages,
+        messages: params.messages,
       });
       if (!prefix.ok) {
         return { ok: false as const, reason: "stale-base-leaf" as const };
       }
 
+      // Redaction can change role discriminators; admit the whole fresh suffix before any writes.
+      const freshMessages = redactedMessages.slice(prefix.recoveredMessages.length);
+      if (!freshMessages.every(isCommittedAgentMessage)) {
+        return { ok: false as const, reason: "invalid-batch" as const };
+      }
+
       const messages = [...prefix.recoveredMessages];
       let nextMessageSeq = prefix.activeVisibleEntryCount;
-      for (const message of redactedMessages.slice(prefix.recoveredMessages.length)) {
+      for (const message of freshMessages) {
         if (message.role === "assistant") {
           Object.assign(message, prepareWorkerTurnTranscriptMessage(params.identity, message));
         }
