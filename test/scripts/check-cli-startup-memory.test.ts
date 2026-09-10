@@ -8,12 +8,14 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
+  realpathSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { testing } from "../../scripts/check-cli-startup-memory.mjs";
 import { withEnv } from "../../src/test-utils/env.js";
 import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
@@ -283,6 +285,170 @@ describe("check-cli-startup-memory", () => {
         expect.soft(readFileSync(reportPath, "utf8")).toBe(sentinel);
         expect.soft(readFileSync(aliasPath, "utf8")).toBe(sentinel);
       }
+    });
+
+    describe("case-equivalent output paths", () => {
+      it.each([false, true])(
+        "preserves distinct artifacts on the actual filesystem (reversed: %s)",
+        (reversed) => {
+          if (process.platform !== "darwin" && process.platform !== "linux") {
+            return;
+          }
+
+          const tempRoot = tempRoots.make("openclaw-startup-memory-case-");
+          const reportsDir = path.join(tempRoot, "reports");
+          const homeRoot = path.join(tempRoot, "homes");
+          mkdirSync(reportsDir);
+          mkdirSync(homeRoot);
+          const sentinel = path.join(reportsDir, "case-sentinel");
+          const alternateSentinel = path.join(reportsDir, "CASE-SENTINEL");
+          writeFileSync(sentinel, "case sentinel\n");
+          writeFileSync(alternateSentinel, "case sentinel\n");
+          const first = lstatSync(sentinel, { bigint: true });
+          const second = lstatSync(alternateSentinel, { bigint: true });
+          const caseInsensitive = first.dev === second.dev && first.ino === second.ino;
+          rmSync(sentinel);
+          if (!caseInsensitive) {
+            rmSync(alternateSentinel);
+          }
+          console.info(
+            `[startup-memory-case] filesystem=${caseInsensitive ? "case-insensitive" : "case-sensitive"} reversed=${reversed}`,
+          );
+
+          const jsonPath = path.join(reportsDir, reversed ? "REPORT" : "report");
+          const summaryPath = path.join(reportsDir, reversed ? "report" : "REPORT");
+          expect(existsSync(jsonPath)).toBe(false);
+          expect(existsSync(summaryPath)).toBe(false);
+          let probes = 0;
+          let failure: unknown;
+          let result: ReturnType<typeof testing.runStartupMemoryCheck> | undefined;
+          withEnv({ TMPDIR: homeRoot, TEMP: homeRoot, TMP: homeRoot }, () => {
+            try {
+              result = testing.runStartupMemoryCheck(
+                ["--json", jsonPath, "--summary", summaryPath],
+                {
+                  platform: process.platform,
+                  spawnSync: () => {
+                    probes += 1;
+                    return {
+                      status: 0,
+                      signal: null,
+                      stdout: "",
+                      stderr: "__OPENCLAW_MAX_RSS_KB__=1024\n",
+                    };
+                  },
+                },
+              );
+            } catch (error) {
+              failure = error;
+            }
+          });
+
+          expect.soft(readdirSync(homeRoot)).toEqual([]);
+          if (caseInsensitive) {
+            expect.soft(failure).toMatchObject({ message: aliasError });
+            expect.soft(probes).toBe(0);
+            expect.soft(existsSync(jsonPath)).toBe(false);
+            expect.soft(existsSync(summaryPath)).toBe(false);
+            expect.soft(readdirSync(reportsDir)).toEqual([]);
+          } else {
+            expect(failure).toBeUndefined();
+            expect(result?.skipped).toBe(false);
+            expect(result?.results).toHaveLength(testing.cases.length);
+            expect(probes).toBe(testing.cases.length * testing.sampleCount);
+            expect(JSON.parse(readFileSync(jsonPath, "utf8"))).toMatchObject({ status: "pass" });
+            expect(readFileSync(summaryPath, "utf8")).toContain("Status: pass");
+            const jsonStat = lstatSync(jsonPath, { bigint: true });
+            const summaryStat = lstatSync(summaryPath, { bigint: true });
+            expect([jsonStat.dev, jsonStat.ino]).not.toEqual([summaryStat.dev, summaryStat.ino]);
+            expect(readdirSync(reportsDir).toSorted()).toEqual(["REPORT", "report"]);
+          }
+        },
+      );
+
+      it.each([
+        [true, true, true],
+        [true, undefined, true],
+        [undefined, true, true],
+        [undefined, undefined, true],
+        [false, true, false],
+        [true, false, false],
+        [false, undefined, false],
+        [undefined, false, false],
+        [false, false, false],
+      ] as const)(
+        "admits JSON %s / summary %s case probes (reject: %s)",
+        async (jsonCase, summaryCase, reject) => {
+          if (process.platform !== "darwin" && process.platform !== "linux") {
+            return;
+          }
+
+          const tempRoot = tempRoots.make("openclaw-startup-memory-case-policy-");
+          const reportsDir = path.join(tempRoot, "reports");
+          mkdirSync(reportsDir);
+          const jsonPath = path.join(reportsDir, "report");
+          const summaryPath = path.join(reportsDir, "REPORT");
+          const physicalParent = realpathSync.native(reportsDir);
+          const jsonIdentity = path.join(physicalParent, "report");
+          const summaryIdentity = path.join(physicalParent, "REPORT");
+          const blockedTempRoot = path.join(tempRoot, "not-a-directory");
+          const sentinel = "temporary HOME must not be attempted\n";
+          writeFileSync(blockedTempRoot, sentinel);
+          let probes = 0;
+          let failure: unknown;
+
+          vi.resetModules();
+          vi.doMock("../../src/infra/path-case.ts", () => ({
+            tryResolvePathCaseInsensitive(value: string) {
+              if (value === jsonIdentity) {
+                return jsonCase;
+              }
+              if (value === summaryIdentity) {
+                return summaryCase;
+              }
+              throw new Error("unexpected case-probe identity");
+            },
+          }));
+          try {
+            const { testing: freshTesting } =
+              await import("../../scripts/check-cli-startup-memory.mjs");
+            withEnv(
+              { TMPDIR: blockedTempRoot, TEMP: blockedTempRoot, TMP: blockedTempRoot },
+              () => {
+                try {
+                  freshTesting.runStartupMemoryCheck(
+                    ["--json", jsonPath, "--summary", summaryPath],
+                    {
+                      platform: process.platform,
+                      spawnSync: () => {
+                        probes += 1;
+                        return {
+                          status: 0,
+                          signal: null,
+                          stdout: "",
+                          stderr: "__OPENCLAW_MAX_RSS_KB__=1024\n",
+                        };
+                      },
+                    },
+                  );
+                } catch (error) {
+                  failure = error;
+                }
+              },
+            );
+            expect
+              .soft(failure)
+              .toMatchObject(reject ? { message: aliasError } : { code: "ENOTDIR" });
+            expect.soft(probes).toBe(0);
+            expect.soft(readdirSync(reportsDir)).toEqual([]);
+            expect.soft(readFileSync(blockedTempRoot, "utf8")).toBe(sentinel);
+            expect.soft(readdirSync(tempRoot).toSorted()).toEqual(["not-a-directory", "reports"]);
+          } finally {
+            vi.doUnmock("../../src/infra/path-case.ts");
+            vi.resetModules();
+          }
+        },
+      );
     });
 
     it("rejects environment aliases before creating a temporary HOME", () => {

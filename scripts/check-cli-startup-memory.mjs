@@ -14,6 +14,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { tryResolvePathCaseInsensitive } from "../src/infra/path-case.ts";
 import { resolveRepoRoot } from "./lib/repo-root.mjs";
 const repoRoot = resolveRepoRoot(import.meta.url);
 const tmpDir = process.env.TMPDIR || process.env.TEMP || process.env.TMP || os.tmpdir();
@@ -127,13 +128,22 @@ function resolveReportPath(filePath, unresolvedLinks = new Set()) {
 function assertDistinctReportPaths({ jsonPath, summaryPath }) {
   const jsonStat = statSync(jsonPath, { bigint: true, throwIfNoEntry: false });
   const summaryStat = statSync(summaryPath, { bigint: true, throwIfNoEntry: false });
-  if (
-    (jsonStat &&
-      summaryStat &&
-      jsonStat.dev === summaryStat.dev &&
-      jsonStat.ino === summaryStat.ino) ||
-    resolveReportPath(jsonPath) === resolveReportPath(summaryPath)
-  ) {
+  let aliases = Boolean(
+    jsonStat && summaryStat && jsonStat.dev === summaryStat.dev && jsonStat.ino === summaryStat.ino,
+  );
+  if (!aliases) {
+    const jsonIdentity = resolveReportPath(jsonPath);
+    const summaryIdentity = resolveReportPath(summaryPath);
+    aliases = jsonIdentity === summaryIdentity;
+    if (!aliases && jsonIdentity.toLowerCase() === summaryIdentity.toLowerCase()) {
+      // Like fixed session-store admission, ambiguous case-equivalent future
+      // paths must not be allowed to overwrite each other's artifacts.
+      const jsonCase = tryResolvePathCaseInsensitive(jsonIdentity);
+      const summaryCase = tryResolvePathCaseInsensitive(summaryIdentity);
+      aliases = jsonCase !== false && summaryCase !== false;
+    }
+  }
+  if (aliases) {
     throw new Error("--json and --summary must refer to different files");
   }
 }
