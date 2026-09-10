@@ -1,8 +1,10 @@
 // QA Lab tests cover canonical profile scheduling evidence.
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { qaProfileEvidencePlan } from "./profile-evidence-plan.js";
 import { readQaScenarioById } from "./scenario-catalog.js";
 import { expandQaScenarioExecutionCells, type QaScenarioExecutionCell } from "./scenario-lane.js";
+import { qaMaturityTaxonomyIdentity, readQaMaturityTaxonomySource } from "./scorecard-taxonomy.js";
 
 describe("QA profile evidence plan", () => {
   const portable = readQaScenarioById("thread-isolation");
@@ -12,6 +14,9 @@ describe("QA profile evidence plan", () => {
   function buildPlan(observedCells: QaScenarioExecutionCell[]) {
     return qaProfileEvidencePlan.build({
       profile: "all",
+      taxonomyIdentity: qaMaturityTaxonomyIdentity(
+        readQaMaturityTaxonomySource(path.resolve(import.meta.dirname, "../../../taxonomy.yaml")),
+      ),
       membershipScenarios: [excluded, native, portable],
       selectedScenarios: [portable, native],
       excludedScenarios: [{ scenario: excluded, reasons: ["providerMode=mock-openai"] }],
@@ -73,6 +78,55 @@ describe("QA profile evidence plan", () => {
         expectedCells: complete.expectedCells.toReversed(),
       }).success,
     ).toBe(false);
+  });
+
+  it("includes semantic identity in attestation", () => {
+    const plan = buildPlan([]);
+    expect(
+      qaProfileEvidencePlan.attest({
+        ...plan,
+        taxonomyIdentity: { version: 1, sha256: "0".repeat(64) },
+      }).sha256,
+    ).not.toBe(qaProfileEvidencePlan.attest(plan).sha256);
+    expect(() =>
+      qaProfileEvidencePlan.build({
+        profile: "all",
+        membershipScenarios: [],
+        selectedScenarios: [],
+        excludedScenarios: [],
+        expectedCells: [],
+        observedCells: [],
+        // @ts-expect-error new producers must supply identity even though historical parsing accepts absence.
+        taxonomyIdentity: undefined,
+      }),
+    ).toThrow();
+  });
+
+  it("preserves historical plan bytes and its fixed attestation digest", () => {
+    const cell = { scenarioId: "historical-scenario", executionKind: "flow", channel: "telegram" };
+    const historical = {
+      profile: "all",
+      membership: ["historical-scenario"],
+      selected: ["historical-scenario"],
+      excluded: [],
+      expectedCells: [cell],
+      observedCells: [cell],
+      missingCells: [],
+      counts: {
+        membership: 1,
+        selected: 1,
+        excluded: 0,
+        expectedCells: 1,
+        observedCells: 1,
+        missingCells: 0,
+      },
+    };
+    const attestation = qaProfileEvidencePlan.attest(historical, true);
+    expect(JSON.stringify(attestation.plan)).toBe(JSON.stringify(historical));
+    expect(attestation.plan).not.toHaveProperty("taxonomyIdentity");
+    expect(attestation.sha256).toBe(
+      "6c09166ba9ba6719862d917a29795165a90997cdc5658cd4c65e3a10d89e0fa1",
+    );
   });
 
   it("normalizes object key order before workflow hashing", () => {
