@@ -1127,6 +1127,26 @@ function extractLastMatchingUserText(texts: string[], pattern: RegExp) {
   return "";
 }
 
+function findCurrentScenarioUserTurn(input: ResponsesInputItem[], pattern: RegExp) {
+  for (let index = input.length - 1; index >= 0; index -= 1) {
+    const item = input[index];
+    if (item.role !== "user" || !Array.isArray(item.content)) {
+      continue;
+    }
+    const text = extractInputText(item.content);
+    if (!text || isInternalRuntimeContextCarrierText(text)) {
+      continue;
+    }
+    if (pattern.test(text)) {
+      return { index, text };
+    }
+    if (!isToolOutputContinuationText(text)) {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
 function extractExactReplyDirective(text: string) {
   const backtickedMatch = extractLastCapture(text, /reply(?: with)? exactly\s+`([^`]+)`/i);
   if (backtickedMatch) {
@@ -2162,14 +2182,21 @@ async function buildResponsesPayload(
   const canCallSessionsYield =
     hasDeclaredTool(body, "sessions_yield") ||
     QA_SUBAGENT_DIRECT_FALLBACK_PROMPT_RE.test(allInputText);
-  const buildToolProgressReadEvents = (pattern: RegExp) => {
-    const toolProgressPrompt = extractLastMatchingUserText(extractAllUserTexts(input), pattern);
+  const toolProgressTurn = findCurrentScenarioUserTurn(input, /tool progress(?: error)? qa check/i);
+  const toolProgressPrompt = toolProgressTurn?.text ?? "";
+  const toolProgressInput = toolProgressTurn ? input.slice(toolProgressTurn.index) : [];
+  const toolProgressToolOutput = extractToolOutput(toolProgressInput);
+  const toolProgressToolJson = parseToolOutputJson(toolProgressToolOutput);
+  const toolProgressDirectiveText =
+    typeof toolProgressToolJson?.text === "string"
+      ? toolProgressToolJson.text
+      : toolProgressToolOutput;
+  const buildToolProgressReadEvents = () => {
     return buildToolCallEventsWithArgs("read", {
       path: readTargetFromPrompt(toolProgressPrompt || prompt || allInputText),
     });
   };
-  const buildToolProgressExecEvents = (pattern: RegExp) => {
-    const toolProgressPrompt = extractLastMatchingUserText(extractAllUserTexts(input), pattern);
+  const buildToolProgressExecEvents = () => {
     const command = execCommandFromToolProgressPrompt(toolProgressPrompt || prompt || allInputText);
     return command ? buildToolCallEventsWithArgs("exec", { command }) : null;
   };
@@ -2477,25 +2504,30 @@ async function buildResponsesPayload(
       },
     ]);
   }
-  const toolProgressReplyDirective = exactReplyDirective ?? exactMarkerDirective;
-  if (QA_TOOL_PROGRESS_ERROR_PROMPT_RE.test(allInputText) && toolProgressReplyDirective) {
-    if (!toolOutput) {
-      return buildToolProgressReadEvents(QA_TOOL_PROGRESS_ERROR_PROMPT_RE);
+  const toolProgressReplyDirective =
+    extractExactReplyDirective(toolProgressPrompt) ??
+    extractExactMarkerDirective(toolProgressPrompt) ??
+    extractExactReplyDirective(toolProgressDirectiveText) ??
+    extractExactMarkerDirective(toolProgressDirectiveText);
+  if (QA_TOOL_PROGRESS_ERROR_PROMPT_RE.test(toolProgressPrompt)) {
+    if (!toolProgressToolOutput) {
+      return buildToolProgressReadEvents();
     }
-    return buildAssistantEvents(
-      hasToolErrorOutput(toolJson, toolOutput)
-        ? toolProgressReplyDirective
-        : "BUG-TOOL-DID-NOT-FAIL",
-    );
-  }
-  if (QA_TOOL_PROGRESS_PROMPT_RE.test(allInputText) && toolProgressReplyDirective) {
-    if (!toolOutput) {
-      return (
-        buildToolProgressExecEvents(QA_TOOL_PROGRESS_PROMPT_RE) ??
-        buildToolProgressReadEvents(QA_TOOL_PROGRESS_PROMPT_RE)
+    if (toolProgressReplyDirective) {
+      return buildAssistantEvents(
+        hasToolErrorOutput(toolProgressToolJson, toolProgressToolOutput)
+          ? toolProgressReplyDirective
+          : "BUG-TOOL-DID-NOT-FAIL",
       );
     }
-    return buildAssistantEvents(toolProgressReplyDirective);
+  }
+  if (QA_TOOL_PROGRESS_PROMPT_RE.test(toolProgressPrompt)) {
+    if (!toolProgressToolOutput) {
+      return buildToolProgressExecEvents() ?? buildToolProgressReadEvents();
+    }
+    if (toolProgressReplyDirective) {
+      return buildAssistantEvents(toolProgressReplyDirective);
+    }
   }
   if (QA_BLOCK_STREAMING_PROMPT_RE.test(allInputText) && blockStreamingMarkers) {
     if (!toolOutput) {
