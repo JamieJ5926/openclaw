@@ -30,7 +30,6 @@ describe("fetchXaiUsage", () => {
     await expect(fetchXaiUsage("oauth-token", 5000, mockFetch)).resolves.toEqual({
       provider: "xai",
       displayName: "SuperGrok",
-      usageScope: "account",
       windows: [
         {
           label: "Weekly",
@@ -82,7 +81,6 @@ describe("fetchXaiUsage", () => {
     expect(result).toEqual({
       provider: "xai",
       displayName: "xAI",
-      usageScope: "account",
       windows: [],
       error: "Token expired",
     });
@@ -98,7 +96,6 @@ describe("fetchXaiUsage", () => {
     const result = await fetchXaiUsage("oauth-token", 5000, mockFetch);
 
     expect(result.error).toBe(error);
-    expect(result.usageScope).toBe("account");
     expect(result.windows).toHaveLength(0);
   });
 });

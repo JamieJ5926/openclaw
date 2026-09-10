@@ -40,10 +40,10 @@ export async function fetchCopilotUsage(
 
   if (!res.ok) {
     await res.body?.cancel().catch(() => undefined);
-    return {
-      ...buildUsageHttpErrorSnapshot({ provider: "github-copilot", status: res.status }),
-      usageScope: "account",
-    };
+    return buildUsageHttpErrorSnapshot({
+      provider: "github-copilot",
+      status: res.status,
+    });
   }
 
   const payload = await readProviderJsonResponse<unknown>(res, "github-copilot-usage");
@@ -69,7 +69,6 @@ export async function fetchCopilotUsage(
   return {
     provider: "github-copilot",
     displayName: PROVIDER_LABELS["github-copilot"],
-    usageScope: "account",
     windows,
     plan: data.copilot_plan,
   };

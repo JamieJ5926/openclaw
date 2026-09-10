@@ -108,6 +108,8 @@ families](/plugins/sdk-provider-plugins/hook-families) for the shared builders.
     API-key/OAuth fallback. Return `null` or `undefined` when the provider did
     not handle the request and OpenClaw should continue with generic fallback.
 
+    Account usage is currently implemented for Codex logins through the OpenAI
+    provider. Other bundled providers retain provider-wide usage only.
     To support per-account usage, also declare the provider id in
     `contracts.accountUsageProviders`. Without this opt-in, OpenClaw keeps
     provider-wide usage collection and does not attribute results to a saved
@@ -115,9 +117,10 @@ families](/plugins/sdk-provider-plugins/hook-families) for the shared builders.
     in. Declare it only after both hooks honor the following contract.
 
     When `ctx.authProfileId` is present, the request is for one saved
-    account. The auth resolver helpers are pinned to that exact profile;
+    OAuth or token account. `resolveOAuthToken` is pinned to that exact profile;
     OAuth refresh stays with its current account and prepared configuration.
-    Use those helpers instead of a
+    API-key helpers return no credentials for account requests. Use the OAuth
+    helper instead of a
     provider-wide environment or administrator key, and never substitute a
     different account when the selected profile cannot supply usage auth.
     OpenClaw passes the same `authProfileId` to `fetchUsageSnapshot`.

@@ -147,7 +147,6 @@ function buildSuperGrokUsageSnapshot(data: unknown): ProviderUsageSnapshot {
     return {
       provider: XAI_PROVIDER_ID,
       displayName: "SuperGrok",
-      usageScope: "account",
       windows: [],
       error: "Malformed billing response",
     };
@@ -158,7 +157,6 @@ function buildSuperGrokUsageSnapshot(data: unknown): ProviderUsageSnapshot {
     return {
       provider: XAI_PROVIDER_ID,
       displayName: "SuperGrok",
-      usageScope: "account",
       windows: [],
       error: "No usage data",
     };
@@ -167,7 +165,6 @@ function buildSuperGrokUsageSnapshot(data: unknown): ProviderUsageSnapshot {
   return {
     provider: XAI_PROVIDER_ID,
     displayName: "SuperGrok",
-    usageScope: "account",
     windows: [window],
     billing: resolveBilling(config),
     plan: parsePlan(payload?.["subscription_tier"] ?? payload?.["subscriptionTier"]) ?? "SuperGrok",
@@ -195,14 +192,11 @@ export async function fetchXaiUsage(
   );
   if (!response.ok) {
     await response.body?.cancel().catch(() => undefined);
-    return {
-      ...buildUsageHttpErrorSnapshot({
-        provider: XAI_PROVIDER_ID,
-        status: response.status,
-        tokenExpiredStatuses: [401, 403],
-      }),
-      usageScope: "account",
-    };
+    return buildUsageHttpErrorSnapshot({
+      provider: XAI_PROVIDER_ID,
+      status: response.status,
+      tokenExpiredStatuses: [401, 403],
+    });
   }
 
   try {
@@ -213,7 +207,6 @@ export async function fetchXaiUsage(
     return {
       provider: XAI_PROVIDER_ID,
       displayName: "SuperGrok",
-      usageScope: "account",
       windows: [],
       error: "Malformed billing response",
     };

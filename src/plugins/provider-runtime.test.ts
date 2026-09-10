@@ -559,13 +559,13 @@ describe("provider-runtime", () => {
   it("does not lend a bundled account capability to a legacy override", async () => {
     const resolveUsageAuth = vi.fn(async () => ({ token: "synthetic-organization" }));
     const fetchUsageSnapshot = vi.fn(async () => ({
-      provider: "openrouter",
+      provider: "openai",
       displayName: "Legacy",
       windows: [],
     }));
     resolvePluginProvidersMock.mockReturnValue([
       {
-        id: "openrouter",
+        id: "openai",
         pluginId: "zz-legacy-usage",
         label: "Legacy",
         auth: [],
@@ -575,26 +575,26 @@ describe("provider-runtime", () => {
     ]);
     resolveUsageHookProviderPluginContractsMock.mockReturnValue([
       {
-        pluginId: "openrouter",
-        providerIds: ["openrouter"],
-        accountUsageProviderIds: ["openrouter"],
+        pluginId: "openai",
+        providerIds: ["openai"],
+        accountUsageProviderIds: ["openai"],
       },
-      { pluginId: "zz-legacy-usage", providerIds: ["openrouter"] },
+      { pluginId: "zz-legacy-usage", providerIds: ["openai"] },
     ]);
     const context = {
       config: {},
       env: {},
-      provider: "openrouter",
-      authProfileId: "openrouter:login",
+      provider: "openai",
+      authProfileId: "openai:login",
       resolveApiKeyFromConfigAndStore: () => undefined,
       resolveOAuthToken: async () => null,
     };
-    expect(await resolveProviderUsageAuthWithPlugin({ provider: "openrouter", context })).toEqual({
+    expect(await resolveProviderUsageAuthWithPlugin({ provider: "openai", context })).toEqual({
       handled: true,
     });
     expect(resolveUsageAuth).not.toHaveBeenCalled();
     await resolveProviderUsageSnapshotWithPlugin({
-      provider: "openrouter",
+      provider: "openai",
       context: {
         ...context,
         token: "synthetic-selected",
@@ -606,7 +606,7 @@ describe("provider-runtime", () => {
     expect(fetchUsageSnapshot).not.toHaveBeenCalled();
     expect(
       await resolveProviderUsageAuthWithPlugin({
-        provider: "openrouter",
+        provider: "openai",
         context: { ...context, authProfileId: undefined },
       }),
     ).toEqual({ token: "synthetic-organization" });

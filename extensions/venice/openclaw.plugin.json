@@ -6,8 +6,7 @@
   "enabledByDefault": true,
   "providers": ["venice"],
   "contracts": {
-    "usageProviders": ["venice"],
-    "accountUsageProviders": ["venice"]
+    "usageProviders": ["venice"]
   },
   "modelPricing": {
     "providers": {

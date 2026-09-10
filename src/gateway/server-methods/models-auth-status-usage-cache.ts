@@ -179,9 +179,6 @@ function scheduleProviderUsageRefresh(params: {
       !params.authProfile ||
       !credential ||
       // A reference alone cannot prove that its externally resolved secret is unchanged.
-      (credential.type === "api_key" &&
-        (credential.keyRef ||
-          coerceSecretRef(credential.key, params.configRef.secrets?.defaults))) ||
       (credential.type === "token" &&
         (credential.tokenRef ||
           coerceSecretRef(credential.token, params.configRef.secrets?.defaults))) ||

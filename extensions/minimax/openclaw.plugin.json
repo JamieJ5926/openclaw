@@ -101,8 +101,7 @@
     "musicGenerationProviders": ["minimax", "minimax-portal"],
     "videoGenerationProviders": ["minimax", "minimax-portal"],
     "webSearchProviders": ["minimax"],
-    "usageProviders": ["minimax"],
-    "accountUsageProviders": ["minimax"]
+    "usageProviders": ["minimax"]
   },
   "mediaUnderstandingProviderMetadata": {
     "minimax": {

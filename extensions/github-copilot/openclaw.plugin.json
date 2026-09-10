@@ -267,8 +267,7 @@
   },
   "contracts": {
     "embeddingProviders": ["github-copilot"],
-    "usageProviders": ["github-copilot"],
-    "accountUsageProviders": ["github-copilot"]
+    "usageProviders": ["github-copilot"]
   },
   "setup": {
     "providers": [
