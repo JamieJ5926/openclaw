@@ -115,6 +115,7 @@ It reuses `account/rateLimits/read` in a temporary local app-server with the
 selected login, even when the normal harness uses a native home or remote server.
 Each request fetches current quotas; the UI retains the result until refreshed.
 The request requires `operator.admin` and rejects changed or removed credentials.
+Proxy launch arguments are rejected to avoid changing a shared daemon's login.
 
 ## Requirements
 

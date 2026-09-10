@@ -116,6 +116,23 @@ describe("codex.accountUsage", () => {
     );
   });
 
+  it("rejects proxy launches before sending the selected account to a shared daemon", async () => {
+    config.plugins = {
+      entries: {
+        codex: {
+          config: { appServer: { args: ["app-server", "proxy", "--sock", "/tmp/codex.sock"] } },
+        },
+      },
+    };
+    const respond = await request({ agentId: "main", profileId: "openai:alex" });
+    expect(respond).toHaveBeenCalledWith(
+      false,
+      undefined,
+      expect.objectContaining({ code: "UNAVAILABLE", message: expect.stringContaining("proxy") }),
+    );
+    expect(readCodexAppServerUsage).not.toHaveBeenCalled();
+  });
+
   it.each([
     { agentId: "missing", profileId: "openai:alex" },
     { agentId: "../main", profileId: "openai:alex" },

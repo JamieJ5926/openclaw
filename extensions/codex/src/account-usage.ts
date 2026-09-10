@@ -5,6 +5,7 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import { z } from "zod";
 import { resolveCodexAppServerAuthProfileStore } from "./app-server/auth-profile.js";
 import { resolveCodexAppServerRuntimeOptions } from "./app-server/config.js";
+import { isCodexAppServerProxyLaunch } from "./app-server/launch-args.js";
 import { buildCodexAppServerUsageSnapshot } from "./app-server/rate-limits.js";
 import { readCodexAppServerUsage } from "./app-server/request.js";
 
@@ -59,6 +60,11 @@ export function registerCodexAccountUsage(api: OpenClawPluginApi): void {
         const { start } = resolveCodexAppServerRuntimeOptions({
           pluginConfig: config.plugins?.entries?.codex?.config,
         });
+        if (isCodexAppServerProxyLaunch(start.args)) {
+          throw new Error(
+            "Account usage is unavailable through a Codex proxy. Configure a direct app-server launch.",
+          );
+        }
         const usage = await readCodexAppServerUsage({
           agentDir,
           config,
