@@ -33,6 +33,11 @@ export function isSystemdUserBusUnavailableDetail(detail?: string): boolean {
     normalized.includes("no medium found")
   );
 }
+/** True when busctl itself rejected the invocation, e.g. systemd < 240 has no --json flag. */
+export function isBusctlJsonUnsupportedDetail(detail?: string): boolean {
+  const normalized = normalizeDetail(detail);
+  return normalized.includes("unrecognized option") && normalized.includes("--json");
+}
 
 export function classifySystemdUnavailableDetail(detail?: string): SystemdUnavailableKind | null {
   const normalized = normalizeDetail(detail);

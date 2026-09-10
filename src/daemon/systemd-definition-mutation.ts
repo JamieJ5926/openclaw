@@ -17,6 +17,7 @@ import {
   type ServiceDefinitionMutationCapability,
 } from "./service-types.js";
 import {
+  BUSCTL_JSON_UNSUPPORTED_CODE,
   readSystemdServiceExecStart,
   resolveSystemdEnvironmentFilePath,
   resolveSystemdUnitPath,
@@ -176,7 +177,10 @@ async function inspect(
       }
     }
     return result({ kind: "writable" });
-  } catch {
+  } catch (error) {
+    if (hasErrnoCode(error, BUSCTL_JSON_UNSUPPORTED_CODE)) {
+      return result({ kind: "unknown", reason: "busctl-incompatible", artifact });
+    }
     return result({ kind: "unknown", reason: "inspection-failed", artifact });
   }
 }

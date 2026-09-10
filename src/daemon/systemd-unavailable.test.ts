@@ -19,6 +19,7 @@ import {
 } from "./systemd-lifecycle.js";
 import {
   classifySystemdUnavailableDetail,
+  isBusctlJsonUnsupportedDetail,
   isSystemctlMissingDetail,
   isSystemdUserBusUnavailableDetail,
 } from "./systemd-unavailable.js";
@@ -58,6 +59,19 @@ describe("classifySystemdUnavailableDetail", () => {
 
   it("returns null for unrelated details", () => {
     expect(classifySystemdUnavailableDetail("permission denied")).toBeNull();
+  });
+});
+describe("isBusctlJsonUnsupportedDetail", () => {
+  it("detects old-busctl option rejection", () => {
+    expect(isBusctlJsonUnsupportedDetail("busctl: unrecognized option '--json=short'")).toBe(true);
+  });
+
+  it("rejects unrelated failures", () => {
+    expect(isBusctlJsonUnsupportedDetail("Call failed: Unit openclaw-gateway.service not found.")).toBe(
+      false,
+    );
+    expect(isBusctlJsonUnsupportedDetail("")).toBe(false);
+    expect(isBusctlJsonUnsupportedDetail(undefined)).toBe(false);
   });
 });
 

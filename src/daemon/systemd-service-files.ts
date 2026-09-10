@@ -18,6 +18,7 @@ import type {
   GatewayServiceReadOptions,
 } from "./service-types.js";
 import { bindSystemdManagerOwner, execBusctlUser } from "./systemd-exec.js";
+import { isBusctlJsonUnsupportedDetail } from "./systemd-unavailable.js";
 import type {
   SystemdCommandSnapshotParams,
   SystemdEnvironmentFilesParams,
@@ -33,6 +34,8 @@ const SYSTEMD_GATEWAY_DOTENV_FILENAME = "gateway.systemd.env";
 const SYSTEMD_NODE_DOTENV_FILENAME = "node.systemd.env";
 const SYSTEMD_MANAGER_QUERY_TIMEOUT_MS = 5_000;
 
+/** errno-style marker: busctl rejected --json, so no JSON inspection is possible on this host. */
+export const BUSCTL_JSON_UNSUPPORTED_CODE = "BUSCTL_JSON_UNSUPPORTED";
 export function resolveSystemdUnitPathForName(env: GatewayServiceEnv, name: string): string {
   const home = normalizeWindowsPathSeparators(resolveDaemonHomeDir(env));
   return path.posix.join(home, ".config", "systemd", "user", `${name}.service`);
@@ -118,6 +121,13 @@ async function readSystemdManagerCommand(
     }
     if (result.code !== 0) {
       const detail = result.stderr.trim();
+      if (result.termination === "exit" && isBusctlJsonUnsupportedDetail(detail)) {
+        const unsupported: NodeJS.ErrnoException = new Error(
+          "busctl does not support --json output on this host.",
+        );
+        unsupported.code = BUSCTL_JSON_UNSUPPORTED_CODE;
+        throw unsupported;
+      }
       if (
         result.termination === "exit" &&
         ((args.includes("LoadUnit") && detail === `Call failed: Unit ${unitName} not found.`) ||
