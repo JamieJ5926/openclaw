@@ -2,7 +2,6 @@ import type {
   DesktopObserveResult,
   DesktopSource,
   EnvironmentSummary,
-  WorkerDesktopLaunchResult,
 } from "@openclaw/gateway-protocol";
 import type { ControlUiFocusBuildTarget } from "@openclaw/session-url-contract";
 import { html, nothing } from "lit";
@@ -594,10 +593,7 @@ class OpenClawDesktopPanel extends OpenClawLitElement {
     this.launchingApp = app;
     this.launchErrorText = null;
     try {
-      await client.request<WorkerDesktopLaunchResult>("desktop.launch", {
-        source,
-        app,
-      });
+      await client.request("desktop.launch", { source, app });
       if (operationId !== this.launchOperationId) {
         return;
       }
