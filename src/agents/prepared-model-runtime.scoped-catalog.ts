@@ -1,6 +1,7 @@
 import type { ProviderCatalogOutcome } from "../plugins/provider-catalog.types.js";
 import { withPluginRuntimeGenerationScope } from "../plugins/runtime/generation-scope.js";
 import type { AuthProfileStore } from "./auth-profiles/types.js";
+import { modelCatalogRowToEntry } from "./model-catalog-entry.js";
 import { createPreparedModelCatalogProviderNormalizer } from "./model-catalog-provider-normalizer.js";
 import type { ModelCatalogSnapshot } from "./model-catalog.types.js";
 import { ensureOpenClawModelsJson, planOpenClawModelsJsonSource } from "./models-config.js";
@@ -47,13 +48,19 @@ async function prepareScopedReadOnlyModelCatalogWithMode(
     false,
     catalogMode === "live" ? { providerDiscoveryProviderIds } : {},
   );
-  const { modelCatalog } = await prepareFullCatalogFacts(
+  const { modelCatalog, configuredRuntimeModels } = await prepareFullCatalogFacts(
     agentFactsForInput,
     pluginGeneration,
     catalogMode,
     catalogSource,
   );
-  return materializePreparedModelCatalog(modelCatalog, agentFactsForInput.runtimeCapabilityModels);
+  return materializePreparedModelCatalog(
+    modelCatalog,
+    agentFactsForInput.runtimeCapabilityModels,
+    scopedInput.config.models?.mode === "replace"
+      ? []
+      : configuredRuntimeModels.map(({ model }) => modelCatalogRowToEntry(model)),
+  );
 }
 
 /** Builds a request-scoped read-only catalog without executing live provider discovery. */

@@ -237,6 +237,7 @@ export function prepareModelCatalogPublication(
 export function materializePreparedModelCatalog(
   snapshot: ModelCatalogSnapshot,
   runtimeCapabilityModels: readonly PreparedRuntimeCapabilityModel[],
+  configuredStaticEntries: ModelCatalogSnapshot["staticEntries"] = [],
 ): ModelCatalogSnapshot {
   // Preserve inventory reads before capability preparation when the snapshot has accessors.
   const materialized = { ...snapshot };
@@ -271,8 +272,13 @@ export function materializePreparedModelCatalog(
     });
   materialized.entries = project(sourceEntries);
   materialized.routeVariants = project(snapshot.routeVariants);
-  if (snapshot.staticEntries) {
-    materialized.staticEntries = project(snapshot.staticEntries);
+  if (snapshot.staticEntries || configuredStaticEntries.length > 0) {
+    materialized.staticEntries = project(
+      dedupeByKey(
+        [...configuredStaticEntries, ...(snapshot.staticEntries ?? [])],
+        resolveModelCatalogIdentityKey,
+      ),
+    );
   }
   if (isPreparedModelCatalogFull(snapshot)) {
     markPreparedModelCatalogFull(materialized);
@@ -320,6 +326,9 @@ export function createPreparedModelRuntimeSnapshot(
   const modelCatalog = materializePreparedModelCatalog(
     catalogFacts.modelCatalog,
     agentFacts.runtimeCapabilityModels,
+    input.config.models?.mode === "replace"
+      ? []
+      : configuredRuntimeModels.map(({ model }) => modelCatalogRowToEntry(model)),
   );
   prepareModelCatalogThinkingPolicies({
     catalog: modelCatalog,

@@ -165,10 +165,7 @@ function createFullModelCatalogAccess(params: {
     const projected = materializePreparedModelCatalog(
       catalog,
       params.agentFacts.runtimeCapabilityModels,
-    );
-    projected.staticEntries = dedupeByKey(
-      [...(current.staticEntries ?? []), ...(projected.staticEntries ?? [])],
-      resolveModelCatalogIdentityKey,
+      current.staticEntries,
     );
     projected.entries = dedupeByKey(
       [...projected.entries, ...current.entries],
