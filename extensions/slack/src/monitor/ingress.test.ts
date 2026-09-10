@@ -349,7 +349,9 @@ describe("Slack durable ingress", () => {
         );
         // The original claim can outlive the pre-adoption watchdog without
         // restarting the duplicate or letting a channel migration overtake it.
-        await new Promise((resolve) => setTimeout(resolve, 160));
+        await new Promise((resolve) => {
+          setTimeout(resolve, 160);
+        });
         expect(starts).toEqual(["Ev-independent"]);
         expect(processEvent).toHaveBeenCalledTimes(2);
         settleDuplicate();
