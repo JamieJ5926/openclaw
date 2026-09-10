@@ -67,9 +67,9 @@ describe("isBusctlJsonUnsupportedDetail", () => {
   });
 
   it("rejects unrelated failures", () => {
-    expect(isBusctlJsonUnsupportedDetail("Call failed: Unit openclaw-gateway.service not found.")).toBe(
-      false,
-    );
+    expect(
+      isBusctlJsonUnsupportedDetail("Call failed: Unit openclaw-gateway.service not found."),
+    ).toBe(false);
     expect(isBusctlJsonUnsupportedDetail("")).toBe(false);
     expect(isBusctlJsonUnsupportedDetail(undefined)).toBe(false);
   });

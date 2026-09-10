@@ -18,11 +18,11 @@ import type {
   GatewayServiceReadOptions,
 } from "./service-types.js";
 import { bindSystemdManagerOwner, execBusctlUser } from "./systemd-exec.js";
-import { busctlJsonUnsupportedError, isBusctlJsonUnsupportedDetail } from "./systemd-unavailable.js";
 import type {
   SystemdCommandSnapshotParams,
   SystemdEnvironmentFilesParams,
 } from "./systemd-service-files.types.js";
+import { throwIfBusctlJsonUnsupported } from "./systemd-unavailable.js";
 import {
   parseSystemdEnvAssignments,
   parseSystemdExecStart,
@@ -119,9 +119,8 @@ async function readSystemdManagerCommand(
     }
     if (result.code !== 0) {
       const detail = result.stderr.trim();
-      if (result.termination === "exit" && isBusctlJsonUnsupportedDetail(detail)) {
-        throw busctlJsonUnsupportedError();
-      } else if (
+      throwIfBusctlJsonUnsupported(result);
+      if (
         result.termination === "exit" &&
         ((args.includes("LoadUnit") && detail === `Call failed: Unit ${unitName} not found.`) ||
           (args.includes("GetUnit") &&

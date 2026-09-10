@@ -21,8 +21,8 @@ import {
   resolveSystemdEnvironmentFilePath,
   resolveSystemdUnitPath,
 } from "./systemd-service-files.js";
-import { BUSCTL_JSON_UNSUPPORTED_CODE } from "./systemd-unavailable.js";
 import { assertNoSystemSystemdOwnership, isSystemSystemdOwnershipError } from "./systemd-system.js";
+import { BUSCTL_JSON_UNSUPPORTED_CODE } from "./systemd-unavailable.js";
 
 type Snapshot = { contents: Buffer; mode: number } | null;
 type SystemdDefinitionMutation = {
