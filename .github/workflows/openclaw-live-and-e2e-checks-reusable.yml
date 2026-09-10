@@ -4364,6 +4364,8 @@ jobs:
               echo "OPENCLAW_LIVE_CLI_BACKEND_DEBUG=1" >> "$GITHUB_ENV"
               echo "OPENCLAW_CLI_BACKEND_LOG_OUTPUT=1" >> "$GITHUB_ENV"
               echo "OPENCLAW_TEST_CONSOLE=1" >> "$GITHUB_ENV"
+              echo "OPENCLAW_LIVE_CLI_BACKEND_RESUME_PROBE=1" >> "$GITHUB_ENV"
+              echo "OPENCLAW_LIVE_CLI_BACKEND_MCP_PROBE=1" >> "$GITHUB_ENV"
               ;;
             live-codex-harness*-docker)
               # TODO(2026-10-01): Repair or remove stale staged Codex auth, then choose the canonical CI auth path.
@@ -4698,6 +4700,8 @@ jobs:
               echo "OPENCLAW_LIVE_CLI_BACKEND_DEBUG=1" >> "$GITHUB_ENV"
               echo "OPENCLAW_CLI_BACKEND_LOG_OUTPUT=1" >> "$GITHUB_ENV"
               echo "OPENCLAW_TEST_CONSOLE=1" >> "$GITHUB_ENV"
+              echo "OPENCLAW_LIVE_CLI_BACKEND_RESUME_PROBE=1" >> "$GITHUB_ENV"
+              echo "OPENCLAW_LIVE_CLI_BACKEND_MCP_PROBE=1" >> "$GITHUB_ENV"
               ;;
             live-codex-harness*-docker)
               echo "OPENCLAW_LIVE_CODEX_HARNESS_AUTH=api-key" >> "$GITHUB_ENV"
