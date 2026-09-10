@@ -80,7 +80,7 @@ export async function retainUpdatePackageBackup(
   result: UpdateRunResult,
   assertCurrent: () => void,
 ): Promise<void> {
-  const retained = await transaction.complete({ activationVerified: false });
+  const retained = await transaction.complete({ activationVerified: false }, assertCurrent);
   assertCurrent();
   if (retained) {
     const backupPath = transaction.backupRoot;

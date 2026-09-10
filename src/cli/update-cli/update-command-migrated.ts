@@ -31,7 +31,10 @@ import type {
   MigratedUpdateFinalizationInput,
   MigratedUpdateFinalizationResult,
 } from "./update-command-migrated-types.js";
-import { UpdateCommandRecoveryPendingError } from "./update-command-recovery.js";
+import {
+  createUpdateCommandFinalizationFence,
+  UpdateCommandRecoveryPendingError,
+} from "./update-command-recovery.js";
 import {
   recordUpdateResultNextAction,
   UpdateCommandFailure,
@@ -126,9 +129,10 @@ async function recoverMigratedUpdateInParent(
   result: FinishUpdateParams["result"],
   bufferedSteps: UpdateRunStep[],
   windowsHandedOff: boolean,
+  assertCurrent: () => void,
 ): Promise<MigratedUpdateOutcome> {
   const run = params.opts.run;
-  run?.executorFence?.assertCurrent();
+  assertCurrent();
   const before = params.preManagedServiceStop;
   // The guardian stays delegated. A new owner can enable the restored task only
   // after the candidate is gone and the original executor has resumed.
@@ -138,7 +142,7 @@ async function recoverMigratedUpdateInParent(
           serviceEnv: before.serviceEnv,
           alreadySuspended: true,
           updateRun: run,
-          assertCurrent: () => run?.executorFence?.assertCurrent(),
+          assertCurrent,
           assertCurrentService: createWindowsTaskAutoStartGuard({
             root: params.root,
             before,
@@ -148,8 +152,9 @@ async function recoverMigratedUpdateInParent(
       : undefined;
   let rollback: Awaited<ReturnType<typeof rollbackFailedUpdate>> | undefined;
   try {
-    rollback = await withOwnedManagedUpdateEnv(params.ownedManagedUpdateEnv, () =>
-      rollbackFailedUpdate({
+    rollback = await withOwnedManagedUpdateEnv(params.ownedManagedUpdateEnv, () => {
+      assertCurrent();
+      return rollbackFailedUpdate({
         result,
         previousRoot: params.root,
         packageTransaction: params.packageTransaction,
@@ -169,8 +174,8 @@ async function recoverMigratedUpdateInParent(
         timeoutMs: params.updateStepTimeoutMs,
         nodeRunner: params.packageUpdateNodeRunner,
         invocationCwd: params.invocationCwd,
-      }),
-    );
+      });
+    });
   } finally {
     try {
       await adoptedWindowsRecovery?.complete(rollback?.rolledBack === true);
@@ -182,7 +187,7 @@ async function recoverMigratedUpdateInParent(
       );
     }
   }
-  run?.executorFence?.assertCurrent();
+  assertCurrent();
   if (!rollback.stateRestored || rollback.pendingRecoveryReason) {
     // The previous reader cannot inspect or write a forward-migrated ledger.
     throw new UpdateCommandPendingRecoveryFailure(
@@ -198,7 +203,7 @@ async function recoverMigratedUpdateInParent(
   };
   if (run) {
     for (const step of bufferedSteps) {
-      run.executorFence?.assertCurrent();
+      assertCurrent();
       recordUpdateRunStep(run.runId, step, { env: run.env });
     }
   }
@@ -209,7 +214,7 @@ async function recoverMigratedUpdateInParent(
     stoppedAtMs !== undefined && rollback.verifiedAtMs !== undefined
       ? Math.max(0, rollback.verifiedAtMs - stoppedAtMs)
       : undefined;
-  run?.executorFence?.assertCurrent();
+  assertCurrent();
   if (run && rollback.rolledBack) {
     finishUpdateRun(
       run.runId,
@@ -223,11 +228,12 @@ async function recoverMigratedUpdateInParent(
     result: completed,
     jsonMode: Boolean(params.opts.json),
   });
-  run?.executorFence?.assertCurrent();
+  assertCurrent();
   printResult(completed, params.opts, { nextAction });
   const retained = await params.packageTransaction
-    ?.complete({ activationVerified: false })
+    ?.complete({ activationVerified: false }, assertCurrent)
     .catch((error: unknown) => {
+      assertCurrent();
       defaultRuntime.error(`Update backup cleanup failed: ${formatErrorMessage(error)}`);
     });
   if (retained) {
@@ -251,6 +257,8 @@ export async function continueMigratedUpdateInFreshProcess(
   if (!run) {
     throw new Error("Migrated update continuation requires its admitted run.");
   }
+  const assertCurrent = createUpdateCommandFinalizationFence(params);
+  assertCurrent();
   const windowsRecovery = params.preManagedServiceStop?.windowsTaskAutoStartRecovery;
   const result = params.result;
   const scratchDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-update-migrated-"));
@@ -260,9 +268,17 @@ export async function continueMigratedUpdateInFreshProcess(
   let parentRecoverySupported = false;
   const recover = async (failure: FinishUpdateParams["result"]) => {
     recoveryAttempted = true;
-    return await recoverMigratedUpdateInParent(params, failure, bufferedSteps, windowsHandedOff);
+    assertCurrent();
+    return await recoverMigratedUpdateInParent(
+      params,
+      failure,
+      bufferedSteps,
+      windowsHandedOff,
+      assertCurrent,
+    );
   };
   try {
+    assertCurrent();
     const root = result.root;
     if (!root) {
       throw new Error("The active installation root is unknown; candidate finalization is unsafe.");
@@ -283,7 +299,7 @@ export async function continueMigratedUpdateInFreshProcess(
       TEMP: scratchDir,
     };
     if (run.executorFence || params.updateRecoveryBackup) {
-      run.executorFence?.assertCurrent();
+      assertCurrent();
       // Compatibility only, never authority. An older installed worker ignores
       // new JSON fields, so refuse before exposing any continuation input.
       const check = await runUtf8CommandWithTimeout([...workerCommand, "--check"], {
@@ -297,7 +313,7 @@ export async function continueMigratedUpdateInFreshProcess(
         maxOutputBytes: 64 * 1024,
       });
       candidateExtinguished = check.cleanup !== "uncertain";
-      run.executorFence?.assertCurrent();
+      assertCurrent();
       let contract: unknown;
       try {
         contract = JSON.parse(check.stdout);
@@ -416,12 +432,12 @@ export async function continueMigratedUpdateInFreshProcess(
       : await runChild();
     if ("error" in outcome) {
       candidateExtinguished = true;
-      executorFence?.assertCurrent();
+      assertCurrent();
       throw toErrorObject(outcome.error, "Candidate finalization transport failed");
     }
     const child = outcome.command;
     candidateExtinguished = child.cleanup !== "uncertain";
-    executorFence?.assertCurrent();
+    assertCurrent();
     if (child.stdout) {
       process.stdout.write(child.stdout);
     }
@@ -431,6 +447,7 @@ export async function continueMigratedUpdateInFreshProcess(
     const response = JSON.parse(
       await fs.readFile(resultPath, "utf8"),
     ) as MigratedUpdateFinalizationResult; // SAFETY: Only the candidate worker launched above writes this private artifact.
+    assertCurrent();
     if (
       child.termination !== "exit" ||
       child.code !== 0 ||
@@ -467,14 +484,14 @@ export async function continueMigratedUpdateInFreshProcess(
       response.result.status === "ok"
     ) {
       try {
-        executorFence?.assertCurrent();
+        assertCurrent();
         await writeUpdateRecoveryBackupOutcome(
           params.updateRecoveryBackup,
           { status: "committed" },
-          { assertOwned: () => executorFence?.assertCurrent() },
+          { assertOwned: assertCurrent },
         );
       } catch (error) {
-        executorFence?.assertCurrent();
+        assertCurrent();
         const warning = `Update completed; backup outcome could not be recorded at ${params.updateRecoveryBackup.manifestPath}: ${formatErrorMessage(error)}`;
         defaultRuntime.error(`Warning: ${warning}`);
         response.result.steps.push({
@@ -488,8 +505,9 @@ export async function continueMigratedUpdateInFreshProcess(
       }
     }
     const retained = await params.packageTransaction
-      ?.complete({ activationVerified: response.result.status === "ok" })
+      ?.complete({ activationVerified: response.result.status === "ok" }, assertCurrent)
       .catch((error: unknown) => {
+        assertCurrent();
         defaultRuntime.error(`Update backup cleanup failed: ${String(error)}`);
       });
     if (retained) {
@@ -506,7 +524,7 @@ export async function continueMigratedUpdateInFreshProcess(
       throw error;
     }
     if (params.updateRecoveryBackup && candidateExtinguished) {
-      run.executorFence?.assertCurrent();
+      assertCurrent();
       return await recover({
         ...result,
         status: "error",

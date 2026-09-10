@@ -4,11 +4,13 @@ import { readConfigFileSnapshot } from "../../config/config.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { UpdateChannel } from "../../infra/update-channels.js";
 import { compareSemverStrings } from "../../infra/update-check.js";
+import { normalizeUpdatePostInstallDoctorWarnings } from "../../infra/update-doctor-result.js";
 import {
   persistUpdateRecoveryConfigWrites,
   withUpdateRecoveryConfigWrites,
 } from "../../infra/update-recovery-config-writes.js";
 import { recordUpdateRunStep } from "../../infra/update-run-ledger.js";
+import { updateRunStepsFromResultStep } from "../../infra/update-run-step.js";
 import type { UpdateRunResult } from "../../infra/update-runner.js";
 import { loadInstalledPluginIndexInstallRecords } from "../../plugins/installed-plugin-index-records.js";
 import { withPluginLifecycleLease } from "../../plugins/plugin-lifecycle-lease.js";
@@ -43,6 +45,7 @@ export async function convergeUpdatePlugins(
         await params.beforeDoctor?.();
         assertCurrent();
         await persistUpdateRecoveryConfigWrites(backup, { assertOwned: assertCurrent });
+        assertCurrent();
       },
     }),
   );
@@ -132,6 +135,7 @@ async function convergeUpdatePluginsInternal(params: {
     }
     try {
       let postCorePluginUpdate;
+      const doctorWarnings: string[] = [];
       let pluginsUpdatedInFreshProcess = false;
       if (shouldResumePostCoreInFreshProcess) {
         const freshProcessResult = await continuePostCoreUpdateInFreshProcess({
@@ -196,6 +200,9 @@ async function convergeUpdatePluginsInternal(params: {
           yes: params.opts.yes === true,
           json: params.opts.json === true,
           timeoutMs: params.updateStepTimeoutMs,
+          onWarnings: (warnings) => {
+            doctorWarnings.push(...warnings);
+          },
           ...(params.packageUpdateNodeRunner ? { nodeRunner: params.packageUpdateNodeRunner } : {}),
         });
         postCorePluginUpdate = completedPluginUpdate.pluginUpdate;
@@ -213,6 +220,22 @@ async function convergeUpdatePluginsInternal(params: {
             },
           }
         : params.result;
+      if (doctorWarnings.length) {
+        resultWithPostUpdate = {
+          ...resultWithPostUpdate,
+          steps: [
+            ...resultWithPostUpdate.steps,
+            ...normalizeUpdatePostInstallDoctorWarnings(doctorWarnings).map((message, index) => ({
+              name: `post-plugin doctor warning ${index + 1}`,
+              command: "openclaw doctor --fix",
+              cwd: postUpdateRoot,
+              durationMs: 0,
+              exitCode: 0,
+              advisory: { kind: "package-post-install-doctor" as const, message },
+            })),
+          ],
+        };
+      }
       if (
         params.coreAlreadyCurrent &&
         resultWithPostUpdate.status !== "error" &&
@@ -223,6 +246,11 @@ async function convergeUpdatePluginsInternal(params: {
         delete resultWithPostUpdate.reason;
       }
       if (params.opts.run) {
+        for (const step of resultWithPostUpdate.steps.flatMap(updateRunStepsFromResultStep)) {
+          if (step.step.startsWith("warning:")) {
+            recordUpdateRunStep(params.opts.run.runId, step, { env: params.opts.run.env });
+          }
+        }
         recordUpdateRunStep(
           params.opts.run.runId,
           {

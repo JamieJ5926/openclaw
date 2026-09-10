@@ -367,8 +367,9 @@ export async function finishUpdate(params: FinishUpdateParams): Promise<UpdateRu
     assertCurrent();
     if (retireBackup) {
       await params.packageTransaction
-        ?.complete({ activationVerified: finalResult.status === "ok" })
+        ?.complete({ activationVerified: finalResult.status === "ok" }, assertCurrent)
         .catch((error: unknown) => {
+          assertCurrent();
           defaultRuntime.error(`Update backup cleanup failed: ${formatErrorMessage(error)}`);
         });
     }

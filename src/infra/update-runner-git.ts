@@ -7,15 +7,12 @@ import { resolveStableNodePath } from "./stable-node-path.js";
 import { DEV_BRANCH, type UpdateChannel } from "./update-channels.js";
 import { readBuiltGatewayBuildId, verifyGitUpdateRecovery } from "./update-git-runtime.js";
 import { runStep } from "./update-runner-command.js";
-import {
-  buildUpdateDoctorEnv,
-  buildUpdateRecoveryDoctorArgs,
-  resolveUpdateDoctorExecutionPolicy,
-} from "./update-runner-doctor.js";
+import { resolveUpdateDoctorExecutionPolicy } from "./update-runner-doctor.js";
 import { gitCleanCheckArgs } from "./update-runner-git-commands.js";
 import { runGitCandidatePreflight } from "./update-runner-git-preflight.js";
 import { readCurrentGitUpdateRecovery } from "./update-runner-git-recovery.js";
 import { prepareGitRuntimePromotion } from "./update-runner-git-runtime.js";
+import { runGitDoctorStep, runGitUpstreamStep } from "./update-runner-git-steps.js";
 import {
   prepareGitMutation,
   readBranchName,
@@ -509,7 +506,15 @@ export async function updateGitCheckout(params: {
     };
     const inspectedTarget = opts.inspectGitTarget
       ? await withGitTargetInspectionRoot(
-          { root: gitRoot, runCommand, timeoutMs },
+          {
+            root: gitRoot,
+            runCommand,
+            timeoutMs,
+            onWarning: (warning) => {
+              steps.push(warning);
+              opts.progress?.onStepComplete?.({ ...warning, index: 0, total: 0 });
+            },
+          },
           inspectAndPrepare,
         )
       : undefined;
@@ -559,7 +564,7 @@ export async function updateGitCheckout(params: {
     if (preflight.status !== "ok") {
       return buildError(preflight.reason, preflight.status);
     }
-    // Candidate validation and worktree cleanup finish while the old gateway serves.
+    // Candidate validation and cleanup attempts finish while the old gateway serves.
     // Its exact build is retained on this filesystem; activation never installs or builds.
     const sourceChanged = await checkSourceUnchanged();
     if (sourceChanged) {
@@ -579,21 +584,23 @@ export async function updateGitCheckout(params: {
     }
     createdDevBranchDuringUpdate = activateBranch && preflight.localDevBranchExists === false;
     if (createdDevBranchDuringUpdate && preflight.selectedDevUpstream) {
-      const upstreamFailure = await runRequiredStep(
+      const upstreamArgs = [
+        "git",
+        "-C",
+        gitRoot,
+        "branch",
+        "--set-upstream-to",
+        preflight.selectedDevUpstream,
+        DEV_BRANCH,
+      ];
+      const upstreamOptions = step(
         `git branch --set-upstream-to ${preflight.selectedDevUpstream} ${DEV_BRANCH}`,
-        [
-          "git",
-          "-C",
-          gitRoot,
-          "branch",
-          "--set-upstream-to",
-          preflight.selectedDevUpstream,
-          DEV_BRANCH,
-        ],
-        "checkout-failed",
+        upstreamArgs,
+        gitRoot,
       );
-      if (upstreamFailure) {
-        return upstreamFailure;
+      const upstreamStep = await runGitUpstreamStep(upstreamOptions);
+      if (upstreamStep.exitCode !== 0 && !upstreamStep.advisory) {
+        return await rollbackError("checkout-failed");
       }
     }
     if (!runtimePromotion) {
@@ -639,30 +646,22 @@ export async function updateGitCheckout(params: {
       });
       stateMigrationStarted = true;
       recovery = { serviceRestartSafe: false, reason: "state-migration-started" };
-      const doctorStep = await runStep(
-        step(
-          "openclaw doctor",
-          [
-            doctorNodePath,
-            doctorEntry,
-            "doctor",
-            "--non-interactive",
-            ...(doctorPolicy.fix ? ["--fix"] : []),
-            ...buildUpdateRecoveryDoctorArgs(opts.getUpdateRecoveryBackup?.()),
-          ],
-          gitRoot,
-          {
-            ...opts.getDoctorEnv?.(),
-            ...buildUpdateDoctorEnv({
-              allowGatewayServiceRepair,
-              allowGatewayActivation,
-              serviceRepairPolicy: doctorPolicy.serviceRepairPolicy,
-              deferConfiguredPluginInstallRepair: opts.deferConfiguredPluginInstallRepair,
-            }),
-          },
-        ),
-      );
-      if (doctorStep.exitCode !== 0) {
+      const doctorStep = await runGitDoctorStep({
+        root: gitRoot,
+        entryPath: doctorEntry,
+        nodePath: doctorNodePath,
+        fix: doctorPolicy.fix,
+        updateRecoveryBackup: opts.getUpdateRecoveryBackup?.(),
+        step,
+        env: opts.getDoctorEnv?.(),
+        doctorEnvOptions: {
+          allowGatewayServiceRepair,
+          allowGatewayActivation,
+          serviceRepairPolicy: doctorPolicy.serviceRepairPolicy,
+          deferConfiguredPluginInstallRepair: opts.deferConfiguredPluginInstallRepair,
+        },
+      });
+      if (doctorStep.exitCode !== 0 && !doctorStep.advisory) {
         return await rollbackError("doctor-failed");
       }
     }

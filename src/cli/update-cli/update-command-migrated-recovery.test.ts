@@ -142,6 +142,7 @@ function fixture(): FinishUpdateParams {
 function worker(
   outcome: "failed" | "crashed" | "transport failed" | "uncertain" | "lost executor" | "success",
   parentRecoverySupported = true,
+  afterChild?: () => void,
 ) {
   vi.mocked(runUtf8CommandWithTimeout).mockImplementation(async (argv, options) => {
     const command = {
@@ -194,6 +195,7 @@ function worker(
       }),
     );
     state.events.push("child finished");
+    afterChild?.();
     if (outcome === "lost executor") {
       state.executorCurrent = false;
     }
@@ -242,6 +244,33 @@ it.each(["uncertain", "lost executor"] as const)(
   },
 );
 
+it.each(["run", "executor"] as const)(
+  "refuses parent restoration after its original %s is replaced",
+  async (replacement) => {
+    const params = fixture();
+    const originalRun = params.opts.run;
+    assert(originalRun);
+    worker("failed", true, () => {
+      if (replacement === "run") {
+        params.opts.run = { ...originalRun };
+      } else {
+        originalRun.executorFence = { assertCurrent: vi.fn() };
+      }
+    });
+    vi.mocked(rollbackFailedUpdate).mockImplementation(async (input) => ({
+      result: input.result,
+      rolledBack: true,
+      stateRestored: true,
+    }));
+    await expect(continueMigratedUpdateInFreshProcess(params, [])).rejects.toThrow(
+      "lost its original executor",
+    );
+    expect(rollbackFailedUpdate).not.toHaveBeenCalled();
+    expect(recordUpdateResultNextAction).not.toHaveBeenCalled();
+    expect(printResult).not.toHaveBeenCalled();
+  },
+);
+
 it("does not reopen the old ledger when state restoration fails", async () => {
   worker("failed");
   vi.mocked(rollbackFailedUpdate).mockImplementation(async (input) => ({
@@ -266,7 +295,10 @@ it("keeps successful candidate finalization terminal without restoring state", a
     exitCode: 0,
   });
   expect(rollbackFailedUpdate).not.toHaveBeenCalled();
-  expect(params.packageTransaction?.complete).toHaveBeenCalledWith({ activationVerified: true });
+  expect(params.packageTransaction?.complete).toHaveBeenCalledWith(
+    { activationVerified: true },
+    expect.any(Function),
+  );
 });
 
 it.each([
