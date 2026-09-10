@@ -36,6 +36,7 @@ type CanaryResult = {
   logTail: string[];
   steps: UpdateStepResult[];
   candidateSchemaVersions?: OpenClawSchemaVersions;
+  candidateUpdateRecovery?: "parent-v1";
 } & (
   | { status: "ok" }
   | {
@@ -127,6 +128,7 @@ export async function validateUpdateCandidateCanary(params: {
   const logTail: string[] = [];
   const steps: UpdateStepResult[] = [];
   let candidateSchemaVersions: OpenClawSchemaVersions | undefined;
+  let candidateUpdateRecovery: "parent-v1" | undefined;
   let phase: CanaryPhase = "snapshot";
   let env: NodeJS.ProcessEnv = { ...sourceEnv };
   const capture = (chunk: Buffer | string) => {
@@ -352,6 +354,8 @@ export async function validateUpdateCandidateCanary(params: {
         if (!candidateSchemaVersions) {
           code = 1;
           capture("Candidate migration continuation did not report its schema contract");
+        } else if (isRecord(contract) && contract.updateRecovery === "parent-v1") {
+          candidateUpdateRecovery = "parent-v1";
         }
       }
       const step: UpdateStepResult = {
@@ -433,6 +437,7 @@ export async function validateUpdateCandidateCanary(params: {
       durationMs: Date.now() - started,
       logTail,
       candidateSchemaVersions,
+      ...(candidateUpdateRecovery ? { candidateUpdateRecovery } : {}),
       steps,
     };
   } catch (error) {

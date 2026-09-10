@@ -9,6 +9,7 @@ import { readBuiltGatewayBuildId, verifyGitUpdateRecovery } from "./update-git-r
 import { runStep } from "./update-runner-command.js";
 import {
   buildUpdateDoctorEnv,
+  buildUpdateRecoveryDoctorArgs,
   resolveUpdateDoctorExecutionPolicy,
 } from "./update-runner-doctor.js";
 import { gitCleanCheckArgs } from "./update-runner-git-commands.js";
@@ -647,14 +648,18 @@ export async function updateGitCheckout(params: {
             "doctor",
             "--non-interactive",
             ...(doctorPolicy.fix ? ["--fix"] : []),
+            ...buildUpdateRecoveryDoctorArgs(opts.getUpdateRecoveryBackup?.()),
           ],
           gitRoot,
-          buildUpdateDoctorEnv({
-            allowGatewayServiceRepair,
-            allowGatewayActivation,
-            serviceRepairPolicy: doctorPolicy.serviceRepairPolicy,
-            deferConfiguredPluginInstallRepair: opts.deferConfiguredPluginInstallRepair,
-          }),
+          {
+            ...opts.getDoctorEnv?.(),
+            ...buildUpdateDoctorEnv({
+              allowGatewayServiceRepair,
+              allowGatewayActivation,
+              serviceRepairPolicy: doctorPolicy.serviceRepairPolicy,
+              deferConfiguredPluginInstallRepair: opts.deferConfiguredPluginInstallRepair,
+            }),
+          },
         ),
       );
       if (doctorStep.exitCode !== 0) {

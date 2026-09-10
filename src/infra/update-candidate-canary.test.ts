@@ -102,6 +102,30 @@ afterEach(async () => {
 });
 
 describe("update candidate canary", () => {
+  it.each([
+    { advertised: undefined, expected: undefined },
+    { advertised: "unknown-parent-v2", expected: undefined },
+    { advertised: "parent-v1", expected: "parent-v1" },
+  ])(
+    "reports parent recovery support only for the supported advertised contract ($advertised)",
+    async ({ advertised, expected }) => {
+      runtimeContract = { state: 2, agent: 3, updateRecovery: advertised };
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => Response.json({ status: "started", ready: true })),
+      );
+      const result = await validateUpdateCandidateCanary({
+        root,
+        stateDir: root,
+        config: {},
+        env: {},
+        timeoutMs: 3_000,
+      });
+      expect(result.status).toBe("ok");
+      expect(result.candidateUpdateRecovery).toBe(expected);
+    },
+  );
+
   it.each([undefined, "unknown-owned-v2"])(
     "keeps unsupported checkpoint capability out of admission (%s)",
     async (candidateMutation) => {
@@ -144,6 +168,7 @@ describe("update candidate canary", () => {
     });
     expect(result).toMatchObject({ status: "ok", phase: "runtime" });
     expect(result.candidateSchemaVersions).toBeUndefined();
+    expect(result).not.toHaveProperty("candidateUpdateRecovery");
     expect(result).not.toHaveProperty("checkpointContinuation");
     expect(result.steps).toEqual([
       expect.objectContaining({

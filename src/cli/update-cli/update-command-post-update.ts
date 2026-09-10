@@ -13,6 +13,10 @@ import { classifyUpdateOutcome } from "../../shared/update-outcome.js";
 import { formatCliCommand } from "../command-format.js";
 import { printResult } from "./progress.js";
 import { tryWriteCompletionCache } from "./shared.js";
+import {
+  completeUpdateCommandBackup,
+  retainUpdatePackageBackup,
+} from "./update-command-backup-lifecycle.js";
 import { convergeUpdatePlugins } from "./update-command-convergence.js";
 import type { FinishUpdateParams } from "./update-command-finish-types.js";
 import { retireStandaloneGitWrapper } from "./update-command-git.js";
@@ -26,6 +30,7 @@ import { prepareUpdateRestart } from "./update-command-restart-context.js";
 import {
   markControlPlaneUpdateRestartSentinelFailureBestEffort,
   UpdateCommandFailure,
+  UpdateCommandPendingRecoveryFailure,
   resolveAutomaticUpdateTriage,
   recordUpdateResultNextAction,
   writeControlPlaneUpdateRestartSentinelBestEffort,
@@ -108,7 +113,7 @@ export async function finishUpdate(params: FinishUpdateParams): Promise<UpdateRu
   // Finalization owns the complete outcome, including recovery, restart, and completion work.
   const completedResult = (result: UpdateRunResult): UpdateRunResult => ({
     ...result,
-    ...(result.status === "error" && params.rollbackBlockedReason
+    ...(result.status === "error" && params.rollbackBlockedReason && !params.updateRecoveryBackup
       ? { reason: params.rollbackBlockedReason }
       : {}),
     durationMs: Math.max(0, Date.now() - params.startedAt),
@@ -142,6 +147,9 @@ export async function finishUpdate(params: FinishUpdateParams): Promise<UpdateRu
     repair?: (result: UpdateRunResult) => Promise<UpdateRunResult>,
   ) => {
     assertCurrent();
+    if (params.deferFailureRecoveryToParent && initialResult.status === "error") {
+      throw new UpdateCommandFailure(initialResult, 1);
+    }
     let result = initialResult;
     let recoverService = initialRecoverService;
     if (
@@ -155,6 +163,7 @@ export async function finishUpdate(params: FinishUpdateParams): Promise<UpdateRu
           result,
           previousRoot: params.root,
           packageTransaction: params.packageTransaction,
+          updateRecoveryBackup: params.updateRecoveryBackup,
           rollbackBlockedReason: params.rollbackBlockedReason,
           schemaVersions: params.schemaVersions,
           candidateSchemaVersions: params.candidateSchemaVersions,
@@ -169,6 +178,12 @@ export async function finishUpdate(params: FinishUpdateParams): Promise<UpdateRu
           invocationCwd: params.invocationCwd,
         }),
       );
+      if (rollback.pendingRecoveryReason) {
+        throw new UpdateCommandPendingRecoveryFailure(
+          rollback.result,
+          rollback.pendingRecoveryReason,
+        );
+      }
       result = rollback.result;
       rollbackStopState = rollback.stoppedForRollback;
       rolledBack = rollback.rolledBack;
@@ -181,6 +196,7 @@ export async function finishUpdate(params: FinishUpdateParams): Promise<UpdateRu
     if (
       result.status === "error" &&
       params.rollbackBlockedReason &&
+      !params.updateRecoveryBackup &&
       !postVerificationRepairAttempted
     ) {
       result = { ...result, reason: params.rollbackBlockedReason };
@@ -223,6 +239,9 @@ export async function finishUpdate(params: FinishUpdateParams): Promise<UpdateRu
     notify = true,
   ): Promise<UpdateRunResult> => {
     assertCurrent();
+    if (params.deferFailureRecoveryToParent && initialResult.status === "error") {
+      throw new UpdateCommandFailure(initialResult, 1);
+    }
     const { result, recoverService } = await recoverFailedResult(
       initialResult,
       initialRecoverService,
@@ -291,22 +310,8 @@ export async function finishUpdate(params: FinishUpdateParams): Promise<UpdateRu
     const retireBackup =
       finalResult.status === "ok" || finalResult.recovery?.packageRollbackVerified === true;
     if (params.packageTransaction && !retireBackup) {
-      const retained = await params.packageTransaction.complete({ activationVerified: false });
-      if (retained) {
-        const backupPath = params.packageTransaction.backupRoot;
-        finalResult.steps = [
-          ...finalResult.steps,
-          {
-            ...retained,
-            stderrTail:
-              retained.exitCode === 0 || retained.stderrTail?.includes(backupPath)
-                ? retained.stderrTail
-                : [retained.stderrTail, `Recovery transaction backup path: ${backupPath}`]
-                    .filter(Boolean)
-                    .join("\n"),
-          },
-        ];
-      }
+      await retainUpdatePackageBackup(params.packageTransaction, finalResult, assertCurrent);
+      assertCurrent();
     }
     if (finalResult.status === "error" && !rolledBack && currentServiceStop()?.stopped) {
       await recordFailedUpdateGatewayState(
@@ -314,6 +319,7 @@ export async function finishUpdate(params: FinishUpdateParams): Promise<UpdateRu
         currentServiceStop()?.serviceEnv ?? process.env,
       );
     }
+    await completeUpdateCommandBackup(params, finalResult, assertCurrent);
     recordNextAction(finalResult);
     if (notify) {
       await writeControlPlaneUpdateRestartSentinelBestEffort({
@@ -425,7 +431,7 @@ export async function finishUpdate(params: FinishUpdateParams): Promise<UpdateRu
 
     const postUpdateRoot = params.result.root ?? params.root;
     const convergePlugins = async (beforeDoctor?: () => Promise<void>) => {
-      const convergence = await convergeUpdatePlugins({ ...params, beforeDoctor });
+      const convergence = await convergeUpdatePlugins({ ...params, beforeDoctor }, assertCurrent);
       if (convergence.resultWithPostUpdate.status === "error") {
         triageAllowed = !convergence.cancelled;
         const reported = await reportResult(convergence.resultWithPostUpdate);
