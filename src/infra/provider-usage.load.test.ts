@@ -609,48 +609,65 @@ describe("provider-usage.load", () => {
     ]);
   });
 
-  it("loads provider usage through guarded HTTP with the default fetch", async () => {
-    const server = createServer((_request, response) => response.end("42"));
-    await new Promise<void>((resolve) => {
-      server.listen(0, "127.0.0.1", resolve);
-    });
-    try {
-      const address = server.address();
-      if (!address || typeof address === "string") {
-        throw new Error("Expected a listening HTTP server");
+  it.each(["direct", "guarded"])(
+    "loads provider usage through %s HTTP with the default fetch",
+    async (transport) => {
+      const globalFetch = globalThis.fetch;
+      let interceptedRequests = 0;
+      if (transport === "direct") {
+        globalThis.fetch = (input, init) => {
+          interceptedRequests++;
+          return globalFetch(input, init);
+        };
       }
-      resolveProviderUsageSnapshotWithPluginMock.mockImplementation(async ({ context }) => {
-        const guarded = await fetchWithSsrFGuard({
-          url: `http://127.0.0.1:${address.port}`,
-          fetchImpl: context.fetchFn,
-          policy: { allowPrivateNetwork: true },
+      const server = createServer((_request, response) => response.end("42"));
+      await new Promise<void>((resolve) => {
+        server.listen(0, "127.0.0.1", resolve);
+      });
+      try {
+        const address = server.address();
+        if (!address || typeof address === "string") {
+          throw new Error("Expected a listening HTTP server");
+        }
+        resolveProviderUsageSnapshotWithPluginMock.mockImplementation(async ({ context }) => {
+          const url = `http://127.0.0.1:${address.port}`;
+          const guarded =
+            transport === "guarded"
+              ? await fetchWithSsrFGuard({
+                  url,
+                  fetchImpl: context.fetchFn,
+                  policy: { allowPrivateNetwork: true },
+                })
+              : { response: await context.fetchFn(url), release: async () => {} };
+          try {
+            return {
+              provider: "xiaomi",
+              displayName: "Xiaomi",
+              windows: [{ label: "5h", usedPercent: Number(await guarded.response.text()) }],
+            };
+          } finally {
+            await guarded.release();
+          }
         });
-        try {
-          return {
+        const summary = await loadProviderUsageSummary({
+          now: usageNow,
+          auth: [{ provider: "xiaomi", token: "token-x" }],
+          env: {},
+        });
+        expect(summary.providers).toEqual([
+          {
             provider: "xiaomi",
             displayName: "Xiaomi",
-            windows: [{ label: "5h", usedPercent: Number(await guarded.response.text()) }],
-          };
-        } finally {
-          await guarded.release();
-        }
-      });
-      const summary = await loadProviderUsageSummary({
-        now: usageNow,
-        auth: [{ provider: "xiaomi", token: "token-x" }],
-        env: {},
-      });
-      expect(summary.providers).toEqual([
-        {
-          provider: "xiaomi",
-          displayName: "Xiaomi",
-          windows: [{ label: "5h", usedPercent: 42 }],
-        },
-      ]);
-    } finally {
-      await new Promise<void>((resolve, reject) => {
-        server.close((error) => (error ? reject(error) : resolve()));
-      });
-    }
-  });
+            windows: [{ label: "5h", usedPercent: 42 }],
+          },
+        ]);
+        expect(interceptedRequests).toBe(transport === "direct" ? 1 : 0);
+      } finally {
+        globalThis.fetch = globalFetch;
+        await new Promise<void>((resolve, reject) => {
+          server.close((error) => (error ? reject(error) : resolve()));
+        });
+      }
+    },
+  );
 });

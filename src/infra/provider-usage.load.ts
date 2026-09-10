@@ -9,9 +9,12 @@ import {
 } from "../plugins/provider-runtime.js";
 import { trackAsyncWork } from "../shared/async-work-scope.js";
 import { formatErrorMessage } from "./errors.js";
-import { resolveFetch } from "./fetch.js";
+import { wrapFetchWithAbortSignal } from "./fetch.js";
 import { resolveProxyFetchFromEnv } from "./net/proxy-fetch.js";
-import { fetchWithRuntimeDispatcherOrMockedGlobal } from "./net/runtime-fetch.js";
+import {
+  fetchWithRuntimeDispatcherOrMockedGlobal,
+  type DispatcherAwareRequestInit,
+} from "./net/runtime-fetch.js";
 import {
   type ProviderAuth,
   resolveProviderAuths,
@@ -124,12 +127,14 @@ export async function loadProviderUsageSummary(
   const timeoutMs = opts.timeoutMs ?? PROVIDER_USAGE_TIMEOUT_MS;
   const config = opts.config ?? getRuntimeConfig();
   const env = opts.env ?? process.env;
+  const globalFetch = globalThis.fetch;
   const fetchFn = opts.fetch
-    ? resolveFetch(opts.fetch)
-    : (resolveProxyFetchFromEnv(env) ?? resolveFetch(fetchWithRuntimeDispatcherOrMockedGlobal));
-  if (!fetchFn) {
-    throw new Error("fetch is not available");
-  }
+    ? wrapFetchWithAbortSignal(opts.fetch)
+    : (resolveProxyFetchFromEnv(env) ??
+      wrapFetchWithAbortSignal((input, init?: DispatcherAwareRequestInit) =>
+        // Dispatcher requests need matching Undici; direct requests retain global capture.
+        (init?.dispatcher ? fetchWithRuntimeDispatcherOrMockedGlobal : globalFetch)(input, init),
+      ));
 
   const descriptors: ProviderUsagePluginDescriptor[] = opts.authProfile
     ? [
