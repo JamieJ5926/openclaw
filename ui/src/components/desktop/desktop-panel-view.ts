@@ -205,6 +205,7 @@ export function renderDesktopConnection(options: {
   environmentSelected: boolean;
   launchingApp: WorkerDesktopAppId | null;
   showApps: boolean;
+  pictureInPictureControl: TemplateResult;
   onDisconnect: () => void;
   onLaunch: (app: WorkerDesktopAppId) => void;
   onTakeControl: () => void;
@@ -241,6 +242,7 @@ export function renderDesktopConnection(options: {
           : nothing
       }
       <span class="desktop-toolbar__spacer"></span>
+      ${options.pictureInPictureControl}
       <button
         class="desktop-toolbar-action"
         type="button"

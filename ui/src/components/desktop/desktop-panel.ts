@@ -31,17 +31,17 @@ import {
 } from "./desktop-panel-connection.ts";
 import { desktopCredentialRequirement } from "./desktop-panel-credentials.ts";
 import { DesktopPanelFullscreenController } from "./desktop-panel-fullscreen-controller.ts";
-import { desktopPanelLayout } from "./desktop-panel-layout.ts";
+import { desktopPanelLayout, desktopPanelStyle } from "./desktop-panel-layout.ts";
 import { type DesktopPanelState, renderDesktopPanelRecovery } from "./desktop-panel-state.ts";
 import { desktopPanelElementStyles } from "./desktop-panel-styles.ts";
 import {
   renderDesktopConnection,
   renderDesktopCredentials,
-  renderDesktopNotice,
   renderDesktopPanelContent,
   renderDesktopPanelHeader,
   renderDesktopPicker,
 } from "./desktop-panel-view.ts";
+import { DesktopPictureInPicture } from "./desktop-picture-in-picture.ts";
 import { DesktopSessionController } from "./desktop-session-controller.ts";
 import { desktopSourceForEnvironment } from "./desktop-source.ts";
 
@@ -86,6 +86,7 @@ class OpenClawDesktopPanel extends OpenClawLitElement {
   @state() private scaleViewport = true;
 
   private readonly connection = new DesktopConnectionHandoff();
+  private readonly pictureInPicture = new DesktopPictureInPicture(this, () => this.state);
   private credentials: DesktopCredentials | undefined;
   private credentialAuth: "vnc-password" | "ard-account" | undefined;
   private pendingConnection: PendingDesktopConnection | null = null;
@@ -277,6 +278,7 @@ class OpenClawDesktopPanel extends OpenClawLitElement {
   }
 
   private disconnectConnection(retainViewer = false): void {
+    this.pictureInPicture.close();
     this.operationId += 1;
     this.pendingConnection = null;
     this.connection.begin(retainViewer);
@@ -615,7 +617,7 @@ class OpenClawDesktopPanel extends OpenClawLitElement {
     if (!this.available || (!this.documentMode && !this.embedded && !this.dockLayout.open)) {
       return nothing;
     }
-    const notice = renderDesktopNotice(
+    const notice = this.pictureInPicture.renderNotice(
       this.fullscreenMode.errorText ?? this.launchErrorText ?? this.errorText,
       this.noticeText,
     );
@@ -658,6 +660,7 @@ class OpenClawDesktopPanel extends OpenClawLitElement {
         controlling: this.controlling,
         scaleViewport: this.scaleViewport,
         keyboardInputValue: this.mobileKeyboard.value,
+        pictureInPictureControl: this.pictureInPicture.renderButton(),
         notice,
         picker,
         credentials,
@@ -680,21 +683,16 @@ class OpenClawDesktopPanel extends OpenClawLitElement {
       environmentSelected: this.environmentId !== null,
       launchingApp: this.launchingApp,
       showApps: this.source?.kind === "environment",
+      pictureInPictureControl: this.pictureInPicture.renderButton(),
       onLaunch: (app) => void this.launchApp(app),
       onTakeControl: () => void this.connectEnvironment(this.environmentId, true),
       onDisconnect: () => this.returnToPicker(),
     });
     const dock = this.dockLayout.dock;
-    const style =
-      this.embedded || this.fullscreenMode.active
-        ? ""
-        : dock === "bottom"
-          ? `height:${this.dockLayout.height}px`
-          : `width:${this.dockLayout.width}px`;
     return html`
       <section
         class="bp bp--${this.embedded ? "embedded" : dock}"
-        style=${style}
+        style=${desktopPanelStyle(this.embedded || this.fullscreenMode.active, this.dockLayout)}
         aria-label=${t("desktop.title")}
       >
         ${this.embedded ? nothing : this.dockLayout.renderResizer("bp", t("desktop.resize"))}
