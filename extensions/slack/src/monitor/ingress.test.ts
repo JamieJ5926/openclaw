@@ -24,6 +24,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSlackMonitorContext } from "./context.js";
 import { registerSlackMemberEvents } from "./events/members.js";
 import { createSlackDurableIngress, resolveSlackIngressTurnLifecycle } from "./ingress.js";
+import { claimSlackMessageDispatchReplay } from "./message-dispatch-dedupe.js";
 
 type SlackIngressQueue = NonNullable<Parameters<typeof createSlackDurableIngress>[0]["queue"]>;
 type SlackIngressPayload = Parameters<SlackIngressQueue["enqueue"]>[1];
@@ -303,6 +304,63 @@ describe("Slack durable ingress", () => {
 
       expect(order).toEqual(["ack-start", "ack-complete", "dispatch"]);
       await ingress.stop();
+    });
+  });
+
+  it("releases a waiting duplicate's channel lane while preserving its migration fence", async () => {
+    await withQueue(async (queue) => {
+      let settleDuplicate = () => {};
+      const pending = new Promise<boolean>((resolve) => {
+        settleDuplicate = () => resolve(true);
+      });
+      const starts: string[] = [];
+      const processEvent = vi.fn(async (receiverEvent: ReceiverEvent) => {
+        const id = (receiverEvent.body as { event_id: string }).event_id;
+        const lifecycle = resolveSlackIngressTurnLifecycle(receiverEvent.customProperties)!;
+        if (id === "Ev-duplicate") {
+          await claimSlackMessageDispatchReplay({
+            guard: {
+              claim: async () => ({ kind: "inflight", pending }),
+            } as unknown as Parameters<typeof claimSlackMessageDispatchReplay>[0]["guard"],
+            key: "logical-message",
+            onWaiting: lifecycle.onDispatchWaiting,
+          });
+          starts.push(id);
+          return;
+        }
+        starts.push(id);
+        await lifecycle.onAdopted();
+      });
+      const { ingress, receive } = attachIngress(queue, processEvent, {
+        adoptionStallTimeoutMs: 80,
+      });
+      ingress.start();
+      try {
+        await receive(createReceiverEvent("Ev-duplicate"));
+        await vi.waitFor(() => expect(processEvent).toHaveBeenCalledOnce());
+        await receive(
+          createReceiverEvent("Ev-independent", undefined, { ts: "1700000001.000100" }),
+        );
+        await vi.waitFor(() => expect(starts).toEqual(["Ev-independent"]), { timeout: 500 });
+        await receive(
+          createReceiverEventWithBody(
+            createChannelIdChangedEnvelope("Ev-migration", "C_OLD", "C_TEST"),
+          ),
+        );
+        // The original claim can outlive the pre-adoption watchdog without
+        // restarting the duplicate or letting a channel migration overtake it.
+        await new Promise((resolve) => setTimeout(resolve, 160));
+        expect(starts).toEqual(["Ev-independent"]);
+        expect(processEvent).toHaveBeenCalledTimes(2);
+        settleDuplicate();
+        await ingress.waitForIdle();
+        expect(starts).toEqual(["Ev-independent", "Ev-duplicate", "Ev-migration"]);
+        expect(await queue.listPending()).toEqual([]);
+        expect(await queue.listClaims()).toEqual([]);
+      } finally {
+        settleDuplicate();
+        await ingress.stop();
+      }
     });
   });
 

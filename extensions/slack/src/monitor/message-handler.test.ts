@@ -728,6 +728,68 @@ describe("createSlackMessageHandler", () => {
     expect(dispatchPreparedSlackMessageMock).toHaveBeenCalledTimes(1);
   });
 
+  it("defers ingress before waiting for a duplicate's dispatch claim", async () => {
+    let release = () => {};
+    const pending = new Promise<boolean>((resolve) => {
+      release = () => resolve(true);
+    });
+    const onDispatchWaiting = vi.fn();
+    const handler = createSlackMessageHandler({
+      ctx: createContext(),
+      account: { accountId: "default" } as Parameters<
+        typeof createSlackMessageHandler
+      >[0]["account"],
+      dispatchReplayGuard: {
+        claim: async () => ({ kind: "inflight", pending }),
+      } as unknown as NonNullable<
+        Parameters<typeof createSlackMessageHandler>[0]["dispatchReplayGuard"]
+      >,
+    });
+    const handled = handler(
+      { type: "message", channel: "C_TEST", ts: "1709000000.009999", text: "hello" } as never,
+      {
+        source: "message",
+        awaitDispatch: true,
+        turnAdoptionLifecycle: {
+          admission: "exclusive",
+          abortSignal: new AbortController().signal,
+          onAdopted: vi.fn(),
+          onDeferred: vi.fn(),
+          onAbandoned: vi.fn(),
+          onDispatchWaiting,
+        },
+      },
+    );
+    await vi.waitFor(() => expect(enqueueMock).toHaveBeenCalledOnce());
+    const { createChannelInboundDebouncer } = await vi.importActual<
+      typeof import("openclaw/plugin-sdk/channel-inbound")
+    >("openclaw/plugin-sdk/channel-inbound");
+    const { debouncer } = createChannelInboundDebouncer<Record<string, unknown>>({
+      cfg: {},
+      channel: "slack",
+      debounceMsOverride: 0,
+      buildKey: () => "thread",
+      serializeImmediate: true,
+      onFlush: (entries, createFlush) => onFlushCallbacks[0]!(entries, createFlush),
+    });
+    let admitted = false;
+    const admission = debouncer.enqueue(enqueueMock.mock.calls[0]?.[0] as Record<string, unknown>);
+    void admission.then(() => {
+      admitted = true;
+    });
+    try {
+      await vi.waitFor(() => expect(onDispatchWaiting).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(admitted).toBe(true));
+      expect(prepareSlackMessageMock).not.toHaveBeenCalled();
+    } finally {
+      release();
+      await admission;
+      await debouncer.drain();
+      await handled;
+    }
+    expect(dispatchPreparedSlackMessageMock).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["message", "app_mention"],
     ["app_mention", "message"],

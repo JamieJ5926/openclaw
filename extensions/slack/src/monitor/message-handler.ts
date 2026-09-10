@@ -258,6 +258,13 @@ export function createSlackMessageHandler(params: {
                 const claim = await claimSlackMessageDispatchReplay({
                   guard: dispatchReplayGuard,
                   key: replayKey,
+                  onWaiting: () => {
+                    entry.opts.turnAdoptionLifecycle?.onDispatchWaiting?.();
+                    // The logical owner already holds this message's ordering.
+                    // Release both ingress and debounce admission so later input
+                    // can reach the active turn while the twin awaits settlement.
+                    admissionLifecycle.onDeferred();
+                  },
                 });
                 if (claim.kind === "claimed") {
                   claims.push(claim.handle);
