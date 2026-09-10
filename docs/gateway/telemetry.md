@@ -10,8 +10,9 @@ read_when:
 
 **Automatic update checks send a daily request by default.** It asks whether a
 newer version exists and includes the OpenClaw version, operating system, Node.js
-version, CPU architecture, and request surface. The receiver also uses
-Cloudflare-derived request-origin geography. Feature statistics are opt-in.
+version, CPU architecture, and request surface. A planned receiver rollout will
+add Cloudflare-derived request-origin geography to the hosted telemetry service.
+Feature statistics are opt-in.
 This page describes update-check telemetry, not requests made by configured
 providers, channels, or other services.
 
@@ -80,25 +81,35 @@ replacement endpoint URL. The public server source is available at
 
 ## Cloudflare-derived request geography
 
-Cloudflare processes the connection IP address and provides approximate
-request-origin **country, region code, city, and timezone**. The receiver records
-those derived fields alongside request metadata in Analytics Engine. They come
-from Cloudflare's incoming request metadata, not a client payload or client-supplied
-geography headers. Missing or invalid values are left empty.
+**Pending receiver rollout:** The geography recording described below starts
+only after the receiver change is deployed and verified. This client documentation
+change does not enable it.
+
+For the hosted telemetry service, Cloudflare processes the connection IP address
+and provides approximate request-origin **country, region code, city, and timezone**.
+After the rollout, the receiver will record those derived fields alongside
+request metadata in Analytics Engine. They come from Cloudflare's incoming request
+metadata, not a client payload or client-supplied geography headers. Missing or
+invalid values are left empty.
 
 These fields describe the network origin of a request. They may reflect a proxy,
 VPN exit, or remote server rather than a person's location, language, or locale.
 The derived timezone is not the OpenClaw runtime's clock setting. Region codes
 are interpreted within their country, not as globally unique names.
 
-Geography is baseline update-request metadata: it remains included when feature
-statistics are off or `DO_NOT_TRACK` is set. There is no separate client timezone
-setting, payload field, or prompt. Disabling automatic update requests also stops
-their baseline metadata reporting.
+Once deployed, geography will be baseline update-request metadata: it will remain
+included when feature statistics are off or `DO_NOT_TRACK` is set. There is no
+separate client timezone setting, payload field, or prompt. Disabling automatic
+update requests also stops their baseline metadata reporting.
 
 The same **three-month** Analytics Engine retention applies to these fields.
 Disabling requests does not erase previously recorded rows. Public stats and
 homepage aggregates do not expose geography fields or breakdowns.
+
+This section describes the hosted service at
+[telemetry.openclaw.ai](https://telemetry.openclaw.ai). A replacement endpoint
+configured with `OPENCLAW_TELEMETRY_ENDPOINT` can use different infrastructure
+and processing or storage policies.
 
 <a id="optional-anonymous-feature-statistics" />
 
@@ -179,7 +190,7 @@ file paths, hostnames, account identifiers, user identifiers, or installation
 and machine identifiers. OpenClaw does not create a random UUID or other
 persistent client identifier for these requests.
 
-The service's Analytics Engine rows exclude those direct identifiers and raw
+The hosted service's Analytics Engine rows exclude those direct identifiers and raw
 client IP addresses, coordinates, postal codes, and physical-device hardware
 details. Cloudflare handles TLS and network requests and processes the connection
 IP to derive geography. The Worker also reads that IP transiently for rate
@@ -213,8 +224,8 @@ You can also configure the same preference directly:
 Set `DO_NOT_TRACK=1` or `DO_NOT_TRACK=true` to force feature statistics off,
 even when `telemetry.enabled` is `true`. `DO_NOT_TRACK` does not disable the
 daily update check: OpenClaw sends the update-only `GET` request without a
-feature-statistics body. Baseline request metadata, including Cloudflare-derived
-geography, remains eligible for recording.
+feature-statistics body. Baseline request metadata remains eligible for recording;
+Cloudflare-derived geography will join it after the receiver rollout.
 
 ## Automated environments
 
