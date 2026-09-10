@@ -1,5 +1,5 @@
 import { Command, CommanderError } from "commander";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { registerTelemetryCli } from "./telemetry-cli.js";
 
@@ -27,12 +27,7 @@ vi.mock("../infra/telemetry.js", () => ({
 vi.mock("../runtime.js", () => ({ defaultRuntime: mocks.defaultRuntime }));
 
 const config: OpenClawConfig = {
-  telemetry: {
-    enabled: true,
-    consentedAt: "2026-08-23T00:00:00.000Z",
-    runtimeUtcOffsetEnabled: true,
-    runtimeUtcOffsetConsentedAt: "2026-09-01T12:00:00.000Z",
-  },
+  telemetry: { enabled: true, consentedAt: "2026-08-23T00:00:00.000Z" },
 };
 const payload = {
   schema: 1,
@@ -45,7 +40,6 @@ const payload = {
     providerFamilies: ["anthropic", "openai"],
     pluginsEnabled: 7,
     sessionsLast24h: 14,
-    runtimeUtcOffsetBucket: "pos_6_12",
   },
 };
 
@@ -70,10 +64,7 @@ async function runTelemetryCli(args: string[]): Promise<void> {
 
 describe("telemetry cli", () => {
   beforeEach(() => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-09-09T12:00:00.000Z"));
     vi.clearAllMocks();
-    mocks.transformConfigFileWithRetry.mockReset();
     mocks.runtimeLogs.length = 0;
     mocks.runtimeErrors.length = 0;
     mocks.defaultRuntime.writeJson.mockImplementation(() => {});
@@ -87,12 +78,7 @@ describe("telemetry cli", () => {
       reason: "enabled",
       endpoint: "https://telemetry.openclaw.ai/api/latest-version",
       lastPingAt: Date.parse("2026-08-22T12:00:00.000Z"),
-      runtimeUtcOffset: { optedIn: true, active: true },
     });
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
   });
 
   it("prints exactly the canonical payload when feature statistics are enabled", async () => {
@@ -101,8 +87,6 @@ describe("telemetry cli", () => {
     expect(mocks.buildTelemetryPayload).toHaveBeenCalledWith(config, { surface: "gateway" });
     expect(mocks.runtimeLogs).toContain(JSON.stringify(payload));
     expect(mocks.runtimeLogs).toContain("Feature stats: enabled");
-    expect(mocks.runtimeLogs).toContain("Runtime UTC-offset opt-in: enabled");
-    expect(mocks.runtimeLogs).toContain("Runtime UTC-offset sharing: active");
     expect(mocks.runtimeLogs).toContain("Last ping: 2026-08-22T12:00:00.000Z");
     expect(mocks.runtimeLogs).toContain(
       "Request: POST https://telemetry.openclaw.ai/api/latest-version",
@@ -115,7 +99,6 @@ describe("telemetry cli", () => {
     expect(mocks.defaultRuntime.writeJson).toHaveBeenCalledExactlyOnceWith(
       {
         featureStatsEnabled: true,
-        runtimeUtcOffset: { optedIn: true, active: true },
         reason: "enabled",
         endpoint: "https://telemetry.openclaw.ai/api/latest-version",
         lastPingAt: "2026-08-22T12:00:00.000Z",
@@ -147,7 +130,6 @@ describe("telemetry cli", () => {
       enabled: false,
       reason,
       endpoint,
-      runtimeUtcOffset: { optedIn: true, active: false },
     });
 
     await runTelemetryCli(["show", "--json"]);
@@ -155,7 +137,6 @@ describe("telemetry cli", () => {
     expect(mocks.defaultRuntime.writeJson).toHaveBeenCalledExactlyOnceWith(
       {
         featureStatsEnabled: false,
-        runtimeUtcOffset: { optedIn: true, active: false },
         reason,
         endpoint,
         lastPingAt: null,
@@ -170,8 +151,6 @@ describe("telemetry cli", () => {
     expect(mocks.runtimeLogs).toEqual([
       "Feature stats: disabled",
       `Reason: ${label}`,
-      "Runtime UTC-offset opt-in: enabled",
-      "Runtime UTC-offset sharing: inactive",
       `Endpoint: ${endpoint}`,
       "Last ping: never",
       ...(method
@@ -188,12 +167,7 @@ describe("telemetry cli", () => {
     async ({ command, enabled }) => {
       const originalConfig: OpenClawConfig = {
         update: { checkOnStart: false },
-        telemetry: {
-          enabled: !enabled,
-          consentedAt: "2025-01-01T00:00:00.000Z",
-          runtimeUtcOffsetEnabled: true,
-          runtimeUtcOffsetConsentedAt: "2026-09-01T12:00:00.000Z",
-        },
+        telemetry: { enabled: !enabled, consentedAt: "2025-01-01T00:00:00.000Z" },
       };
       mocks.transformConfigFileWithRetry.mockImplementationOnce(
         async (options: {
@@ -206,82 +180,16 @@ describe("telemetry cli", () => {
       const result = await mocks.transformConfigFileWithRetry.mock.results[0]?.value;
       expect(result.nextConfig).toMatchObject({
         update: { checkOnStart: false },
-        telemetry: {
-          enabled,
-          consentedAt: "2026-09-09T12:00:00.000Z",
-          runtimeUtcOffsetEnabled: true,
-          runtimeUtcOffsetConsentedAt: "2026-09-01T12:00:00.000Z",
-        },
+        telemetry: { enabled, consentedAt: expect.any(String) },
       });
+      expect(Number.isNaN(Date.parse(result.nextConfig.telemetry.consentedAt))).toBe(false);
       expect(mocks.runtimeLogs).toContain(
         `Anonymous feature stats ${enabled ? "enabled" : "disabled"}.`,
       );
     },
   );
 
-  it("keeps UTC-offset consent independent and cannot restore it with ordinary feature toggles", async () => {
-    let stored: OpenClawConfig = {
-      update: { checkOnStart: false },
-      telemetry: { enabled: false, consentedAt: "2026-08-23T00:00:00.000Z" },
-    };
-    mocks.transformConfigFileWithRetry.mockImplementation(
-      async (options: {
-        transform: (current: OpenClawConfig) => { nextConfig: OpenClawConfig };
-      }) => {
-        const result = options.transform(stored);
-        stored = result.nextConfig;
-        return result;
-      },
-    );
-
-    await runTelemetryCli(["utc-offset", "on"]);
-    expect(stored).toEqual({
-      update: { checkOnStart: false },
-      telemetry: {
-        enabled: false,
-        consentedAt: "2026-08-23T00:00:00.000Z",
-        runtimeUtcOffsetEnabled: true,
-        runtimeUtcOffsetConsentedAt: "2026-09-09T12:00:00.000Z",
-      },
-    });
-
-    await runTelemetryCli(["utc-offset", "off"]);
-    expect(stored.telemetry).toEqual({
-      enabled: false,
-      consentedAt: "2026-08-23T00:00:00.000Z",
-      runtimeUtcOffsetEnabled: false,
-    });
-    await runTelemetryCli(["on"]);
-    await runTelemetryCli(["off"]);
-    await runTelemetryCli(["on"]);
-    expect(stored.telemetry).toEqual({
-      enabled: true,
-      consentedAt: "2026-09-09T12:00:00.000Z",
-      runtimeUtcOffsetEnabled: false,
-    });
-
-    vi.setSystemTime(new Date("2026-09-10T12:00:00.000Z"));
-    await runTelemetryCli(["utc-offset", "on"]);
-    expect(stored.telemetry).toEqual({
-      enabled: true,
-      consentedAt: "2026-09-09T12:00:00.000Z",
-      runtimeUtcOffsetEnabled: true,
-      runtimeUtcOffsetConsentedAt: "2026-09-10T12:00:00.000Z",
-    });
-  });
-
-  it.each([
-    {
-      args: [],
-      usage: "telemetry [options] [command]",
-      description: "Inspect and manage anonymous usage telemetry",
-    },
-    {
-      args: ["utc-offset"],
-      usage: "telemetry utc-offset [options] [command]",
-      description: "Manage separate consent to runtime UTC-offset buckets",
-    },
-  ])("prints parent help for $usage without a subcommand", async ({ args, usage, description }) => {
+  it("prints parent help with a successful exit when no subcommand is given", async () => {
     const previousExitCode = process.exitCode;
     process.exitCode = undefined;
     const { program, stdout, stderr } = createTelemetryProgram();
@@ -289,7 +197,7 @@ describe("telemetry cli", () => {
     try {
       let exitCode: number;
       try {
-        await program.parseAsync(["telemetry", ...args], { from: "user" });
+        await program.parseAsync(["telemetry"], { from: "user" });
         exitCode = process.exitCode ?? 0;
       } catch (error) {
         if (!(error instanceof CommanderError) || error.code !== "commander.help") {
@@ -299,8 +207,8 @@ describe("telemetry cli", () => {
       }
 
       expect(exitCode).toEqual(0);
-      expect(stdout.join("")).toContain(`Usage: openclaw ${usage}`);
-      expect(stdout.join("")).toContain(description);
+      expect(stdout.join("")).toContain("Usage: openclaw telemetry [options] [command]");
+      expect(stdout.join("")).toContain("Inspect and manage anonymous usage telemetry");
       expect(stderr).toEqual([]);
       expect(mocks.getRuntimeConfig).not.toHaveBeenCalled();
       expect(mocks.transformConfigFileWithRetry).not.toHaveBeenCalled();
@@ -313,16 +221,6 @@ describe("telemetry cli", () => {
     { name: "explicit help", args: ["--help"], usage: "telemetry [options] [command]" },
     { name: "implicit help", args: ["help"], usage: "telemetry [options] [command]" },
     { name: "nested help", args: ["help", "show"], usage: "telemetry show [options]" },
-    {
-      name: "offset help",
-      args: ["utc-offset", "--help"],
-      usage: "telemetry utc-offset [options] [command]",
-    },
-    {
-      name: "offset command help",
-      args: ["utc-offset", "help", "on"],
-      usage: "telemetry utc-offset on [options]",
-    },
   ])("preserves $name without reading or changing telemetry", async ({ args, usage }) => {
     const previousExitCode = process.exitCode;
     process.exitCode = undefined;

@@ -1,24 +1,24 @@
 ---
-summary: "What OpenClaw sends: a daily update check by default, optional anonymous feature statistics, and every privacy control"
+summary: "Daily update requests, Cloudflare-derived request geography, optional feature statistics, and privacy controls"
 title: "Usage telemetry and update checks"
 read_when:
-  - Checking what information OpenClaw sends and what it never collects
-  - Deciding whether to share anonymous feature statistics
-  - Enabling or disabling anonymous feature statistics
+  - Checking what OpenClaw sends and what the receiver stores
+  - Deciding whether to share feature statistics
+  - Enabling or disabling feature statistics
   - Disabling all automatic update-check requests
 ---
 
 **Automatic update checks send a daily request by default.** It asks whether a
 newer version exists and includes the OpenClaw version, operating system, Node.js
-version, CPU architecture, and request surface. Feature statistics are opt-in.
+version, CPU architecture, and request surface. The receiver also uses
+Cloudflare-derived request-origin geography. Feature statistics are opt-in.
 This page describes update-check telemetry, not requests made by configured
 providers, channels, or other services.
 
-Anonymous feature statistics describe configured channels and providers, plugin
+Feature statistics describe configured channels and providers, plugin
 inventory, and a retained session-creation count. They are **off by default**.
 When you enable them, they ride along with that same daily update check instead
-of adding a second request. Runtime UTC-offset buckets require a separate
-opt-in and are also **off by default**.
+of adding a second request.
 
 These reports help inform maintenance priorities. They do not measure individual
 plugin invocations, messages, model requests, or active users. Public aggregates
@@ -47,12 +47,8 @@ feature statistics are disabled, it shows the update-only request
 and its `User-Agent` header instead. When automation or update-check policy
 disables all requests, it shows `Request: none` with the reason (`request: null`
 in JSON).
-
-The output also shows the separate runtime UTC-offset preference and whether
-sharing is active under the CLI process's current policy. In JSON, these are
-`runtimeUtcOffset.optedIn` and `runtimeUtcOffset.active`. An enabled preference
-can be inactive because feature statistics are off or another policy suppresses
-them.
+The preview describes the client request only. It cannot show geography derived
+by Cloudflare at the receiver.
 
 ## Daily update check
 
@@ -82,7 +78,31 @@ For testing or self-hosting, set `OPENCLAW_TELEMETRY_ENDPOINT` to your complete
 replacement endpoint URL. The public server source is available at
 [openclaw/telemetry](https://github.com/openclaw/telemetry).
 
-## Optional anonymous feature statistics
+## Cloudflare-derived request geography
+
+Cloudflare processes the connection IP address and provides approximate
+request-origin **country, region code, city, and timezone**. The receiver records
+those derived fields alongside request metadata in Analytics Engine. They come
+from Cloudflare's incoming request metadata, not a client payload or client-supplied
+geography headers. Missing or invalid values are left empty.
+
+These fields describe the network origin of a request. They may reflect a proxy,
+VPN exit, or remote server rather than a person's location, language, or locale.
+The derived timezone is not the OpenClaw runtime's clock setting. Region codes
+are interpreted within their country, not as globally unique names.
+
+Geography is baseline update-request metadata: it remains included when feature
+statistics are off or `DO_NOT_TRACK` is set. There is no separate client timezone
+setting, payload field, or prompt. Disabling automatic update requests also stops
+their baseline metadata reporting.
+
+The same **three-month** Analytics Engine retention applies to these fields.
+Disabling requests does not erase previously recorded rows. Public stats and
+homepage aggregates do not expose geography fields or breakdowns.
+
+<a id="optional-anonymous-feature-statistics" />
+
+## Optional feature statistics
 
 Feature statistics are **off by default**. Interactive setup can offer a one-time
 opt-in with **No thanks** selected by default; guided Quick Start skips that
@@ -112,19 +132,18 @@ When you explicitly enable feature statistics, the same daily request becomes a
 }
 ```
 
-| Field                             | Meaning                                                                                           |
-| --------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `schema`                          | Payload format version, currently `1`.                                                            |
-| `version`                         | Installed OpenClaw version.                                                                       |
-| `platform`                        | Operating system and CPU architecture.                                                            |
-| `node`                            | Running Node.js version.                                                                          |
-| `surface`                         | Request surface: `gateway` or `cli`; the CLI preview uses `gateway`.                              |
-| `features.channels`               | Configured, not explicitly disabled channel IDs backed by public plugins in the inventory.        |
-| `features.providerFamilies`       | Public provider IDs from configuration, auth profiles, and configured model references.           |
-| `features.plugins`                | Public plugin IDs from the enabled inventory, sorted alphabetically.                              |
-| `features.pluginsEnabled`         | Total plugins in that inventory, including plugins not named in `features.plugins`.               |
-| `features.sessionsLast24h`        | Retained session-creation events timestamped within the preceding 24 hours, not session activity. |
-| `features.runtimeUtcOffsetBucket` | Optional coarse runtime clock UTC-offset bucket, only with the separate opt-in below.             |
+| Field                       | Meaning                                                                                           |
+| --------------------------- | ------------------------------------------------------------------------------------------------- |
+| `schema`                    | Payload format version, currently `1`.                                                            |
+| `version`                   | Installed OpenClaw version.                                                                       |
+| `platform`                  | Operating system and CPU architecture.                                                            |
+| `node`                      | Running Node.js version.                                                                          |
+| `surface`                   | Request surface: `gateway` or `cli`; the CLI preview uses `gateway`.                              |
+| `features.channels`         | Configured, not explicitly disabled channel IDs backed by public plugins in the inventory.        |
+| `features.providerFamilies` | Public provider IDs from configuration, auth profiles, and configured model references.           |
+| `features.plugins`          | Public plugin IDs from the enabled inventory, sorted alphabetically.                              |
+| `features.pluginsEnabled`   | Total plugins in that inventory, including plugins not named in `features.plugins`.               |
+| `features.sessionsLast24h`  | Retained session-creation events timestamped within the preceding 24 hours, not session activity. |
 
 With an active plugin registry, the inventory includes enabled, loaded plugins
 whose code was imported, plus loaded bundle-format plugins. Without that
@@ -146,32 +165,35 @@ plugin registry, configuration, and collection time can differ. The CLI preview
 is not a guarantee of the exact next Gateway payload.
 
 Reports have no persistent client identifier. Repeated reports are not unique
-installations or users, and the reported fields do not provide a per-install
-history or retention measure.
+installations or users. The service does not maintain a per-install history or
+retention measure; derived geography and the other stored request metadata are
+not a guarantee of anonymity.
 
-### What is never collected
+<a id="what-is-never-collected" />
+
+### What is not sent or stored
 
 Neither the update-check `User-Agent` nor the feature-statistics body includes
 message content, prompts, model names, API keys, credentials, secret references,
 file paths, hostnames, account identifiers, user identifiers, or installation
 and machine identifiers. OpenClaw does not create a random UUID or other
-persistent client identifier for these requests. The optional UTC-offset field
-does not include a raw offset, IANA timezone name, location, device model, role,
-or consent timestamp.
+persistent client identifier for these requests.
 
-The service's Analytics Engine rows exclude those identifying fields and client
-IP addresses. Cloudflare still handles TLS and network requests and sees the
-client IP. The Worker reads that IP transiently for rate limiting without writing
-it to Analytics Engine. The service's deployment configuration disables Worker
+The service's Analytics Engine rows exclude those direct identifiers and raw
+client IP addresses, coordinates, postal codes, and physical-device hardware
+details. Cloudflare handles TLS and network requests and processes the connection
+IP to derive geography. The Worker also reads that IP transiently for rate
+limiting without writing it to Analytics Engine. The service's deployment
+configuration disables Worker
 observability, logs, and invocation logs; those settings do not describe or
 control Cloudflare's separate infrastructure-level processing.
 
-Anonymous feature statistics are separate from optional, operator-configured
+Feature statistics are separate from optional, operator-configured
 [OpenTelemetry export](/gateway/opentelemetry).
 
 ## Turn feature statistics on or off
 
-Enable or disable anonymous feature statistics at any time:
+Enable or disable feature statistics at any time:
 
 ```bash
 openclaw telemetry on
@@ -191,71 +213,8 @@ You can also configure the same preference directly:
 Set `DO_NOT_TRACK=1` or `DO_NOT_TRACK=true` to force feature statistics off,
 even when `telemetry.enabled` is `true`. `DO_NOT_TRACK` does not disable the
 daily update check: OpenClaw sends the update-only `GET` request without a
-feature-statistics body.
-
-## Optional runtime UTC-offset buckets
-
-Runtime UTC-offset buckets help investigate compatibility across runtime
-timezone settings. They describe the clock used by the OpenClaw process, not a
-person's location. A server or container can use a different clock setting from
-its operator. The offset is sampled when a report is built for transport, so
-daylight saving changes do not leave it fixed at process startup.
-
-This is a separate, **default-off** choice:
-
-```bash
-openclaw telemetry utc-offset on
-openclaw telemetry utc-offset off
-openclaw telemetry show
-```
-
-`utc-offset on` does not turn on feature statistics. The field is included only
-when both `telemetry.enabled` and `telemetry.runtimeUtcOffsetEnabled` are `true`
-and effective policy permits feature statistics. It adds no request or counter.
-`DO_NOT_TRACK`, automation suppression, and update-check controls still apply.
-
-You can also set the preference directly:
-
-```json5
-{
-  telemetry: {
-    enabled: true,
-    runtimeUtcOffsetEnabled: true,
-  },
-}
-```
-
-The CLI records `telemetry.runtimeUtcOffsetConsentedAt` locally when enabling the
-choice. That timestamp is never sent and is not authorization: the boolean flag
-controls sharing. Disabling the choice writes `false` and removes its timestamp.
-Ordinary `telemetry on` and `telemetry off` preserve the separate choice; turning
-feature statistics back on cannot restore a revoked UTC-offset opt-in.
-
-The only possible wire values are:
-
-| Bucket      | Runtime minutes east of UTC                      |
-| ----------- | ------------------------------------------------ |
-| `neg_12_6`  | At least -720 and less than -360                 |
-| `neg_6_0`   | At least -360 and less than 0                    |
-| `utc_0`     | Zero, including signed zero                      |
-| `pos_0_6`   | Greater than 0 and less than 360                 |
-| `pos_6_12`  | At least 360 and less than 720                   |
-| `pos_12_14` | At least 720 and at most 840                     |
-| `unknown`   | Unavailable, non-finite, or outside those bounds |
-
-The CLI preview uses its own clock and current policy. It does not read the
-running Gateway's timezone setting or predict the next scheduled report.
-
-On the hosted service, the optional bucket is stored with the other fields in
-the same Analytics Engine report rows, with **3-month retention**. It is not a
-separate, shorter-lived dataset. There is no public timezone breakdown or public
-output combining timezone buckets with other dimensions. Turning the choice off
-stops future collection; it cannot erase historical rows already received.
-
-Before downgrading to an older version whose strict configuration reader does
-not recognize these options, remove **both** `telemetry.runtimeUtcOffsetEnabled`
-and `telemetry.runtimeUtcOffsetConsentedAt`. Setting the boolean to `false` is
-not sufficient for those older readers.
+feature-statistics body. Baseline request metadata, including Cloudflare-derived
+geography, remains eligible for recording.
 
 ## Automated environments
 
@@ -265,11 +224,10 @@ are not installations: they would outnumber real operators by orders of
 magnitude and make version and platform counts meaningless, and your pipeline
 should not report to us on every job.
 
-This applies to both tiers, including the optional UTC-offset bucket, so a CI job
-sends no update check and no feature statistics. Setting
-`OPENCLAW_TELEMETRY_ENDPOINT` overrides CI suppression, because a configured
-endpoint means the run is deliberately exercising this path. It does not
-override `DO_NOT_TRACK`, disabled update checks, or Nix-mode suppression.
+This applies to both tiers, so a CI job sends no update check and no feature
+statistics. Setting `OPENCLAW_TELEMETRY_ENDPOINT` overrides the suppression,
+because a configured endpoint means the run is deliberately exercising this
+path.
 
 ## Disable every automatic update request
 
@@ -284,7 +242,7 @@ To go fully dark, disable the existing startup update check:
 ```
 
 This stops both tiers and every automatic update request: no update request, no
-feature statistics, and no update notice, even when `update.auto.enabled` is
+baseline request geography, no feature statistics, and no update notice, even when `update.auto.enabled` is
 `true`. Setting `OPENCLAW_NO_AUTO_UPDATE=1` also prevents automatic update
 requests and applies. Explicit update commands remain available when you choose
 to run them.

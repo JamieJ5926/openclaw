@@ -148,15 +148,7 @@ export function preserveSetupMigrationOnboardingConsents(
   return {
     ...config,
     ...(preserveSecurity ? { wizard: { ...config.wizard, securityAcknowledgedAt } } : {}),
-    ...(preserveTelemetry
-      ? {
-          telemetry: {
-            ...config.telemetry,
-            enabled: inMemoryConfig.telemetry?.enabled,
-            consentedAt: inMemoryConfig.telemetry?.consentedAt,
-          },
-        }
-      : {}),
+    ...(preserveTelemetry ? { telemetry: inMemoryConfig.telemetry } : {}),
   };
 }
 

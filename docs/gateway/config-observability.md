@@ -156,23 +156,15 @@ writer is best-effort, not a lossless compliance archive.
   telemetry: {
     enabled: false,
     consentedAt: "2026-08-02T12:00:00.000Z",
-    runtimeUtcOffsetEnabled: false,
   },
 }
 ```
 
 - `enabled`: include public configured channel and provider names, plugin inventory names and count, and a retained session-creation count in the existing daily update-check request (default: `false`). These fields do not measure per-plugin usage or active sessions. Interactive setup can offer an explicit opt-in with **No thanks** selected by default; non-interactive setup does not enable it automatically but can retain an explicitly enabled preference. `DO_NOT_TRACK=1` or `DO_NOT_TRACK=true` always disables feature statistics without disabling the update check.
 - `consentedAt`: ISO timestamp recording when the operator accepted or declined feature statistics. Prevents interactive setup from asking again.
-- `runtimeUtcOffsetEnabled`: separately opt in to a coarse runtime clock UTC-offset bucket (default: `false`). Requires enabled feature statistics and effective policy to allow them. Describes the runtime clock, not a person's location.
-- `runtimeUtcOffsetConsentedAt`: optional ISO timestamp recorded locally by the UTC-offset opt-in command. Never sent; the boolean flag, not this timestamp, controls sharing.
 - `openclaw telemetry show` previews the request using the CLI process's current context, which can differ from the running Gateway; `openclaw telemetry on` and `openclaw telemetry off` update the preference and consent timestamp.
-- `openclaw telemetry utc-offset on` and `openclaw telemetry utc-offset off` update only the separate UTC-offset choice. Ordinary feature-statistics toggles preserve that choice.
 - `OPENCLAW_TELEMETRY_ENDPOINT`: optional full endpoint URL for testing or a self-hosted service. Defaults to `https://telemetry.openclaw.ai/api/latest-version`.
 
 See [Usage telemetry and update checks](/gateway/telemetry) for the complete payload, privacy guarantees, and all opt-out controls.
-
-Before downgrading to an older strict configuration reader, remove both
-`runtimeUtcOffsetEnabled` and `runtimeUtcOffsetConsentedAt`, including a boolean
-set to `false`.
 
 ---

@@ -652,8 +652,6 @@ describe("buildGatewayReloadPlan", () => {
     "update.auto.enabled",
     "telemetry.enabled",
     "telemetry.consentedAt",
-    "telemetry.runtimeUtcOffsetEnabled",
-    "telemetry.runtimeUtcOffsetConsentedAt",
   ])("hot-applies operation policy without restarting subsystems: %s", (path) => {
     const plan = buildGatewayReloadPlan([path]);
 
