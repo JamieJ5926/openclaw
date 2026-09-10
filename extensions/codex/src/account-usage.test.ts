@@ -155,7 +155,9 @@ describe("codex.accountUsage", () => {
   it.each(["removed", "replaced", "config changed", "authority revoked"])(
     "rejects guarded work and discards its result when %s during a read",
     async (change) => {
+      let assertCurrent: (() => void) | undefined;
       vi.mocked(readCodexAppServerUsage).mockImplementation(async (options) => {
+        assertCurrent = options.assertCurrent;
         if (change === "removed") {
           delete store.profiles["openai:alex"];
         } else if (change === "replaced") {
@@ -169,11 +171,11 @@ describe("codex.accountUsage", () => {
         } else {
           currentAuthority = false;
         }
-        expect(options.assertCurrent).toBeTypeOf("function");
-        expect(() => options.assertCurrent?.()).toThrow();
         return usage(99);
       });
       const respond = await request({ agentId: "main", profileId: "openai:alex" });
+      expect(assertCurrent).toBeTypeOf("function");
+      expect(() => assertCurrent?.()).toThrow();
       expect(respond).toHaveBeenCalledWith(
         false,
         undefined,
