@@ -24,6 +24,7 @@ import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { getAgentDir } from "../config.js";
 import { hasUsableCustomProviderApiKey } from "../model-auth-provider-config.js";
 import { parseModelCatalogJson } from "../model-catalog-json.js";
+import { modelTransportRoutesMatch } from "../model-compat-catalog.js";
 import { resolveModelPluginMetadataSnapshot } from "../model-discovery-context.js";
 import { mergeProviderModels } from "../models-config.merge.js";
 import {
@@ -241,6 +242,7 @@ function formatValidationPath(error: TLocalizedValidationError): string {
 }
 
 interface ProviderRequestConfig {
+  baseUrls?: readonly string[];
   apiKey?: string;
   auth?: ProviderAuthMode;
   headers?: Record<string, string>;
@@ -789,11 +791,25 @@ export class ModelRegistry {
    * Get API key for a model.
    */
   hasConfiguredAuth(model: Model): boolean {
+    const providerConfig = this.getModelProviderRequestConfig(model);
     return (
       this.authStorage.hasAuth(model.provider) ||
-      this.providerRequestConfigs.get(model.provider)?.auth === "aws-sdk" ||
-      this.providerRequestConfigs.get(model.provider)?.apiKey !== undefined
+      providerConfig?.auth === "aws-sdk" ||
+      providerConfig?.apiKey !== undefined
     );
+  }
+
+  private getModelProviderRequestConfig(model: Model): ProviderRequestConfig | undefined {
+    const config = this.providerRequestConfigs.get(model.provider);
+    if (
+      config?.baseUrls &&
+      !config.baseUrls.some((baseUrl) =>
+        modelTransportRoutesMatch({ baseUrl }, { baseUrl: model.baseUrl }),
+      )
+    ) {
+      return undefined;
+    }
+    return config;
   }
 
   private getModelRequestKey(provider: string, modelId: string): string {
@@ -803,6 +819,8 @@ export class ModelRegistry {
   private storeProviderRequestConfig(
     providerName: string,
     config: {
+      baseUrl?: string;
+      models?: readonly { baseUrl?: string }[];
       apiKey?: string;
       auth?: ProviderAuthMode;
       headers?: Record<string, string>;
@@ -814,6 +832,11 @@ export class ModelRegistry {
     }
 
     this.providerRequestConfigs.set(providerName, {
+      // File-authored endpoints authorize these settings; generated destinations do not.
+      // Route-less runtime registrations retain their explicit caller-owned scope.
+      baseUrls: config.baseUrl
+        ? [config.baseUrl, ...(config.models ?? []).flatMap((model) => model.baseUrl ?? [])]
+        : undefined,
       apiKey: config.apiKey,
       auth: config.auth,
       headers: config.headers,
@@ -839,7 +862,7 @@ export class ModelRegistry {
    */
   async getApiKeyAndHeaders(model: Model): Promise<ResolvedRequestAuth> {
     try {
-      const providerConfig = this.providerRequestConfigs.get(model.provider);
+      const providerConfig = this.getModelProviderRequestConfig(model);
       const usesAwsSdkAuth = providerConfig?.auth === "aws-sdk";
       const apiKeyFromAuthStorage = usesAwsSdkAuth
         ? undefined

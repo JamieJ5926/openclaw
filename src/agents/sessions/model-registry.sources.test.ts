@@ -77,6 +77,39 @@ function createRegistry(
 }
 
 describe("ModelRegistry source composition", () => {
+  it.each([rootUrl, catalogUrl])(
+    "limits authored request settings to authored endpoints for generated-only rows at %s",
+    async (baseUrl) => {
+      const registry = createRegistry({
+        generated: { ...generated, baseUrl, models: [{ id: "generated-only" }] },
+      });
+      const model = registry.find(provider, "generated-only");
+      expect(model).toBeDefined();
+      expect(registry.hasConfiguredAuth(model!)).toBe(baseUrl === rootUrl);
+      expect(registry.getAvailable().some((entry) => entry.id === "generated-only")).toBe(
+        baseUrl === rootUrl,
+      );
+      await expect(registry.getApiKeyAndHeaders(model!)).resolves.toEqual({
+        ok: true,
+        apiKey: baseUrl === rootUrl ? "authored-fixture-key" : undefined,
+        headers: baseUrl === rootUrl ? { "X-Authored-Provider": "root" } : undefined,
+      });
+    },
+  );
+
+  it("keeps authored model endpoint pins eligible for provider request settings", async () => {
+    const registry = createRegistry({
+      authored: { ...authored, models: [{ id: "shared", baseUrl: catalogUrl }] },
+    });
+    const model = registry.find(provider, "shared");
+    expect(model?.baseUrl).toBe(catalogUrl);
+    await expect(registry.getApiKeyAndHeaders(model!)).resolves.toMatchObject({
+      ok: true,
+      apiKey: "authored-fixture-key",
+      headers: { "X-Authored-Provider": "root" },
+    });
+  });
+
   it.each([false, true])(
     "keeps the authored request route when generated model routing conflicts (model pin: %s)",
     (modelPin) => {
